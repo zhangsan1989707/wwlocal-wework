@@ -1,0 +1,55 @@
+package handler
+
+import (
+	"wwlocal-wework/internal/service"
+	"wwlocal-wework/pkg/response"
+
+	"github.com/labstack/echo/v4"
+)
+
+type SyncHandler struct {
+	syncSvc *service.SyncService
+}
+
+func NewSyncHandler(syncSvc *service.SyncService) *SyncHandler {
+	return &SyncHandler{syncSvc: syncSvc}
+}
+
+type SyncRequest struct {
+	FeatureIDs []int  `json:"feature_ids"`
+	StartTime  int64  `json:"start_time"`
+	EndTime    int64  `json:"end_time"`
+	SyncAll    bool   `json:"sync_all"`
+}
+
+func (h *SyncHandler) Sync(c echo.Context) error {
+	var req SyncRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, 400, "invalid request body")
+	}
+
+	if h.syncSvc.IsRunning() {
+		return response.Error(c, 409, "sync already in progress")
+	}
+
+	go func() {
+		if req.SyncAll {
+			h.syncSvc.SyncAllFeatures(req.StartTime, req.EndTime)
+		} else if len(req.FeatureIDs) > 0 {
+			for _, featureID := range req.FeatureIDs {
+				h.syncSvc.SyncFeature(featureID, req.StartTime, req.EndTime)
+			}
+		}
+	}()
+
+	return response.Success(c, map[string]interface{}{
+		"message": "sync started",
+		"running": true,
+	})
+}
+
+func (h *SyncHandler) Status(c echo.Context) error {
+	return response.Success(c, map[string]interface{}{
+		"running": h.syncSvc.IsRunning(),
+	})
+}

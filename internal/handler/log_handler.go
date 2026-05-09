@@ -1,0 +1,80 @@
+package handler
+
+import (
+	"time"
+
+	"github.com/labstack/echo/v4"
+	"wwlocal-wework/internal/service"
+	"wwlocal-wework/pkg/response"
+)
+
+type LogHandler struct {
+	querySvc *service.QueryService
+}
+
+func NewLogHandler(querySvc *service.QueryService) *LogHandler {
+	return &LogHandler{querySvc: querySvc}
+}
+
+type QueryRequest struct {
+	FeatureIDs []int                  `json:"feature_ids"`
+	StartTime  int64                  `json:"start_time"`
+	EndTime    int64                  `json:"end_time"`
+	Conditions map[string]interface{} `json:"conditions"`
+	Page       int                    `json:"page"`
+	PageSize   int                    `json:"page_size"`
+}
+
+func (h *LogHandler) Query(c echo.Context) error {
+	var req QueryRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, 400, "invalid request body")
+	}
+
+	if len(req.FeatureIDs) == 0 {
+		return response.Error(c, 400, "feature_ids is required")
+	}
+
+	if req.StartTime <= 0 || req.EndTime <= 0 {
+		return response.Error(c, 400, "start_time and end_time are required")
+	}
+
+	queryReq := &service.QueryRequest{
+		FeatureIDs: req.FeatureIDs,
+		StartTime:  req.StartTime,
+		EndTime:    req.EndTime,
+		Conditions: req.Conditions,
+		Page:       req.Page,
+		PageSize:   req.PageSize,
+	}
+
+	result, err := h.querySvc.Query(queryReq)
+	if err != nil {
+		return response.Error(c, 500, err.Error())
+	}
+
+	return response.Success(c, result)
+}
+
+func (h *LogHandler) GetFeatures(c echo.Context) error {
+	features := h.querySvc.GetFeatureIDs()
+	var result []map[string]interface{}
+	for _, id := range features {
+		result = append(result, map[string]interface{}{
+			"id":   id,
+			"name": h.querySvc.GetFeatureName(id),
+		})
+	}
+	return response.Success(c, result)
+}
+
+func (h *LogHandler) GetTimeRange(c echo.Context) error {
+	now := time.Now()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	return response.Success(c, map[string]interface{}{
+		"start_time": startOfDay.AddDate(0, 0, -7).Unix(),
+		"end_time":   startOfDay.Add(24*time.Hour - time.Second).Unix(),
+		"now":        now.Unix(),
+	})
+}

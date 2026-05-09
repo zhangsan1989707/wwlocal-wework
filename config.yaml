@@ -1,0 +1,20 @@
+server:
+  host: 0.0.0.0
+  port: 8080
+
+database:
+  host: localhost
+  port: 3306
+  user: root
+  password: wework123
+  dbname: wework_logs
+
+wework:
+  base_url: https://uat.rztcd.cn:89
+  corpid: ww9904fd98c1b0df9e
+  secret: aNOChgDjGKH-PL-u_hab5ackRzBvr3RtvduVcFjUZz8
+  sync_limit: 1000
+
+keys:
+  storage_path: ./keys
+  default_version: v1
