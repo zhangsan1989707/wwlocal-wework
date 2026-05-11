@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -18,6 +19,13 @@ func NewLogRepository(db *gorm.DB) *LogRepository {
 
 func (r *LogRepository) GetTableName(featureID int, t time.Time) string {
 	return fmt.Sprintf("log_%d_%s", featureID, t.Format("200601"))
+}
+
+func (r *LogRepository) TableExists(tableName string) bool {
+	var result int
+	sql := fmt.Sprintf("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = '%s'", tableName)
+	r.db.Raw(sql).Scan(&result)
+	return result > 0
 }
 
 func (r *LogRepository) CreateTableIfNotExists(featureID int, month time.Time) error {
@@ -81,9 +89,18 @@ func (r *LogRepository) BatchSave(featureID int, entries []model.LogEntry) error
 func (r *LogRepository) Query(featureID int, startTime, endTime int64, page, pageSize int) ([]model.LogEntry, int64, error) {
 	tableName := r.GetTableName(featureID, time.Unix(startTime, 0))
 
+	// 检查表是否存在，不存在则返回空结果
+	if !r.TableExists(tableName) {
+		return []model.LogEntry{}, 0, nil
+	}
+
 	var total int64
 	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE log_time >= ? AND log_time <= ?", tableName)
 	if err := r.db.Raw(countSQL, startTime, endTime).Scan(&total).Error; err != nil {
+		// 如果是表不存在的错误，返回空结果
+		if strings.Contains(err.Error(), "doesn't exist") {
+			return []model.LogEntry{}, 0, nil
+		}
 		return nil, 0, err
 	}
 
@@ -97,6 +114,10 @@ func (r *LogRepository) Query(featureID int, startTime, endTime int64, page, pag
 
 	var entries []model.LogEntry
 	if err := r.db.Raw(querySQL, startTime, endTime, pageSize, offset).Scan(&entries).Error; err != nil {
+		// 如果是表不存在的错误，返回空结果
+		if strings.Contains(err.Error(), "doesn't exist") {
+			return []model.LogEntry{}, 0, nil
+		}
 		return nil, 0, err
 	}
 
