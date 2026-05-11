@@ -18,7 +18,7 @@ type SyncService struct {
 	keyRepo    *repository.KeyRepository
 	cfg        *config.Config
 	mu         sync.Mutex
-	running    bool
+	status     *SyncStatus
 }
 
 func NewSyncService(weworkSvc *WeWorkService, decryptSvc *DecryptService, logRepo *repository.LogRepository, keyRepo *repository.KeyRepository, cfg *config.Config) *SyncService {
@@ -28,24 +28,14 @@ func NewSyncService(weworkSvc *WeWorkService, decryptSvc *DecryptService, logRep
 		logRepo:    logRepo,
 		keyRepo:    keyRepo,
 		cfg:        cfg,
+		status: &SyncStatus{
+			Running: false,
+			Results: make(map[int]int),
+		},
 	}
 }
 
 func (s *SyncService) SyncFeature(featureID int, startTime, endTime int64) (int, error) {
-	s.mu.Lock()
-	if s.running {
-		s.mu.Unlock()
-		return 0, fmt.Errorf("sync already in progress")
-	}
-	s.running = true
-	s.mu.Unlock()
-
-	defer func() {
-		s.mu.Lock()
-		s.running = false
-		s.mu.Unlock()
-	}()
-
 	totalFetched := 0
 	startIndex := 0
 	limit := s.cfg.WeWork.SyncLimit
@@ -95,9 +85,22 @@ func (s *SyncService) SyncFeature(featureID int, startTime, endTime int64) (int,
 }
 
 func (s *SyncService) SyncAllFeatures(startTime, endTime int64) map[int]int {
-	results := make(map[int]int)
+	s.mu.Lock()
+	s.status.Running = true
+	s.status.Progress = 0
+	s.status.Total = len(s.cfg.Features.IDs)
+	s.status.Results = make(map[int]int)
+	s.mu.Unlock()
 
-	for _, featureID := range s.cfg.Features.IDs {
+	defer func() {
+		s.mu.Lock()
+		s.status.Running = false
+		s.status.LastSync = time.Now()
+		s.mu.Unlock()
+	}()
+
+	results := make(map[int]int)
+	for i, featureID := range s.cfg.Features.IDs {
 		count, err := s.SyncFeature(featureID, startTime, endTime)
 		if err != nil {
 			log.Printf("sync feature %d failed: %v", featureID, err)
@@ -105,6 +108,47 @@ func (s *SyncService) SyncAllFeatures(startTime, endTime int64) map[int]int {
 		} else {
 			results[featureID] = count
 		}
+
+		s.mu.Lock()
+		s.status.Progress = i + 1
+		s.status.Results = results
+		s.mu.Unlock()
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	return results
+}
+
+func (s *SyncService) SyncMultipleFeatures(featureIDs []int, startTime, endTime int64) map[int]int {
+	s.mu.Lock()
+	s.status.Running = true
+	s.status.Progress = 0
+	s.status.Total = len(featureIDs)
+	s.status.Results = make(map[int]int)
+	s.mu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		s.status.Running = false
+		s.status.LastSync = time.Now()
+		s.mu.Unlock()
+	}()
+
+	results := make(map[int]int)
+	for i, featureID := range featureIDs {
+		count, err := s.SyncFeature(featureID, startTime, endTime)
+		if err != nil {
+			log.Printf("sync feature %d failed: %v", featureID, err)
+			results[featureID] = -1
+		} else {
+			results[featureID] = count
+		}
+
+		s.mu.Lock()
+		s.status.Progress = i + 1
+		s.status.Results = results
+		s.mu.Unlock()
 
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -115,11 +159,27 @@ func (s *SyncService) SyncAllFeatures(startTime, endTime int64) map[int]int {
 func (s *SyncService) IsRunning() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.running
+	return s.status.Running
+}
+
+func (s *SyncService) GetStatus() *SyncStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// 返回状态的副本
+	statusCopy := *s.status
+	if s.status.Results != nil {
+		statusCopy.Results = make(map[int]int)
+		for k, v := range s.status.Results {
+			statusCopy.Results[k] = v
+		}
+	}
+	return &statusCopy
 }
 
 type SyncStatus struct {
-	Running     bool               `json:"running"`
-	LastSync    time.Time          `json:"last_sync,omitempty"`
-	Results     map[int]int        `json:"results,omitempty"`
+	Running  bool        `json:"running"`
+	Progress int         `json:"progress"`
+	Total    int         `json:"total"`
+	LastSync time.Time   `json:"last_sync,omitempty"`
+	Results  map[int]int `json:"results,omitempty"`
 }

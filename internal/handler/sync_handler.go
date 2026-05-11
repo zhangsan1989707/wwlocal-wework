@@ -36,9 +36,7 @@ func (h *SyncHandler) Sync(c echo.Context) error {
 		if req.SyncAll {
 			h.syncSvc.SyncAllFeatures(req.StartTime, req.EndTime)
 		} else if len(req.FeatureIDs) > 0 {
-			for _, featureID := range req.FeatureIDs {
-				h.syncSvc.SyncFeature(featureID, req.StartTime, req.EndTime)
-			}
+			h.syncSvc.SyncMultipleFeatures(req.FeatureIDs, req.StartTime, req.EndTime)
 		}
 	}()
 
@@ -49,7 +47,5 @@ func (h *SyncHandler) Sync(c echo.Context) error {
 }
 
 func (h *SyncHandler) Status(c echo.Context) error {
-	return response.Success(c, map[string]interface{}{
-		"running": h.syncSvc.IsRunning(),
-	})
+	return response.Success(c, h.syncSvc.GetStatus())
 }
