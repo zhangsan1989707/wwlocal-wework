@@ -13,6 +13,7 @@ type Config struct {
 	Database DatabaseConfig `yaml:"database"`
 	WeWork   WeWorkConfig   `yaml:"wework"`
 	Keys     KeysConfig     `yaml:"keys"`
+	Features FeaturesConfig `yaml:"features"`
 }
 
 type ServerConfig struct {
@@ -38,6 +39,11 @@ type WeWorkConfig struct {
 type KeysConfig struct {
 	StoragePath    string `yaml:"storage_path"`
 	DefaultVersion string `yaml:"default_version"`
+}
+
+type FeaturesConfig struct {
+	IDs   []int            `yaml:"ids"`
+	Names map[int]string   `yaml:"names"`
 }
 
 func (d *DatabaseConfig) DSN() string {

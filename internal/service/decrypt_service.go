@@ -23,6 +23,10 @@ func NewDecryptService(keyRepo *repository.KeyRepository) *DecryptService {
 }
 
 func (s *DecryptService) getDecryptor(version string) (*crypto.RSADecryptor, error) {
+	if version == "" {
+		return s.getActiveDecryptor()
+	}
+
 	if dec, ok := s.cache[version]; ok {
 		return dec, nil
 	}
@@ -31,7 +35,7 @@ func (s *DecryptService) getDecryptor(version string) (*crypto.RSADecryptor, err
 	if err != nil {
 		return nil, fmt.Errorf("get key version %s failed: %w", version, err)
 	}
-	_ = key // key info loaded, using path from keyRepo
+	_ = key
 
 	keyPath := s.keyRepo.GetKeyFilePath(version)
 	dec, err := crypto.NewRSADecryptorFromFile(keyPath)
@@ -51,12 +55,7 @@ func (s *DecryptService) getActiveDecryptor() (*crypto.RSADecryptor, error) {
 	return s.getDecryptor(activeKey.Version)
 }
 
-func (s *DecryptService) Decrypt(item *model.WeWorkLogItem) (*model.LogEntry, error) {
-	dec, err := s.getActiveDecryptor()
-	if err != nil {
-		return nil, err
-	}
-
+func (s *DecryptService) decryptInternal(dec *crypto.RSADecryptor, item *model.WeWorkLogItem) (*model.LogEntry, error) {
 	encKeyBytes, err := dec.Decrypt(item.EncKey)
 	if err != nil {
 		return nil, fmt.Errorf("RSA decrypt enc_key failed: %w", err)
@@ -75,6 +74,11 @@ func (s *DecryptService) Decrypt(item *model.WeWorkLogItem) (*model.LogEntry, er
 	plaintext, err := aesDec.Decrypt(ciphertext)
 	if err != nil {
 		return nil, fmt.Errorf("AES decrypt failed: %w", err)
+	}
+
+	// 截去尾部8字节
+	if len(plaintext) > 8 {
+		plaintext = plaintext[:len(plaintext)-8]
 	}
 
 	var parsedJSON map[string]interface{}
@@ -95,46 +99,18 @@ func (s *DecryptService) Decrypt(item *model.WeWorkLogItem) (*model.LogEntry, er
 	}, nil
 }
 
+func (s *DecryptService) Decrypt(item *model.WeWorkLogItem) (*model.LogEntry, error) {
+	dec, err := s.getActiveDecryptor()
+	if err != nil {
+		return nil, err
+	}
+	return s.decryptInternal(dec, item)
+}
+
 func (s *DecryptService) DecryptWithKey(item *model.WeWorkLogItem, version string) (*model.LogEntry, error) {
 	dec, err := s.getDecryptor(version)
 	if err != nil {
 		return nil, err
 	}
-
-	encKeyBytes, err := dec.Decrypt(item.EncKey)
-	if err != nil {
-		return nil, fmt.Errorf("RSA decrypt enc_key failed: %w", err)
-	}
-
-	aesDec, err := crypto.NewAESDecryptor(encKeyBytes)
-	if err != nil {
-		return nil, fmt.Errorf("create AES decryptor failed: %w", err)
-	}
-
-	ciphertext, err := base64.StdEncoding.DecodeString(item.EncData)
-	if err != nil {
-		return nil, fmt.Errorf("decode enc_data failed: %w", err)
-	}
-
-	plaintext, err := aesDec.Decrypt(ciphertext)
-	if err != nil {
-		return nil, fmt.Errorf("AES decrypt failed: %w", err)
-	}
-
-	var parsedJSON map[string]interface{}
-	if err := json.Unmarshal(plaintext, &parsedJSON); err != nil {
-		return nil, fmt.Errorf("parse decrypted JSON failed: %w", err)
-	}
-
-	parsedJSONStr, _ := json.Marshal(parsedJSON)
-
-	return &model.LogEntry{
-		FeatureID:  item.FeatureID,
-		LogTime:    item.LogTime,
-		IDC:        item.IDC,
-		EncData:    item.EncData,
-		EncKey:     item.EncKey,
-		RawJSON:    string(plaintext),
-		ParsedJSON: string(parsedJSONStr),
-	}, nil
+	return s.decryptInternal(dec, item)
 }

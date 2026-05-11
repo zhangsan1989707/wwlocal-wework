@@ -40,8 +40,8 @@ func main() {
 
 	weworkSvc := service.NewWeWorkService(&cfg.WeWork)
 	decryptSvc := service.NewDecryptService(keyRepo)
-	syncSvc := service.NewSyncService(weworkSvc, decryptSvc, logRepo, keyRepo, &cfg.WeWork)
-	querySvc := service.NewQueryService(logRepo)
+	syncSvc := service.NewSyncService(weworkSvc, decryptSvc, logRepo, keyRepo, cfg)
+	querySvc := service.NewQueryService(logRepo, cfg)
 
 	healthHandler := handler.NewHealthHandler()
 	logHandler := handler.NewLogHandler(querySvc)

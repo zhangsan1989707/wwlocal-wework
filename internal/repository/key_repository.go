@@ -56,17 +56,30 @@ func (r *KeyRepository) GetAll() ([]model.RSAKeyVersion, error) {
 
 func (r *KeyRepository) SetActive(version string) error {
 	tx := r.db.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
 
-	if err := tx.Model(&model.RSAKeyVersion{}).Update("is_active", false).Error; err != nil {
+	// 先取消所有版本的激活状态
+	if err := tx.Model(&model.RSAKeyVersion{}).Where("is_active = ?", true).Update("is_active", false).Error; err != nil {
 		tx.Rollback()
 		return err
 	}
 
+	// 激活指定版本
+	var key model.RSAKeyVersion
+	if err := tx.Where("version = ?", version).First(&key).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	key.IsActive = true
 	now := time.Now()
-	if err := tx.Model(&model.RSAKeyVersion{}).Where("version = ?", version).Updates(map[string]interface{}{
-		"is_active":    true,
-		"activated_at": &now,
-	}).Error; err != nil {
+	key.ActivatedAt = &now
+
+	if err := tx.Save(&key).Error; err != nil {
 		tx.Rollback()
 		return err
 	}

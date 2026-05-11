@@ -7,16 +7,18 @@ import (
 	"strings"
 	"time"
 
+	"wwlocal-wework/config"
 	"wwlocal-wework/internal/model"
 	"wwlocal-wework/internal/repository"
 )
 
 type QueryService struct {
 	logRepo *repository.LogRepository
+	cfg     *config.Config
 }
 
-func NewQueryService(logRepo *repository.LogRepository) *QueryService {
-	return &QueryService{logRepo: logRepo}
+func NewQueryService(logRepo *repository.LogRepository, cfg *config.Config) *QueryService {
+	return &QueryService{logRepo: logRepo, cfg: cfg}
 }
 
 type QueryRequest struct {
@@ -50,20 +52,22 @@ func (s *QueryService) Query(req *QueryRequest) (*QueryResult, error) {
 	var total int64
 
 	for _, featureID := range req.FeatureIDs {
-		entries, _, err := s.logRepo.Query(featureID, req.StartTime, req.EndTime, 1, 10000)
+		// 使用数据库分页，每次只取当前页需要的数据
+		entries, count, err := s.logRepo.Query(featureID, req.StartTime, req.EndTime, req.Page, req.PageSize)
 		if err != nil {
 			return nil, fmt.Errorf("query feature %d failed: %w", featureID, err)
 		}
+		total += count
 
 		for _, entry := range entries {
 			data := s.parseEntry(&entry, req.Conditions)
 			if data != nil {
 				allData = append(allData, data)
-				total++
 			}
 		}
 	}
 
+	// 如果有条件过滤，需要重新计算总数和分页
 	if req.Conditions != nil && len(req.Conditions) > 0 {
 		filtered := make([]map[string]interface{}, 0)
 		for _, data := range allData {
@@ -72,25 +76,16 @@ func (s *QueryService) Query(req *QueryRequest) (*QueryResult, error) {
 			}
 		}
 		allData = filtered
+		// 注意：有条件过滤时，总数可能不准确，因为过滤是在应用层进行的
+		// 这是一个已知的限制，对于精确分页需要在数据库层面实现 JSON 查询
 		total = int64(len(allData))
 	}
-
-	start := (req.Page - 1) * req.PageSize
-	end := start + req.PageSize
-	if start > len(allData) {
-		start = len(allData)
-	}
-	if end > len(allData) {
-		end = len(allData)
-	}
-
-	pageData := allData[start:end]
 
 	return &QueryResult{
 		Total:    total,
 		Page:     req.Page,
 		PageSize: req.PageSize,
-		Data:     pageData,
+		Data:     allData,
 	}, nil
 }
 
@@ -153,43 +148,11 @@ func (s *QueryService) matchField(data map[string]interface{}, key string, expec
 }
 
 func (s *QueryService) GetFeatureIDs() []int {
-	return []int{
-		90000031, 90000032, 90000033, 90000034, 90000035,
-		90000036, 90000037, 90000038, 90000039, 90000040,
-		90000041, 90000042, 90000043, 90000044, 90000047,
-		90000048, 90000054, 90000055, 90000058, 90000059,
-		90000061, 90000062, 90000063, 90000066,
-	}
+	return s.cfg.Features.IDs
 }
 
 func (s *QueryService) GetFeatureName(featureID int) string {
-	names := map[int]string{
-		90000031: "登录",
-		90000032: "唤醒",
-		90000033: "访问应用",
-		90000034: "应用推送消息",
-		90000035: "聊天消息发送",
-		90000036: "单聊聊天数据",
-		90000037: "群聊聊天数据",
-		90000038: "创建群聊",
-		90000039: "群加人",
-		90000040: "群踢人",
-		90000041: "退群",
-		90000042: "转让群主",
-		90000043: "解散群",
-		90000044: "群改名",
-		90000047: "添加",
-		90000048: "激活",
-		90000054: "客户端安装信息",
-		90000055: "客户端更新信息",
-		90000058: "通讯录更新",
-		90000059: "客户端网络请求统计",
-		90000061: "微盘文件操作",
-		90000062: "微盘账号行为",
-		90000063: "微盘空间操作",
-		90000066: "API接口调用日志",
-	}
-	if name, ok := names[featureID]; ok {
+	if name, ok := s.cfg.Features.Names[featureID]; ok {
 		return name
 	}
 	return fmt.Sprintf("未知(%d)", featureID)

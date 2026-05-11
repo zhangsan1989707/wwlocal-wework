@@ -16,12 +16,12 @@ type SyncService struct {
 	decryptSvc *DecryptService
 	logRepo    *repository.LogRepository
 	keyRepo    *repository.KeyRepository
-	cfg        *config.WeWorkConfig
+	cfg        *config.Config
 	mu         sync.Mutex
 	running    bool
 }
 
-func NewSyncService(weworkSvc *WeWorkService, decryptSvc *DecryptService, logRepo *repository.LogRepository, keyRepo *repository.KeyRepository, cfg *config.WeWorkConfig) *SyncService {
+func NewSyncService(weworkSvc *WeWorkService, decryptSvc *DecryptService, logRepo *repository.LogRepository, keyRepo *repository.KeyRepository, cfg *config.Config) *SyncService {
 	return &SyncService{
 		weworkSvc:  weworkSvc,
 		decryptSvc: decryptSvc,
@@ -48,7 +48,7 @@ func (s *SyncService) SyncFeature(featureID int, startTime, endTime int64) (int,
 
 	totalFetched := 0
 	startIndex := 0
-	limit := s.cfg.SyncLimit
+	limit := s.cfg.WeWork.SyncLimit
 
 	if limit > 1000 {
 		limit = 1000
@@ -96,15 +96,8 @@ func (s *SyncService) SyncFeature(featureID int, startTime, endTime int64) (int,
 
 func (s *SyncService) SyncAllFeatures(startTime, endTime int64) map[int]int {
 	results := make(map[int]int)
-	featureIDs := []int{
-		90000031, 90000032, 90000033, 90000034, 90000035,
-		90000036, 90000037, 90000038, 90000039, 90000040,
-		90000041, 90000042, 90000043, 90000044, 90000047,
-		90000048, 90000054, 90000055, 90000058, 90000059,
-		90000061, 90000062, 90000063, 90000066,
-	}
 
-	for _, featureID := range featureIDs {
+	for _, featureID := range s.cfg.Features.IDs {
 		count, err := s.SyncFeature(featureID, startTime, endTime)
 		if err != nil {
 			log.Printf("sync feature %d failed: %v", featureID, err)
