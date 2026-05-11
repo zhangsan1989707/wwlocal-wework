@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"reflect"
 	"strings"
 	"time"
@@ -13,12 +14,14 @@ import (
 )
 
 type QueryService struct {
-	logRepo *repository.LogRepository
-	cfg     *config.Config
+	logRepo    *repository.LogRepository
+	weworkSvc  *WeWorkService
+	decryptSvc *DecryptService
+	cfg        *config.Config
 }
 
-func NewQueryService(logRepo *repository.LogRepository, cfg *config.Config) *QueryService {
-	return &QueryService{logRepo: logRepo, cfg: cfg}
+func NewQueryService(logRepo *repository.LogRepository, weworkSvc *WeWorkService, decryptSvc *DecryptService, cfg *config.Config) *QueryService {
+	return &QueryService{logRepo: logRepo, weworkSvc: weworkSvc, decryptSvc: decryptSvc, cfg: cfg}
 }
 
 type QueryRequest struct {
@@ -28,6 +31,7 @@ type QueryRequest struct {
 	Conditions map[string]interface{} `json:"conditions"`
 	Page       int                    `json:"page"`
 	PageSize   int                    `json:"page_size"`
+	Realtime   bool                   `json:"realtime"` // 是否实时查询
 }
 
 type QueryResult struct {
@@ -52,11 +56,25 @@ func (s *QueryService) Query(req *QueryRequest) (*QueryResult, error) {
 	var total int64
 
 	for _, featureID := range req.FeatureIDs {
-		// 使用数据库分页，每次只取当前页需要的数据
+		// 先从数据库查询
 		entries, count, err := s.logRepo.Query(featureID, req.StartTime, req.EndTime, req.Page, req.PageSize)
 		if err != nil {
 			return nil, fmt.Errorf("query feature %d failed: %w", featureID, err)
 		}
+
+		// 如果数据库中没有数据且启用了实时查询，从政务微信 API 查询
+		if count == 0 && req.Realtime {
+			log.Printf("No data in database for feature %d, querying realtime from API", featureID)
+			realtimeEntries, err := s.queryRealtime(featureID, req.StartTime, req.EndTime)
+			if err != nil {
+				log.Printf("Realtime query failed for feature %d: %v", featureID, err)
+				// 实时查询失败不影响整体查询，继续处理其他 feature
+			} else {
+				entries = realtimeEntries
+				count = int64(len(realtimeEntries))
+			}
+		}
+
 		total += count
 
 		for _, entry := range entries {
@@ -76,17 +94,52 @@ func (s *QueryService) Query(req *QueryRequest) (*QueryResult, error) {
 			}
 		}
 		allData = filtered
-		// 注意：有条件过滤时，总数可能不准确，因为过滤是在应用层进行的
-		// 这是一个已知的限制，对于精确分页需要在数据库层面实现 JSON 查询
 		total = int64(len(allData))
 	}
+
+	// 应用分页
+	start := (req.Page - 1) * req.PageSize
+	end := start + req.PageSize
+	if start > len(allData) {
+		start = len(allData)
+	}
+	if end > len(allData) {
+		end = len(allData)
+	}
+	pageData := allData[start:end]
 
 	return &QueryResult{
 		Total:    total,
 		Page:     req.Page,
 		PageSize: req.PageSize,
-		Data:     allData,
+		Data:     pageData,
 	}, nil
+}
+
+func (s *QueryService) queryRealtime(featureID int, startTime, endTime int64) ([]model.LogEntry, error) {
+	// 从政务微信 API 获取数据
+	logItems, err := s.weworkSvc.GetLogList(featureID, startTime, endTime, 0, 100)
+	if err != nil {
+		return nil, fmt.Errorf("fetch from API failed: %w", err)
+	}
+
+	var entries []model.LogEntry
+	for _, item := range logItems {
+		entry, err := s.decryptSvc.DecryptWithKey(&model.WeWorkLogItem{
+			FeatureID: item.FeatureID,
+			LogTime:   item.LogTime,
+			IDC:       item.IDC,
+			EncKey:    item.EncKey,
+			EncData:   item.EncData,
+		}, "")
+		if err != nil {
+			log.Printf("decrypt failed for feature %d, log_time %d: %v", featureID, item.LogTime, err)
+			continue
+		}
+		entries = append(entries, *entry)
+	}
+
+	return entries, nil
 }
 
 func (s *QueryService) parseEntry(entry *model.LogEntry, conditions map[string]interface{}) map[string]interface{} {

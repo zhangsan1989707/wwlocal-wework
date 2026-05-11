@@ -114,6 +114,18 @@
             </el-form-item>
           </el-col>
         </el-row>
+
+        <el-row :gutter="20">
+          <el-col :span="24">
+            <el-form-item>
+              <el-checkbox v-model="form.realtime">
+                <el-tooltip content="当数据库中没有数据时，自动从政务微信 API 实时查询" placement="top">
+                  <span>实时查询 <el-icon><QuestionFilled /></el-icon></span>
+                </el-tooltip>
+              </el-checkbox>
+            </el-form-item>
+          </el-col>
+        </el-row>
       </el-form>
     </el-card>
 
@@ -164,7 +176,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { logAPI } from '../api'
 import { ElMessage } from 'element-plus'
-import { Search, Refresh, DataAnalysis, Plus, Delete, Close } from '@element-plus/icons-vue'
+import { Search, Refresh, DataAnalysis, Plus, Delete, Close, QuestionFilled } from '@element-plus/icons-vue'
 
 interface Condition {
   key: string
@@ -177,6 +189,7 @@ const form = reactive({
   start_time: 0,
   end_time: 0,
   conditions: null as any,
+  realtime: true, // 默认启用实时查询
 })
 
 const dateRange = ref<[Date, Date] | null>(null)

@@ -4,7 +4,7 @@
       <template #header>
         <div class="card-header">
           <span class="card-title">数据同步</span>
-          <el-tag v-if="syncStatus" :type="syncStatus.running ? 'warning' : 'success'" size="large">
+          <el-tag :type="syncStatus.running ? 'warning' : 'success'" size="large">
             {{ syncStatus.running ? '同步中...' : '空闲' }}
           </el-tag>
         </div>
@@ -41,7 +41,7 @@
           <el-col :span="12">
             <el-form-item label="同步选项">
               <div class="sync-options">
-                <el-checkbox v-model="syncAll" :disabled="syncStatus?.running">
+                <el-checkbox v-model="syncAll" :disabled="syncStatus.running">
                   同步所有数据类型 ({{ features.length }} 项)
                 </el-checkbox>
                 <el-select
@@ -50,7 +50,7 @@
                   multiple
                   placeholder="请选择要同步的数据类型"
                   style="width: 100%; margin-top: 8px"
-                  :disabled="syncStatus?.running"
+                  :disabled="syncStatus.running"
                   collapse-tags
                   collapse-tags-tooltip
                 >
@@ -73,14 +73,14 @@
           <el-button
             type="primary"
             @click="handleSync"
-            :loading="syncStatus?.running"
-            :disabled="syncStatus?.running"
+            :loading="syncStatus.running"
+            :disabled="syncStatus.running"
             size="large"
           >
             <el-icon><VideoPlay /></el-icon>
-            {{ syncStatus?.running ? '同步进行中...' : '开始同步' }}
+            {{ syncStatus.running ? '同步进行中...' : '开始同步' }}
           </el-button>
-          <el-button @click="handleReset" :disabled="syncStatus?.running" size="large">
+          <el-button @click="handleReset" :disabled="syncStatus.running" size="large">
             <el-icon><Refresh /></el-icon>
             重置
           </el-button>
@@ -88,7 +88,7 @@
       </el-form>
     </el-card>
 
-    <el-card v-if="syncStatus" class="status-card">
+    <el-card class="status-card">
       <template #header>
         <span class="card-title">同步状态</span>
       </template>
@@ -104,7 +104,7 @@
         <p class="progress-text">正在同步第 {{ syncStatus.progress }} / {{ syncStatus.total }} 个数据类型...</p>
       </div>
 
-      <div v-if="syncStatus.last_sync" class="last-sync">
+      <div v-else-if="syncStatus.last_sync && syncStatus.last_sync !== '0001-01-01T00:00:00Z'" class="last-sync">
         <el-icon><Clock /></el-icon>
         <span>上次同步时间: {{ formatTime(syncStatus.last_sync) }}</span>
       </div>
@@ -123,6 +123,8 @@
           </el-table-column>
         </el-table>
       </div>
+
+      <el-empty v-if="!syncStatus.running && (!syncStatus.results || Object.keys(syncStatus.results).length === 0)" description="暂无同步记录" />
     </el-card>
   </div>
 </template>
@@ -135,7 +137,12 @@ import { VideoPlay, Refresh, Clock } from '@element-plus/icons-vue'
 
 const dateRange = ref<[Date, Date] | null>(null)
 const activeShortcut = ref<string | null>(null)
-const syncStatus = ref<any>(null)
+const syncStatus = ref<any>({
+  running: false,
+  progress: 0,
+  total: 0,
+  results: {}
+})
 const syncAll = ref(true)
 const form = reactive({
   feature_ids: [] as number[],
@@ -184,7 +191,10 @@ onMounted(async () => {
       features.value = res.data
     }
     await checkStatus()
-    startPolling()
+    // 如果正在同步，启动轮询
+    if (syncStatus.value.running) {
+      startPolling()
+    }
   } catch (err) {
     console.error(err)
   }
