@@ -4,21 +4,37 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"wwlocal-wework/internal/handler"
+	appmw "wwlocal-wework/internal/middleware"
+	"wwlocal-wework/internal/service"
 )
 
 type Router struct {
-	healthHandler *handler.HealthHandler
-	logHandler    *handler.LogHandler
-	keyHandler    *handler.KeyHandler
-	syncHandler   *handler.SyncHandler
+	healthHandler        *handler.HealthHandler
+	authHandler          *handler.AuthHandler
+	logHandler           *handler.LogHandler
+	keyHandler           *handler.KeyHandler
+	syncHandler          *handler.SyncHandler
+	schedulerHandler     *handler.SchedulerHandler
+	contactHandler       *handler.ContactHandler
+	operationLogHandler  *handler.OperationLogHandler
+	dashboardHandler     *handler.DashboardHandler
+	operationLogSvc      *service.OperationLogService
+	jwtSecret            string
 }
 
-func NewRouter(healthHandler *handler.HealthHandler, logHandler *handler.LogHandler, keyHandler *handler.KeyHandler, syncHandler *handler.SyncHandler) *Router {
+func NewRouter(healthHandler *handler.HealthHandler, authHandler *handler.AuthHandler, logHandler *handler.LogHandler, keyHandler *handler.KeyHandler, syncHandler *handler.SyncHandler, schedulerHandler *handler.SchedulerHandler, contactHandler *handler.ContactHandler, operationLogHandler *handler.OperationLogHandler, dashboardHandler *handler.DashboardHandler, operationLogSvc *service.OperationLogService, jwtSecret string) *Router {
 	return &Router{
-		healthHandler: healthHandler,
-		logHandler:    logHandler,
-		keyHandler:    keyHandler,
-		syncHandler:   syncHandler,
+		healthHandler:       healthHandler,
+		authHandler:         authHandler,
+		logHandler:          logHandler,
+		keyHandler:          keyHandler,
+		syncHandler:         syncHandler,
+		schedulerHandler:    schedulerHandler,
+		contactHandler:      contactHandler,
+		operationLogHandler: operationLogHandler,
+		dashboardHandler:    dashboardHandler,
+		operationLogSvc:     operationLogSvc,
+		jwtSecret:           jwtSecret,
 	}
 }
 
@@ -26,21 +42,31 @@ func (r *Router) Setup(e *echo.Echo) {
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORS())
+	e.Use(appmw.OperationLog(r.operationLogSvc))
 
 	e.GET("/health", r.healthHandler.Check)
+	e.POST("/api/v1/auth/login", r.authHandler.Login)
 
-	api := e.Group("/api/v1")
+	api := e.Group("/api/v1", appmw.JWTAuth(r.jwtSecret))
 	{
+		operationLogs := api.Group("/operation-logs")
+		{
+			operationLogs.GET("", r.operationLogHandler.List)
+			operationLogs.GET("/actions", r.operationLogHandler.GetActions)
+		}
+
 		logs := api.Group("/logs")
 		{
 			logs.POST("/query", r.logHandler.Query)
 			logs.GET("/features", r.logHandler.GetFeatures)
 			logs.GET("/time-range", r.logHandler.GetTimeRange)
+			logs.GET("/field-paths", r.logHandler.GetFieldPaths)
 		}
 
 		sync := api.Group("/logs")
 		{
 			sync.POST("/sync", r.syncHandler.Sync)
+			sync.POST("/sync/cancel", r.syncHandler.Cancel)
 			sync.GET("/sync/status", r.syncHandler.Status)
 		}
 
@@ -49,6 +75,33 @@ func (r *Router) Setup(e *echo.Echo) {
 			keys.GET("", r.keyHandler.List)
 			keys.POST("", r.keyHandler.Add)
 			keys.PUT("/activate", r.keyHandler.Activate)
+		}
+
+		scheduler := api.Group("/scheduler")
+		{
+			scheduler.POST("/start", r.schedulerHandler.Start)
+			scheduler.POST("/stop", r.schedulerHandler.Stop)
+			scheduler.GET("/status", r.schedulerHandler.Status)
+			scheduler.POST("/sync", r.schedulerHandler.IncrementalSync)
+			scheduler.PUT("/interval", r.schedulerHandler.SetInterval)
+		}
+
+		contacts := api.Group("/contacts")
+		{
+			contacts.GET("/tree", r.contactHandler.GetDeptTree)
+			contacts.GET("/departments/:id/members", r.contactHandler.GetDeptMembers)
+			contacts.GET("", r.contactHandler.List)
+			contacts.GET("/departments", r.contactHandler.GetDepartments)
+			contacts.POST("/sync", r.contactHandler.Sync)
+			contacts.POST("/sync/incremental", r.contactHandler.SyncIncremental)
+			contacts.POST("/sync/cancel", r.contactHandler.Cancel)
+			contacts.GET("/sync/status", r.contactHandler.Status)
+			contacts.GET("/:userId", r.contactHandler.GetContact)
+		}
+
+		dashboard := api.Group("/dashboard")
+		{
+			dashboard.GET("/inactive-users", r.dashboardHandler.GetInactiveUsers)
 		}
 	}
 }

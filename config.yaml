@@ -6,18 +6,28 @@ database:
   host: localhost
   port: 3306
   user: root
-  password: wework123
+  password: ""  # 通过环境变量 DB_PASSWORD 设置
   dbname: wework_logs
 
 wework:
-  base_url: https://uat.rztcd.cn:89
-  corpid: ww9904fd98c1b0df9e
-  secret: aNOChgDjGKH-PL-u_hab5ackRzBvr3RtvduVcFjUZz8
+  base_url: ""
+  corpid: ""      # 通过环境变量 WEWORK_CORPID 设置
+  secret: ""      # 通过环境变量 WEWORK_SECRET 设置
+  contact_secret: ""  # 通过环境变量 WEWORK_CONTACT_SECRET 设置
   sync_limit: 1000
 
 keys:
   storage_path: ./keys
   default_version: v1
+
+auth:
+  username: admin
+  password: ""    # 通过环境变量 AUTH_PASSWORD 设置
+  jwt_secret: ""  # 通过环境变量 JWT_SECRET 设置
+
+scheduler:
+  enabled: false
+  interval: "1h"
 
 features:
   ids:

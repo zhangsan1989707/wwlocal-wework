@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"log"
+	"runtime/debug"
+
 	"wwlocal-wework/internal/service"
 	"wwlocal-wework/pkg/response"
 
@@ -33,6 +36,11 @@ func (h *SyncHandler) Sync(c echo.Context) error {
 	}
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("sync goroutine panic: %v\n%s", r, debug.Stack())
+			}
+		}()
 		if req.SyncAll {
 			h.syncSvc.SyncAllFeatures(req.StartTime, req.EndTime)
 		} else if len(req.FeatureIDs) > 0 {
@@ -48,4 +56,14 @@ func (h *SyncHandler) Sync(c echo.Context) error {
 
 func (h *SyncHandler) Status(c echo.Context) error {
 	return response.Success(c, h.syncSvc.GetStatus())
+}
+
+func (h *SyncHandler) Cancel(c echo.Context) error {
+	if !h.syncSvc.IsRunning() {
+		return response.Error(c, 400, "no sync in progress")
+	}
+	h.syncSvc.Cancel()
+	return response.Success(c, map[string]interface{}{
+		"message": "sync cancellation requested",
+	})
 }

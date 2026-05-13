@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"wwlocal-wework/internal/crypto"
 	"wwlocal-wework/internal/model"
@@ -11,8 +12,9 @@ import (
 )
 
 type DecryptService struct {
-	keyRepo *repository.KeyRepository
-	cache   map[string]*crypto.RSADecryptor
+	keyRepo   *repository.KeyRepository
+	cache     map[string]*crypto.RSADecryptor
+	cacheMu   sync.RWMutex
 }
 
 func NewDecryptService(keyRepo *repository.KeyRepository) *DecryptService {
@@ -27,7 +29,10 @@ func (s *DecryptService) getDecryptor(version string) (*crypto.RSADecryptor, err
 		return s.getActiveDecryptor()
 	}
 
-	if dec, ok := s.cache[version]; ok {
+	s.cacheMu.RLock()
+	dec, ok := s.cache[version]
+	s.cacheMu.RUnlock()
+	if ok {
 		return dec, nil
 	}
 
@@ -37,13 +42,19 @@ func (s *DecryptService) getDecryptor(version string) (*crypto.RSADecryptor, err
 	}
 	_ = key
 
-	keyPath := s.keyRepo.GetKeyFilePath(version)
-	dec, err := crypto.NewRSADecryptorFromFile(keyPath)
+	pemBytes, err := s.keyRepo.ReadKeyFile(version)
+	if err != nil {
+		return nil, fmt.Errorf("read key file failed: %w", err)
+	}
+
+	dec, err = crypto.NewRSADecryptor(string(pemBytes))
 	if err != nil {
 		return nil, fmt.Errorf("create RSA decryptor failed: %w", err)
 	}
 
+	s.cacheMu.Lock()
 	s.cache[version] = dec
+	s.cacheMu.Unlock()
 	return dec, nil
 }
 

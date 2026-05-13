@@ -9,11 +9,13 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Database DatabaseConfig `yaml:"database"`
-	WeWork   WeWorkConfig   `yaml:"wework"`
-	Keys     KeysConfig     `yaml:"keys"`
-	Features FeaturesConfig `yaml:"features"`
+	Server    ServerConfig    `yaml:"server"`
+	Database  DatabaseConfig  `yaml:"database"`
+	WeWork    WeWorkConfig    `yaml:"wework"`
+	Keys      KeysConfig      `yaml:"keys"`
+	Features  FeaturesConfig  `yaml:"features"`
+	Auth      AuthConfig      `yaml:"auth"`
+	Scheduler SchedulerConfig `yaml:"scheduler"`
 }
 
 type ServerConfig struct {
@@ -30,15 +32,17 @@ type DatabaseConfig struct {
 }
 
 type WeWorkConfig struct {
-	BaseURL   string `yaml:"base_url"`
-	CorpID    string `yaml:"corpid"`
-	Secret    string `yaml:"secret"`
-	SyncLimit int    `yaml:"sync_limit"`
+	BaseURL       string `yaml:"base_url"`
+	CorpID        string `yaml:"corpid"`
+	Secret        string `yaml:"secret"`
+	ContactSecret string `yaml:"contact_secret"`
+	SyncLimit     int    `yaml:"sync_limit"`
 }
 
 type KeysConfig struct {
 	StoragePath    string `yaml:"storage_path"`
 	DefaultVersion string `yaml:"default_version"`
+	EncryptKey     string `yaml:"-"` // 不从 yaml 读取，仅环境变量
 }
 
 type FeaturesConfig struct {
@@ -46,8 +50,19 @@ type FeaturesConfig struct {
 	Names map[int]string   `yaml:"names"`
 }
 
+type AuthConfig struct {
+	Username  string `yaml:"username"`
+	Password  string `yaml:"password"`
+	JWTSecret string `yaml:"jwt_secret"`
+}
+
+type SchedulerConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	Interval string `yaml:"interval"` // "1h", "30m", "24h"
+}
+
 func (d *DatabaseConfig) DSN() string {
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=10s&readTimeout=30s&writeTimeout=30s&maxAllowedPacket=0",
 		d.User, d.Password, d.Host, d.Port, d.DBName)
 }
 
@@ -83,6 +98,41 @@ func Load(path string) (*Config, error) {
 	cfg.Database.User = getEnv("DB_USER", cfg.Database.User)
 	cfg.Database.Password = getEnv("DB_PASSWORD", cfg.Database.Password)
 	cfg.Database.DBName = getEnv("DB_NAME", cfg.Database.DBName)
+
+	cfg.WeWork.BaseURL = getEnv("WEWORK_BASE_URL", cfg.WeWork.BaseURL)
+	cfg.WeWork.CorpID = getEnv("WEWORK_CORPID", cfg.WeWork.CorpID)
+	cfg.WeWork.Secret = getEnv("WEWORK_SECRET", cfg.WeWork.Secret)
+	cfg.WeWork.ContactSecret = getEnv("WEWORK_CONTACT_SECRET", cfg.WeWork.ContactSecret)
+
+	cfg.Auth.Username = getEnv("AUTH_USERNAME", cfg.Auth.Username)
+	cfg.Auth.Password = getEnv("AUTH_PASSWORD", cfg.Auth.Password)
+	cfg.Auth.JWTSecret = getEnv("JWT_SECRET", cfg.Auth.JWTSecret)
+
+	cfg.Keys.EncryptKey = os.Getenv("KEY_ENCRYPT_KEY")
+
+	// 校验必需配置
+	var missing []string
+	if cfg.Database.Password == "" {
+		missing = append(missing, "DB_PASSWORD")
+	}
+	if cfg.WeWork.BaseURL == "" {
+		missing = append(missing, "WEWORK_BASE_URL")
+	}
+	if cfg.WeWork.CorpID == "" {
+		missing = append(missing, "WEWORK_CORPID")
+	}
+	if cfg.WeWork.Secret == "" {
+		missing = append(missing, "WEWORK_SECRET")
+	}
+	if cfg.Auth.Password == "" {
+		missing = append(missing, "AUTH_PASSWORD")
+	}
+	if cfg.Auth.JWTSecret == "" {
+		missing = append(missing, "JWT_SECRET")
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("missing required config (set via env vars): %v", missing)
+	}
 
 	return &cfg, nil
 }

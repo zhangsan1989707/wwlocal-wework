@@ -3,7 +3,63 @@
     <el-card class="sync-card">
       <template #header>
         <div class="card-header">
-          <span class="card-title">数据同步</span>
+          <span class="card-title">定期同步</span>
+          <el-tag :type="schedulerStatus.running ? 'success' : 'info'" size="large">
+            {{ schedulerStatus.running ? '运行中' : '已停止' }}
+          </el-tag>
+        </div>
+      </template>
+
+      <el-descriptions :column="2" border size="small">
+        <el-descriptions-item label="同步间隔">{{ schedulerStatus.interval || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="上次执行">{{ formatTime(schedulerStatus.last_run) }}</el-descriptions-item>
+        <el-descriptions-item label="下次执行">
+          {{ schedulerStatus.running ? formatTime(schedulerStatus.next_run) : '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="状态">
+          <el-tag :type="schedulerStatus.running ? 'success' : 'info'" size="small">
+            {{ schedulerStatus.running ? '定时任务运行中' : '定时任务已停止' }}
+          </el-tag>
+        </el-descriptions-item>
+      </el-descriptions>
+
+      <div class="scheduler-actions" style="margin-top: 16px">
+        <el-button
+          v-if="!schedulerStatus.running"
+          type="success"
+          @click="handleSchedulerStart"
+          size="large"
+        >
+          <el-icon><VideoPlay /></el-icon>
+          启动定时同步
+        </el-button>
+        <el-button
+          v-else
+          type="danger"
+          @click="handleSchedulerStop"
+          size="large"
+        >
+          <el-icon><VideoPause /></el-icon>
+          停止定时同步
+        </el-button>
+        <el-button
+          type="primary"
+          @click="handleIncrementalSync"
+          :loading="syncStatus.running"
+          :disabled="syncStatus.running"
+          size="large"
+          plain
+        >
+          <el-icon><Refresh /></el-icon>
+          立即增量同步
+        </el-button>
+      </div>
+    </el-card>
+
+    <el-card class="sync-card">
+      <template #header>
+        <div class="card-header">
+          <span class="card-title">全量同步</span>
           <el-tag :type="syncStatus.running ? 'warning' : 'success'" size="large">
             {{ syncStatus.running ? '同步中...' : '空闲' }}
           </el-tag>
@@ -78,7 +134,7 @@
             size="large"
           >
             <el-icon><VideoPlay /></el-icon>
-            {{ syncStatus.running ? '同步进行中...' : '开始同步' }}
+            {{ syncStatus.running ? '同步进行中...' : '开始全量同步' }}
           </el-button>
           <el-button @click="handleReset" :disabled="syncStatus.running" size="large">
             <el-icon><Refresh /></el-icon>
@@ -102,11 +158,17 @@
           status="success"
         />
         <p class="progress-text">正在同步第 {{ syncStatus.progress }} / {{ syncStatus.total }} 个数据类型...</p>
+        <el-button type="danger" size="small" @click="handleCancel" style="margin-top: 12px">
+          取消同步
+        </el-button>
       </div>
 
       <div v-else-if="syncStatus.last_sync && syncStatus.last_sync !== '0001-01-01T00:00:00Z'" class="last-sync">
         <el-icon><Clock /></el-icon>
         <span>上次同步时间: {{ formatTime(syncStatus.last_sync) }}</span>
+        <el-tag v-if="syncStatus.failed > 0" type="danger" size="small" style="margin-left: 12px">
+          {{ syncStatus.failed }} 条解密/写入失败
+        </el-tag>
       </div>
 
       <div v-if="syncStatus.results && Object.keys(syncStatus.results).length > 0" class="sync-results">
@@ -121,6 +183,12 @@
               </el-tag>
             </template>
           </el-table-column>
+          <el-table-column prop="error" label="错误信息" min-width="200" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span v-if="row.error" class="error-text">{{ row.error }}</span>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
         </el-table>
       </div>
 
@@ -131,9 +199,9 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
-import { syncAPI, logAPI } from '../api'
-import { ElMessage } from 'element-plus'
-import { VideoPlay, Refresh, Clock } from '@element-plus/icons-vue'
+import { syncAPI, schedulerAPI, logAPI } from '../api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { VideoPlay, VideoPause, Refresh, Clock } from '@element-plus/icons-vue'
 
 const dateRange = ref<[Date, Date] | null>(null)
 const activeShortcut = ref<string | null>(null)
@@ -142,6 +210,10 @@ const syncStatus = ref<any>({
   progress: 0,
   total: 0,
   results: {}
+})
+const schedulerStatus = ref<any>({
+  running: false,
+  interval: '',
 })
 const syncAll = ref(true)
 const form = reactive({
@@ -166,10 +238,12 @@ const progressFormat = (percentage: number) => `${percentage}%`
 
 const resultTableData = computed(() => {
   if (!syncStatus.value?.results) return []
+  const errors = syncStatus.value?.errors || {}
   return Object.entries(syncStatus.value.results).map(([featureId, count]) => ({
     feature_id: featureId,
     name: getFeatureName(Number(featureId)),
     count: count as number,
+    error: errors[featureId] || '',
   }))
 })
 
@@ -179,7 +253,7 @@ const getFeatureName = (featureId: number) => {
 }
 
 const formatTime = (timeStr: string) => {
-  if (!timeStr) return '-'
+  if (!timeStr || timeStr === '0001-01-01T00:00:00Z') return '-'
   const date = new Date(timeStr)
   return date.toLocaleString('zh-CN')
 }
@@ -191,7 +265,7 @@ onMounted(async () => {
       features.value = res.data
     }
     await checkStatus()
-    // 如果正在同步，启动轮询
+    await checkSchedulerStatus()
     if (syncStatus.value.running) {
       startPolling()
     }
@@ -208,7 +282,6 @@ const startPolling = () => {
   stopPolling()
   pollTimer = setInterval(async () => {
     await checkStatus()
-    // 如果同步完成，停止轮询
     if (syncStatus.value && !syncStatus.value.running) {
       stopPolling()
     }
@@ -233,6 +306,65 @@ const handleDateChange = () => {
   activeShortcut.value = null
 }
 
+const handleSchedulerStart = async () => {
+  try {
+    const res: any = await schedulerAPI.start()
+    if (res.code === 0) {
+      ElMessage.success('定时同步已启动')
+      schedulerStatus.value = res.data
+    }
+  } catch (err: any) {
+    ElMessage.error(err.message || '启动失败')
+  }
+}
+
+const handleSchedulerStop = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要停止定时同步吗？',
+      '确认停止',
+      { type: 'warning', confirmButtonText: '停止', cancelButtonText: '取消' }
+    )
+  } catch { return }
+
+  try {
+    const res: any = await schedulerAPI.stop()
+    if (res.code === 0) {
+      ElMessage.success('定时同步已停止')
+      schedulerStatus.value = res.data
+    }
+  } catch (err: any) {
+    ElMessage.error(err.message || '停止失败')
+  }
+}
+
+const handleIncrementalSync = async () => {
+  if (syncStatus.value.running) {
+    ElMessage.warning('已有同步任务在执行中')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      '增量同步将从上次同步进度继续拉取新数据，确定开始吗？',
+      '确认增量同步',
+      { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' }
+    )
+  } catch { return }
+
+  try {
+    const res: any = await schedulerAPI.incrementalSync({ sync_all: true })
+    if (res.code === 0) {
+      ElMessage.success('增量同步已启动')
+      startPolling()
+    } else {
+      ElMessage.error(res.msg || '增量同步启动失败')
+    }
+  } catch (err: any) {
+    ElMessage.error(err.message || '增量同步启动失败')
+  }
+}
+
 const handleSync = async () => {
   if (!dateRange.value) {
     ElMessage.warning('请选择时间范围')
@@ -241,6 +373,16 @@ const handleSync = async () => {
 
   if (!syncAll.value && form.feature_ids.length === 0) {
     ElMessage.warning('请选择至少一个数据类型')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      '全量同步将从政务微信 API 拉取指定时间范围的数据并解密存储，确定开始吗？',
+      '确认全量同步',
+      { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' }
+    )
+  } catch {
     return
   }
 
@@ -256,7 +398,7 @@ const handleSync = async () => {
     })
 
     if (res.code === 0) {
-      ElMessage.success('同步已启动')
+      ElMessage.success('全量同步已启动')
       startPolling()
     } else {
       ElMessage.error(res.msg || '同步启动失败')
@@ -273,11 +415,45 @@ const handleReset = () => {
   form.feature_ids = []
 }
 
+const handleCancel = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要取消当前同步任务吗？已完成的部分会保留。',
+      '确认取消',
+      { type: 'warning', confirmButtonText: '确定取消', cancelButtonText: '继续同步' }
+    )
+  } catch {
+    return
+  }
+
+  try {
+    const res: any = await syncAPI.cancel()
+    if (res.code === 0) {
+      ElMessage.success('已发送取消请求')
+    } else {
+      ElMessage.error(res.msg || '取消失败')
+    }
+  } catch (err: any) {
+    ElMessage.error(err.message || '取消失败')
+  }
+}
+
 const checkStatus = async () => {
   try {
     const res: any = await syncAPI.status()
     if (res.code === 0) {
       syncStatus.value = res.data
+    }
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+const checkSchedulerStatus = async () => {
+  try {
+    const res: any = await schedulerAPI.status()
+    if (res.code === 0) {
+      schedulerStatus.value = res.data
     }
   } catch (err) {
     console.error(err)
@@ -325,6 +501,11 @@ const checkStatus = async () => {
   width: 100%;
 }
 
+.scheduler-actions {
+  display: flex;
+  gap: 12px;
+}
+
 .sync-progress {
   margin-bottom: 20px;
 }
@@ -347,6 +528,11 @@ const checkStatus = async () => {
   margin: 0 0 12px 0;
   font-size: 14px;
   color: #303133;
+}
+
+.error-text {
+  color: #f56c6c;
+  font-size: 12px;
 }
 
 :deep(.el-form-item__label) {

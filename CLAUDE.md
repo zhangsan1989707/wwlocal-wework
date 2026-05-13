@@ -62,8 +62,14 @@ pkg/
 ### 核心流程
 
 1. **数据同步**: `SyncService.SyncFeature()` → `WeWorkService.GetLogList()` → `DecryptService.Decrypt()` → `LogRepository.Save()`
-2. **解密管道**: RSA PKCS1v15 解密 `encrypt_key`(base64) → 得到 16 字节 AES 密钥 → AES-128-CBC 解密 `encrypt_data`(base64, IV = 密文前 16 字节)
-3. **分表策略**: 表名 `log_{feature_id}_{YYYYMM}`，由 `LogRepository` 动态创建
+2. **增量同步**: `SyncService.SyncFeatureIncremental()` 读取 `sync_state.last_log_time`，只拉取新数据，完成后更新状态
+3. **定时调度**: `SchedulerService` 按配置间隔调用 `SyncAllFeaturesIncremental()`
+4. **数据去重**: `LogRepository.BatchSave()` 使用 `INSERT IGNORE` + `enc_data_hash`(MD5) 去重
+5. **解密管道**: RSA PKCS1v15 解密 `encrypt_key`(base64) → 得到 16 字节 AES 密钥 → AES-128-CBC 解密 `encrypt_data`(base64, IV = 密文前 16 字节)
+6. **分表策略**: 表名 `log_{feature_id}_{YYYYMM}`，由 `LogRepository` 动态创建
+7. **通讯录同步**: `ContactSyncService` → `ContactService.GetSimpleUserList()` → 新用户逐个 `GetUserDetail()`（并发 worker 池）→ `ContactRepository.BatchUpsert()`
+8. **手机号匹配**: 日志查询的 `mobile` 参数匹配 `parsed_json.openid`（openid 即手机号）
+9. **通讯录独立 token**: `ContactService` 使用独立的 `contact_secret` 获取 token，与日志 API 的 token 分开管理
 
 ### 密钥热切换
 
@@ -84,21 +90,31 @@ pkg/
 | Method | Path | Handler |
 |--------|------|---------|
 | GET | `/health` | `HealthHandler.Check` |
+| POST | `/api/v1/auth/login` | `AuthHandler.Login` |
 | POST | `/api/v1/logs/query` | `LogHandler.Query` |
 | GET | `/api/v1/logs/features` | `LogHandler.GetFeatures` |
 | GET | `/api/v1/logs/time-range` | `LogHandler.GetTimeRange` |
 | POST | `/api/v1/logs/sync` | `SyncHandler.Sync` (goroutine 异步执行) |
+| POST | `/api/v1/logs/sync/cancel` | `SyncHandler.Cancel` |
 | GET | `/api/v1/logs/sync/status` | `SyncHandler.Status` |
 | GET/POST | `/api/v1/keys` | `KeyHandler.List` / `KeyHandler.Add` |
 | PUT | `/api/v1/keys/activate` | `KeyHandler.Activate` |
+| POST | `/api/v1/scheduler/start` | `SchedulerHandler.Start` |
+| POST | `/api/v1/scheduler/stop` | `SchedulerHandler.Stop` |
+| GET | `/api/v1/scheduler/status` | `SchedulerHandler.Status` |
+| POST | `/api/v1/scheduler/sync` | `SchedulerHandler.IncrementalSync` |
+| PUT | `/api/v1/scheduler/interval` | `SchedulerHandler.SetInterval` |
+| GET | `/api/v1/contacts` | `ContactHandler.List` |
+| GET | `/api/v1/contacts/departments` | `ContactHandler.GetDepartments` |
+| POST | `/api/v1/contacts/sync` | `ContactHandler.Sync` (全量同步) |
+| POST | `/api/v1/contacts/sync/incremental` | `ContactHandler.SyncIncremental` |
+| POST | `/api/v1/contacts/sync/cancel` | `ContactHandler.Cancel` |
+| GET | `/api/v1/contacts/sync/status` | `ContactHandler.Status` |
 
 ## 已知问题
 
-- `KeyRepository.SetActive()` 只设置目标为 true，不取消其他版本的激活状态
-- `QueryService.Query()` 内存分页：从 DB 取最多 10000 条，在 Go 中过滤后切片，不适合大数据量
-- Feature ID 列表在 `SyncService` 和 `QueryService` 中重复硬编码（90000031-90000066）
+- `QueryService` 内存分页：跨多表查询后在 Go 中合并排序再切片，数据量大时有 OOM 风险
 - `LogRepository` 使用原生 SQL，其余 Repository 使用 GORM 查询构建器
-- `KeyHandler` 直接依赖 Repository，跳过了 Service 层
 - 错误响应统一返回 HTTP 200，通过 JSON `code` 字段区分
 
 ## 技术栈

@@ -3,12 +3,13 @@ services:
     image: mysql:8.0
     container_name: wework-mysql
     environment:
-      MYSQL_ROOT_PASSWORD: wework123
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-changeme}
       MYSQL_DATABASE: wework_logs
     ports:
       - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./mysql/my.cnf:/etc/mysql/conf.d/custom.cnf:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -27,20 +28,26 @@ services:
       DB_HOST: mysql
       DB_PORT: 3306
       DB_USER: root
-      DB_PASSWORD: wework123
+      DB_PASSWORD: ${DB_PASSWORD:-changeme}
       DB_NAME: wework_logs
+      WEWORK_BASE_URL: ${WEWORK_BASE_URL:-}
+      WEWORK_CORPID: ${WEWORK_CORPID:-}
+      WEWORK_SECRET: ${WEWORK_SECRET:-}
+      WEWORK_CONTACT_SECRET: ${WEWORK_CONTACT_SECRET:-}
+      AUTH_USERNAME: ${AUTH_USERNAME:-admin}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:?请在 .env 文件中设置 AUTH_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?请在 .env 文件中设置 JWT_SECRET}
+      KEY_ENCRYPT_KEY: ${KEY_ENCRYPT_KEY:-}
     volumes:
       - ./keys:/app/keys
 
   frontend:
-    image: node:20-alpine
+    build: ./web
     container_name: wework-frontend
-    working_dir: /app
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    depends_on:
+      - backend
     ports:
-      - "5173:5173"
-    volumes:
-      - ./web:/app
+      - "5173:80"
 
 volumes:
   mysql_data:

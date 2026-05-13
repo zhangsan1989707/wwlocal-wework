@@ -5,20 +5,23 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"wwlocal-wework/internal/crypto"
 	"wwlocal-wework/internal/model"
 )
 
 type KeyRepository struct {
 	db         *gorm.DB
 	keysDir    string
+	encryptKey string // hex 编码的 AES 密钥，为空则不加密
 	keyCache   map[string]*model.RSAKeyVersion
 }
 
-func NewKeyRepository(db *gorm.DB, keysDir string) *KeyRepository {
+func NewKeyRepository(db *gorm.DB, keysDir, encryptKey string) *KeyRepository {
 	return &KeyRepository{
-		db:      db,
-		keysDir: keysDir,
-		keyCache: make(map[string]*model.RSAKeyVersion),
+		db:         db,
+		keysDir:    keysDir,
+		encryptKey: encryptKey,
+		keyCache:   make(map[string]*model.RSAKeyVersion),
 	}
 }
 
@@ -89,12 +92,35 @@ func (r *KeyRepository) SetActive(version string) error {
 
 func (r *KeyRepository) SaveKeyToFile(version, privateKeyPEM string) error {
 	dir := r.keysDir + "/" + version
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
 
+	data := []byte(privateKeyPEM)
+	if r.encryptKey != "" {
+		encrypted, err := crypto.EncryptBytes(data, r.encryptKey)
+		if err != nil {
+			return err
+		}
+		data = encrypted
+	}
+
 	path := dir + "/rsa_private_key.pem"
-	return os.WriteFile(path, []byte(privateKeyPEM), 0600)
+	return os.WriteFile(path, data, 0600)
+}
+
+func (r *KeyRepository) ReadKeyFile(version string) ([]byte, error) {
+	path := r.keysDir + "/" + version + "/rsa_private_key.pem"
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	if r.encryptKey != "" {
+		return crypto.DecryptBytes(data, r.encryptKey)
+	}
+
+	return data, nil
 }
 
 func (r *KeyRepository) GetKeyFilePath(version string) string {

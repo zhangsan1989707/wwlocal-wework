@@ -19,23 +19,3 @@ type LogEntry struct {
 func (LogEntry) TableName() string {
 	return "log_entries"
 }
-
-type LogEntryQuery struct {
-	FeatureIDs []int
-	StartTime  int64
-	EndTime    int64
-	Conditions map[string]interface{}
-	Page       int
-	PageSize   int
-}
-
-type LogSyncRecord struct {
-	ID           int64     `gorm:"primaryKey;autoIncrement" json:"id"`
-	FeatureID    int       `gorm:"column:feature_id;not null" json:"feature_id"`
-	SyncTime     time.Time `gorm:"column:sync_time;autoCreateTime" json:"sync_time"`
-	StartTime    int64     `gorm:"column:start_time" json:"start_time"`
-	EndTime      int64     `gorm:"column:end_time" json:"end_time"`
-	StartIndex   int       `gorm:"column:start_index" json:"start_index"`
-	TotalFetched int       `gorm:"column:total_fetched" json:"total_fetched"`
-	Status       string    `gorm:"column:status;type:varchar(32)" json:"status"`
-}

@@ -2,22 +2,22 @@ package handler
 
 import (
 	"wwlocal-wework/internal/model"
-	"wwlocal-wework/internal/repository"
+	"wwlocal-wework/internal/service"
 	"wwlocal-wework/pkg/response"
 
 	"github.com/labstack/echo/v4"
 )
 
 type KeyHandler struct {
-	keyRepo *repository.KeyRepository
+	keySvc *service.KeyService
 }
 
-func NewKeyHandler(keyRepo *repository.KeyRepository) *KeyHandler {
-	return &KeyHandler{keyRepo: keyRepo}
+func NewKeyHandler(keySvc *service.KeyService) *KeyHandler {
+	return &KeyHandler{keySvc: keySvc}
 }
 
 func (h *KeyHandler) List(c echo.Context) error {
-	keys, err := h.keyRepo.GetAll()
+	keys, err := h.keySvc.ListKeys()
 	if err != nil {
 		return response.Error(c, 500, err.Error())
 	}
@@ -34,17 +34,9 @@ func (h *KeyHandler) Add(c echo.Context) error {
 		return response.Error(c, 400, "version and private_key_pem are required")
 	}
 
-	if err := h.keyRepo.SaveKeyToFile(req.Version, req.PrivateKeyPEM); err != nil {
-		return response.Error(c, 500, "save key file failed: "+err.Error())
-	}
-
-	key := &model.RSAKeyVersion{
-		Version:        req.Version,
-		PrivateKeyPath: h.keyRepo.GetKeyFilePath(req.Version),
-	}
-
-	if err := h.keyRepo.Create(key); err != nil {
-		return response.Error(c, 500, "save key to database failed: "+err.Error())
+	key, err := h.keySvc.AddKey(req.Version, req.PrivateKeyPEM)
+	if err != nil {
+		return response.Error(c, 500, "add key failed: "+err.Error())
 	}
 
 	return response.Success(c, key)
@@ -60,7 +52,7 @@ func (h *KeyHandler) Activate(c echo.Context) error {
 		return response.Error(c, 400, "version is required")
 	}
 
-	if err := h.keyRepo.SetActive(req.Version); err != nil {
+	if err := h.keySvc.ActivateKey(req.Version); err != nil {
 		return response.Error(c, 500, "activate key failed: "+err.Error())
 	}
 

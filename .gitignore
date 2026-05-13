@@ -1,0 +1,11 @@
+env.txt
+.env
+.env.*
+keys/
+.DS_Store
+server
+*.tar.gz
+deploy/
+web/node_modules/
+web/dist/
+mysql_data/

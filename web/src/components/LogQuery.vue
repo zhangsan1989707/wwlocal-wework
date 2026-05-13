@@ -73,6 +73,27 @@
         </el-row>
 
         <el-row :gutter="20">
+          <el-col :span="8">
+            <el-form-item label="手机号匹配">
+              <el-input
+                v-model="form.mobile"
+                placeholder="输入手机号，匹配日志中的 openid"
+                clearable
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :span="16">
+            <el-form-item label="&nbsp;">
+              <el-checkbox v-model="form.realtime">
+                <el-tooltip content="当数据库中没有数据时，自动从政务微信 API 实时查询" placement="top">
+                  <span>实时查询 <el-icon><QuestionFilled /></el-icon></span>
+                </el-tooltip>
+              </el-checkbox>
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-row :gutter="20">
           <el-col :span="24">
             <el-form-item label="筛选条件">
               <div class="conditions-container">
@@ -91,10 +112,12 @@
                 </div>
                 <div v-else class="conditions-list">
                   <div v-for="(condition, index) in conditions" :key="index" class="condition-item">
-                    <el-input
+                    <el-autocomplete
                       v-model="condition.key"
-                      placeholder="字段名"
-                      style="width: 150px"
+                      :fetch-suggestions="queryFieldPaths"
+                      placeholder="字段名，如 sender.openid"
+                      style="width: 200px"
+                      clearable
                     />
                     <el-select v-model="condition.operator" style="width: 100px">
                       <el-option label="等于" value="=" />
@@ -114,18 +137,6 @@
             </el-form-item>
           </el-col>
         </el-row>
-
-        <el-row :gutter="20">
-          <el-col :span="24">
-            <el-form-item>
-              <el-checkbox v-model="form.realtime">
-                <el-tooltip content="当数据库中没有数据时，自动从政务微信 API 实时查询" placement="top">
-                  <span>实时查询 <el-icon><QuestionFilled /></el-icon></span>
-                </el-tooltip>
-              </el-checkbox>
-            </el-form-item>
-          </el-col>
-        </el-row>
       </el-form>
     </el-card>
 
@@ -133,7 +144,18 @@
       <template #header>
         <div class="card-header">
           <span class="card-title">查询结果</span>
-          <span v-if="total > 0" class="result-count">共 {{ total }} 条记录</span>
+          <div class="header-actions">
+            <span v-if="total > 0" class="result-count">共 {{ total }} 条记录</span>
+            <el-button
+              v-if="tableData.length > 0"
+              type="success"
+              size="small"
+              @click="handleExport"
+            >
+              <el-icon><Download /></el-icon>
+              导出 CSV
+            </el-button>
+          </div>
         </div>
       </template>
 
@@ -148,10 +170,19 @@
       >
         <el-table-column prop="feature_id" label="FeatureID" width="100" align="center" />
         <el-table-column prop="log_date" label="时间" width="180" align="center" />
-        <el-table-column prop="idc" label="IDC" width="100" align="center" />
         <el-table-column label="数据内容" min-width="400">
-          <template #default="{ row }">
-            <pre class="data-content">{{ formatData(row) }}</pre>
+          <template #default="{ row, $index }">
+            <div class="data-cell">
+              <pre v-if="expandedRows.has($index)" class="data-content">{{ formatData(row) }}</pre>
+              <span v-else class="data-preview" @click="toggleRow($index)">{{ formatPreview(row) }}</span>
+              <el-button
+                v-if="expandedRows.has($index)"
+                type="primary"
+                link
+                size="small"
+                @click="toggleRow($index)"
+              >收起</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -173,10 +204,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import { logAPI } from '../api'
 import { ElMessage } from 'element-plus'
-import { Search, Refresh, DataAnalysis, Plus, Delete, Close, QuestionFilled } from '@element-plus/icons-vue'
+import { Search, Refresh, DataAnalysis, Plus, Delete, Close, QuestionFilled, Download } from '@element-plus/icons-vue'
 
 interface Condition {
   key: string
@@ -189,20 +220,25 @@ const form = reactive({
   start_time: 0,
   end_time: 0,
   conditions: null as any,
-  realtime: true, // 默认启用实时查询
+  mobile: '',
+  realtime: true,
 })
 
 const dateRange = ref<[Date, Date] | null>(null)
 const activeShortcut = ref<string | null>(null)
 const conditions = ref<Condition[]>([])
 const loading = ref(false)
+const rawTableData = ref<any[]>([])
 const tableData = ref<any[]>([])
+const rawTotal = ref(0)
 const total = ref(0)
 const pagination = reactive({
   page: 1,
   page_size: 50,
 })
 const features = ref<any[]>([])
+const fieldPaths = ref<string[]>([])
+const expandedRows = reactive(new Set<number>())
 
 const timeShortcuts = [
   { label: '最近1小时', hours: 1 },
@@ -228,7 +264,28 @@ onMounted(async () => {
   } catch (err) {
     ElMessage.error('加载数据失败')
   }
+  loadFieldPaths()
 })
+
+const loadFieldPaths = async () => {
+  try {
+    const res: any = await logAPI.getFieldPaths()
+    if (res.code === 0) {
+      fieldPaths.value = res.data
+    }
+  } catch {
+    // ignore
+  }
+}
+
+const queryFieldPaths = (query: string, cb: (results: { value: string }[]) => void) => {
+  const q = query.toLowerCase()
+  const results = fieldPaths.value
+    .filter(p => !q || p.toLowerCase().includes(q))
+    .slice(0, 20)
+    .map(p => ({ value: p }))
+  cb(results)
+}
 
 const applyTimeShortcut = (shortcut: { label: string; hours: number }) => {
   activeShortcut.value = shortcut.label
@@ -247,11 +304,53 @@ const addCondition = () => {
 
 const removeCondition = (index: number) => {
   conditions.value.splice(index, 1)
+  applyClientFilter()
 }
 
 const clearConditions = () => {
   conditions.value = []
+  applyClientFilter()
 }
+
+// 通过点号路径获取嵌套字段值，如 "sender.openid"
+const resolveNestedValue = (data: any, path: string): any => {
+  const parts = path.split('.')
+  let current: any = data
+  for (const part of parts) {
+    if (current == null || typeof current !== 'object') return null
+    current = current[part]
+  }
+  return current
+}
+
+const matchCondition = (row: any, cond: Condition): boolean => {
+  if (!cond.key || !cond.value) return true
+  const value = resolveNestedValue(row, cond.key)
+  if (value == null) return false
+  const valStr = String(value).toLowerCase()
+  const expStr = cond.value.toLowerCase()
+  if (cond.operator === '=') {
+    return valStr === expStr
+  }
+  return valStr.includes(expStr)
+}
+
+const applyClientFilter = () => {
+  const validConds = conditions.value.filter(c => c.key && c.value)
+  if (validConds.length === 0 || rawTableData.value.length === 0) {
+    tableData.value = rawTableData.value
+    total.value = rawTotal.value
+    return
+  }
+  tableData.value = rawTableData.value.filter(row =>
+    validConds.every(cond => matchCondition(row, cond))
+  )
+  total.value = tableData.value.length
+}
+
+watch(conditions, () => {
+  applyClientFilter()
+}, { deep: true })
 
 const buildConditions = () => {
   if (conditions.value.length === 0) return null
@@ -259,10 +358,9 @@ const buildConditions = () => {
   const result: any = {}
   for (const condition of conditions.value) {
     if (condition.key && condition.value) {
-      if (condition.operator === 'like') {
-        result[condition.key] = condition.value
-      } else {
-        result[condition.key] = condition.value
+      result[condition.key] = {
+        value: condition.value,
+        operator: condition.operator,
       }
     }
   }
@@ -291,8 +389,9 @@ const handleQuery = async () => {
       page_size: pagination.page_size,
     })
     if (res.code === 0) {
-      tableData.value = res.data.data
-      total.value = res.data.total
+      rawTableData.value = res.data.data
+      rawTotal.value = res.data.total
+      applyClientFilter()
     } else {
       ElMessage.error(res.msg || '查询失败')
     }
@@ -306,17 +405,103 @@ const handleQuery = async () => {
 const handleReset = () => {
   form.feature_ids = []
   form.conditions = null
+  form.mobile = ''
   conditions.value = []
   activeShortcut.value = null
+  dateRange.value = null
+  rawTableData.value = []
   tableData.value = []
+  rawTotal.value = 0
   total.value = 0
   pagination.page = 1
   pagination.page_size = 50
 }
 
+// 常用关键字段，展示时置顶
+const priorityKeys = ['openid', 'msg_type', 'chat_type', 'sender', 'roomname', 'tolist', 'content']
+
+const isUnixTimestamp = (key: string, val: any): boolean => {
+  if (typeof val !== 'number') return false
+  if (!key.endsWith('_time') && !key.endsWith('time') && key !== 'log_time') return false
+  return val > 1_000_000_000 && val < 2_000_000_000
+}
+
+const formatTimestamp = (val: number): string => {
+  const d = new Date(val * 1000)
+  return d.toISOString().replace('T', ' ').slice(0, 19)
+}
+
+const formatValue = (key: string, val: any): any => {
+  if (isUnixTimestamp(key, val)) {
+    return `${val} (${formatTimestamp(val)})`
+  }
+  if (typeof val === 'object' && val !== null) {
+    const formatted: any = {}
+    for (const [k, v] of Object.entries(val)) {
+      formatted[k] = formatValue(k, v)
+    }
+    return formatted
+  }
+  return val
+}
+
 const formatData = (row: any) => {
-  const { feature_id, log_date, idc, ...rest } = row
-  return JSON.stringify(rest, null, 2)
+  const { feature_id, log_date, _decrypt_failed, ...rest } = row
+  // 按 key 排序，关键字段置顶
+  const sorted: any = {}
+  for (const k of priorityKeys) {
+    if (k in rest) {
+      sorted[k] = formatValue(k, rest[k])
+      delete rest[k]
+    }
+  }
+  for (const [k, v] of Object.entries(rest)) {
+    sorted[k] = formatValue(k, v)
+  }
+  return JSON.stringify(sorted, null, 2)
+}
+
+const formatPreview = (row: any) => {
+  const { feature_id, log_date, _decrypt_failed, ...rest } = row
+  if (_decrypt_failed) return '[解密失败]'
+  // 优先展示关键字段摘要
+  const parts: string[] = []
+  if (rest.openid) parts.push(`openid:${rest.openid}`)
+  if (rest.msg_type != null) parts.push(`msg:${rest.msg_type}`)
+  if (rest.chat_type != null) parts.push(`chat:${rest.chat_type}`)
+  if (rest.sender?.openid) parts.push(`from:${rest.sender.openid}`)
+  if (parts.length > 0) return parts.join(' | ')
+  const str = JSON.stringify(rest)
+  return str.length > 80 ? str.slice(0, 80) + '...' : str
+}
+
+const toggleRow = (index: number) => {
+  if (expandedRows.has(index)) {
+    expandedRows.delete(index)
+  } else {
+    expandedRows.add(index)
+  }
+}
+
+const handleExport = () => {
+  if (tableData.value.length === 0) return
+
+  const headers = ['FeatureID', '时间', '数据内容']
+  const rows = tableData.value.map(row => [
+    row.feature_id,
+    row.log_date,
+    JSON.stringify((() => { const { feature_id, log_date, _decrypt_failed, ...rest } = row; return rest })()),
+  ])
+
+  const bom = '﻿'
+  const csv = bom + [headers.join(','), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `query_result_${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
 }
 </script>
 
@@ -413,6 +598,24 @@ const formatData = (row: any) => {
   background-color: #f5f7fa;
   border-radius: 4px;
   font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+}
+
+.data-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.data-preview {
+  font-size: 12px;
+  color: #606266;
+  cursor: pointer;
+  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+  word-break: break-all;
+}
+
+.data-preview:hover {
+  color: #409eff;
 }
 
 .pagination {

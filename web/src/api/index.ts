@@ -5,18 +5,30 @@ const api = axios.create({
   timeout: 30000,
 })
 
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token')
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+let reloading = false
 api.interceptors.response.use(
   (response) => response.data,
   (error) => {
-    console.error('API Error:', error)
+    if (error.response?.status === 401 && !reloading) {
+      localStorage.removeItem('token')
+      localStorage.removeItem('username')
+      reloading = true
+      window.location.reload()
+    }
     return Promise.reject(error)
   }
 )
 
-export interface ApiResponse<T = any> {
-  code: number
-  msg: string
-  data: T
+export const authAPI = {
+  login: (data: { username: string; password: string }) => api.post('/auth/login', data),
 }
 
 export const healthAPI = {
@@ -27,10 +39,12 @@ export const logAPI = {
   query: (data: any) => api.post('/logs/query', data),
   getFeatures: () => api.get('/logs/features'),
   getTimeRange: () => api.get('/logs/time-range'),
+  getFieldPaths: () => api.get('/logs/field-paths'),
 }
 
 export const syncAPI = {
   sync: (data: any) => api.post('/logs/sync', data),
+  cancel: () => api.post('/logs/sync/cancel'),
   status: () => api.get('/logs/sync/status'),
 }
 
@@ -38,6 +52,35 @@ export const keyAPI = {
   list: () => api.get('/keys'),
   add: (data: any) => api.post('/keys', data),
   activate: (data: any) => api.put('/keys/activate', data),
+}
+
+export const schedulerAPI = {
+  start: () => api.post('/scheduler/start'),
+  stop: () => api.post('/scheduler/stop'),
+  status: () => api.get('/scheduler/status'),
+  incrementalSync: (data: any) => api.post('/scheduler/sync', data),
+  setInterval: (data: { interval: string }) => api.put('/scheduler/interval', data),
+}
+
+export const contactAPI = {
+  list: (params: any) => api.get('/contacts', { params }),
+  getDepartments: () => api.get('/contacts/departments'),
+  getDeptTree: () => api.get('/contacts/tree'),
+  getDeptMembers: (deptId: number, params: any) => api.get(`/contacts/departments/${deptId}/members`, { params }),
+  getContact: (userId: string) => api.get(`/contacts/${userId}`),
+  sync: () => api.post('/contacts/sync'),
+  syncIncremental: () => api.post('/contacts/sync/incremental'),
+  cancel: () => api.post('/contacts/sync/cancel'),
+  status: () => api.get('/contacts/sync/status'),
+}
+
+export const operationLogAPI = {
+  list: (params: any) => api.get('/operation-logs', { params }),
+  getActions: () => api.get('/operation-logs/actions'),
+}
+
+export const dashboardAPI = {
+  getInactiveUsers: (params?: { range?: string; dept_id?: number; min_inactive_days?: number }) => api.get('/dashboard/inactive-users', { params }),
 }
 
 export default api

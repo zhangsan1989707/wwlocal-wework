@@ -18,4 +18,6 @@ COPY --from=builder /app/keys ./keys
 
 EXPOSE 8080
 
+USER nobody
+
 CMD ["./server"]

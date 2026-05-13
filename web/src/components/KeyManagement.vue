@@ -62,7 +62,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { keyAPI } from '../api'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const keys = ref<any[]>([])
 const form = reactive({
@@ -107,6 +107,16 @@ const handleAdd = async () => {
 }
 
 const handleActivate = async (version: string) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要激活密钥版本 "${version}" 吗？激活后其他版本将被停用。`,
+      '确认激活',
+      { type: 'warning', confirmButtonText: '确定', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+
   try {
     const res: any = await keyAPI.activate({ version })
     if (res.code === 0) {

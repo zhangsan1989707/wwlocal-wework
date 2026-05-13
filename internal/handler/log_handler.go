@@ -21,8 +21,10 @@ type QueryRequest struct {
 	StartTime  int64                  `json:"start_time"`
 	EndTime    int64                  `json:"end_time"`
 	Conditions map[string]interface{} `json:"conditions"`
+	Mobile     string                 `json:"mobile"`
 	Page       int                    `json:"page"`
 	PageSize   int                    `json:"page_size"`
+	Realtime   bool                   `json:"realtime"`
 }
 
 func (h *LogHandler) Query(c echo.Context) error {
@@ -44,8 +46,10 @@ func (h *LogHandler) Query(c echo.Context) error {
 		StartTime:  req.StartTime,
 		EndTime:    req.EndTime,
 		Conditions: req.Conditions,
+		Mobile:     req.Mobile,
 		Page:       req.Page,
 		PageSize:   req.PageSize,
+		Realtime:   req.Realtime,
 	}
 
 	result, err := h.querySvc.Query(queryReq)
@@ -77,4 +81,9 @@ func (h *LogHandler) GetTimeRange(c echo.Context) error {
 		"end_time":   startOfDay.Add(24*time.Hour - time.Second).Unix(),
 		"now":        now.Unix(),
 	})
+}
+
+func (h *LogHandler) GetFieldPaths(c echo.Context) error {
+	paths := h.querySvc.GetFieldPaths()
+	return response.Success(c, paths)
 }

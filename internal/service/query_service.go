@@ -4,8 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"reflect"
-	"strings"
+	"sort"
 	"time"
 
 	"wwlocal-wework/config"
@@ -14,14 +13,15 @@ import (
 )
 
 type QueryService struct {
-	logRepo    *repository.LogRepository
-	weworkSvc  *WeWorkService
-	decryptSvc *DecryptService
-	cfg        *config.Config
+	logRepo     *repository.LogRepository
+	contactRepo *repository.ContactRepository
+	weworkSvc   *WeWorkService
+	decryptSvc  *DecryptService
+	cfg         *config.Config
 }
 
-func NewQueryService(logRepo *repository.LogRepository, weworkSvc *WeWorkService, decryptSvc *DecryptService, cfg *config.Config) *QueryService {
-	return &QueryService{logRepo: logRepo, weworkSvc: weworkSvc, decryptSvc: decryptSvc, cfg: cfg}
+func NewQueryService(logRepo *repository.LogRepository, contactRepo *repository.ContactRepository, weworkSvc *WeWorkService, decryptSvc *DecryptService, cfg *config.Config) *QueryService {
+	return &QueryService{logRepo: logRepo, contactRepo: contactRepo, weworkSvc: weworkSvc, decryptSvc: decryptSvc, cfg: cfg}
 }
 
 type QueryRequest struct {
@@ -29,9 +29,10 @@ type QueryRequest struct {
 	StartTime  int64                  `json:"start_time"`
 	EndTime    int64                  `json:"end_time"`
 	Conditions map[string]interface{} `json:"conditions"`
+	Mobile     string                 `json:"mobile"`
 	Page       int                    `json:"page"`
 	PageSize   int                    `json:"page_size"`
-	Realtime   bool                   `json:"realtime"` // 是否实时查询
+	Realtime   bool                   `json:"realtime"`
 }
 
 type QueryResult struct {
@@ -52,23 +53,30 @@ func (s *QueryService) Query(req *QueryRequest) (*QueryResult, error) {
 		req.PageSize = 1000
 	}
 
+	hasConditions := len(req.Conditions) > 0 || req.Mobile != ""
+
 	var allData []map[string]interface{}
 	var total int64
 
 	for _, featureID := range req.FeatureIDs {
-		// 先从数据库查询
-		entries, count, err := s.logRepo.Query(featureID, req.StartTime, req.EndTime, req.Page, req.PageSize)
+		var entries []model.LogEntry
+		var count int64
+		var err error
+
+		if hasConditions {
+			entries, count, err = s.logRepo.QueryAcrossMonthsWithConditions(featureID, req.StartTime, req.EndTime, req.Conditions, req.Mobile, req.Page, req.PageSize)
+		} else {
+			entries, count, err = s.logRepo.QueryAcrossMonths(featureID, req.StartTime, req.EndTime, req.Page, req.PageSize)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("query feature %d failed: %w", featureID, err)
 		}
 
-		// 如果数据库中没有数据且启用了实时查询，从政务微信 API 查询
 		if count == 0 && req.Realtime {
 			log.Printf("No data in database for feature %d, querying realtime from API", featureID)
 			realtimeEntries, err := s.queryRealtime(featureID, req.StartTime, req.EndTime)
 			if err != nil {
 				log.Printf("Realtime query failed for feature %d: %v", featureID, err)
-				// 实时查询失败不影响整体查询，继续处理其他 feature
 			} else {
 				entries = realtimeEntries
 				count = int64(len(realtimeEntries))
@@ -78,26 +86,16 @@ func (s *QueryService) Query(req *QueryRequest) (*QueryResult, error) {
 		total += count
 
 		for _, entry := range entries {
-			data := s.parseEntry(&entry, req.Conditions)
-			if data != nil {
-				allData = append(allData, data)
-			}
+			allData = append(allData, s.parseEntry(&entry))
 		}
 	}
 
-	// 如果有条件过滤，需要重新计算总数和分页
-	if req.Conditions != nil && len(req.Conditions) > 0 {
-		filtered := make([]map[string]interface{}, 0)
-		for _, data := range allData {
-			if s.matchConditions(data, req.Conditions) {
-				filtered = append(filtered, data)
-			}
-		}
-		allData = filtered
-		total = int64(len(allData))
-	}
+	sort.Slice(allData, func(i, j int) bool {
+		ti, _ := allData[i]["log_time"].(int64)
+		tj, _ := allData[j]["log_time"].(int64)
+		return ti > tj
+	})
 
-	// 应用分页
 	start := (req.Page - 1) * req.PageSize
 	end := start + req.PageSize
 	if start > len(allData) {
@@ -117,7 +115,6 @@ func (s *QueryService) Query(req *QueryRequest) (*QueryResult, error) {
 }
 
 func (s *QueryService) queryRealtime(featureID int, startTime, endTime int64) ([]model.LogEntry, error) {
-	// 从政务微信 API 获取数据
 	logItems, err := s.weworkSvc.GetLogList(featureID, startTime, endTime, 0, 100)
 	if err != nil {
 		return nil, fmt.Errorf("fetch from API failed: %w", err)
@@ -142,16 +139,7 @@ func (s *QueryService) queryRealtime(featureID int, startTime, endTime int64) ([
 	return entries, nil
 }
 
-func (s *QueryService) parseEntry(entry *model.LogEntry, conditions map[string]interface{}) map[string]interface{} {
-	if entry.ParsedJSON == "" {
-		return nil
-	}
-
-	var parsed map[string]interface{}
-	if err := json.Unmarshal([]byte(entry.ParsedJSON), &parsed); err != nil {
-		return nil
-	}
-
+func (s *QueryService) parseEntry(entry *model.LogEntry) map[string]interface{} {
 	result := map[string]interface{}{
 		"id":         entry.ID,
 		"feature_id": entry.FeatureID,
@@ -160,44 +148,22 @@ func (s *QueryService) parseEntry(entry *model.LogEntry, conditions map[string]i
 		"idc":        entry.IDC,
 	}
 
+	if entry.ParsedJSON == "" {
+		result["_decrypt_failed"] = true
+		return result
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(entry.ParsedJSON), &parsed); err != nil {
+		result["_decrypt_failed"] = true
+		return result
+	}
+
 	for k, v := range parsed {
 		result[k] = v
 	}
 
 	return result
-}
-
-func (s *QueryService) matchConditions(data map[string]interface{}, conditions map[string]interface{}) bool {
-	for key, expected := range conditions {
-		if !s.matchField(data, key, expected) {
-			return false
-		}
-	}
-	return true
-}
-
-func (s *QueryService) matchField(data map[string]interface{}, key string, expected interface{}) bool {
-	value, ok := data[key]
-	if !ok {
-		return false
-	}
-
-	switch exp := expected.(type) {
-	case string:
-		valStr, valOk := value.(string)
-		if !valOk {
-			return false
-		}
-		if strings.Contains(strings.ToLower(valStr), strings.ToLower(exp)) {
-			return true
-		}
-	case int, int64, float64:
-		return reflect.DeepEqual(value, exp)
-	default:
-		return value == expected
-	}
-
-	return false
 }
 
 func (s *QueryService) GetFeatureIDs() []int {
@@ -209,4 +175,35 @@ func (s *QueryService) GetFeatureName(featureID int) string {
 		return name
 	}
 	return fmt.Sprintf("未知(%d)", featureID)
+}
+
+func (s *QueryService) GetFieldPaths() []string {
+	samples := s.logRepo.SampleParsedJSON(s.cfg.Features.IDs, 20)
+	pathSet := make(map[string]struct{})
+	for _, sample := range samples {
+		var data map[string]interface{}
+		if err := json.Unmarshal([]byte(sample), &data); err != nil {
+			continue
+		}
+		extractPaths(data, "", pathSet)
+	}
+	paths := make([]string, 0, len(pathSet))
+	for p := range pathSet {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func extractPaths(data map[string]interface{}, prefix string, result map[string]struct{}) {
+	for key, val := range data {
+		path := key
+		if prefix != "" {
+			path = prefix + "." + key
+		}
+		result[path] = struct{}{}
+		if nested, ok := val.(map[string]interface{}); ok {
+			extractPaths(nested, path, result)
+		}
+	}
 }

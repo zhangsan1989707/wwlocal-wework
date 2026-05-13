@@ -21,15 +21,29 @@ func Success(c echo.Context, data interface{}) error {
 }
 
 func Error(c echo.Context, code int, msg string) error {
-	return c.JSON(http.StatusOK, Response{
+	c.Set("op_error_msg", msg)
+	httpStatus := codeToHTTPStatus(code)
+	return c.JSON(httpStatus, Response{
 		Code: code,
 		Msg:  msg,
 	})
 }
 
 func ErrorWithStatus(c echo.Context, status int, code int, msg string) error {
+	c.Set("op_error_msg", msg)
 	return c.JSON(status, Response{
 		Code: code,
 		Msg:  msg,
 	})
+}
+
+func codeToHTTPStatus(code int) int {
+	switch {
+	case code >= 400 && code < 500:
+		return code
+	case code >= 500:
+		return code
+	default:
+		return http.StatusOK
+	}
 }
