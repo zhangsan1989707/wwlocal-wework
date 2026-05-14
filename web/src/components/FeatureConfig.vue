@@ -1,0 +1,148 @@
+<template>
+  <div class="feature-config">
+    <el-card>
+      <template #header>
+        <div class="card-header">
+          <span class="card-title">数据类型管理</span>
+          <el-button type="primary" @click="handleSave" :loading="saving" size="small">
+            保存更改
+          </el-button>
+        </div>
+      </template>
+
+      <el-table :data="features" stripe size="small" v-loading="loading">
+        <el-table-column prop="feature_id" label="Feature ID" width="120" align="center" />
+        <el-table-column prop="name" label="名称" min-width="150" />
+        <el-table-column label="启用同步" width="100" align="center">
+          <template #default="{ row }">
+            <el-switch v-model="row.enabled" />
+          </template>
+        </el-table-column>
+        <el-table-column label="上次同步" width="170">
+          <template #default="{ row }">{{ formatTime(row.last_sync_at) }}</template>
+        </el-table-column>
+        <el-table-column label="已同步总数" width="120" align="center">
+          <template #default="{ row }">
+            <span>{{ row.total_synced > 0 ? formatNumber(row.total_synced) : '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="同步进度" width="120">
+          <template #default="{ row }">
+            <span v-if="row.last_log_time > 0" class="time-text">{{ formatUnixTime(row.last_log_time) }}</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <div class="actions">
+        <el-button @click="handleEnableAll" size="small">全部启用</el-button>
+        <el-button @click="handleDisableAll" size="small">全部禁用</el-button>
+      </div>
+    </el-card>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, onMounted } from 'vue'
+import { syncFeatureAPI } from '../api'
+import { ElMessage } from 'element-plus'
+
+const features = ref<any[]>([])
+const loading = ref(false)
+const saving = ref(false)
+
+onMounted(async () => {
+  await loadFeatures()
+})
+
+const loadFeatures = async () => {
+  loading.value = true
+  try {
+    const res: any = await syncFeatureAPI.list()
+    if (res.code === 0) {
+      features.value = res.data || []
+    }
+  } catch (err) {
+    console.error(err)
+  } finally {
+    loading.value = false
+  }
+}
+
+const handleSave = async () => {
+  saving.value = true
+  try {
+    const data = features.value.map(f => ({
+      feature_id: f.feature_id,
+      enabled: f.enabled,
+    }))
+    const res: any = await syncFeatureAPI.update({ features: data })
+    if (res.code === 0) {
+      ElMessage.success('保存成功')
+      features.value = res.data || []
+    } else {
+      ElMessage.error(res.msg || '保存失败')
+    }
+  } catch (err: any) {
+    ElMessage.error(err.message || '保存失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+const handleEnableAll = () => {
+  features.value.forEach(f => { f.enabled = true })
+}
+
+const handleDisableAll = () => {
+  features.value.forEach(f => { f.enabled = false })
+}
+
+const formatTime = (timeStr: string) => {
+  if (!timeStr || timeStr === '0001-01-01T00:00:00Z') return '-'
+  return new Date(timeStr).toLocaleString('zh-CN')
+}
+
+const formatUnixTime = (ts: number) => {
+  return new Date(ts * 1000).toLocaleString('zh-CN')
+}
+
+const formatNumber = (n: number) => {
+  if (n >= 10000) return (n / 10000).toFixed(1) + '万'
+  return n.toLocaleString()
+}
+</script>
+
+<style scoped>
+.feature-config {
+  padding: 0;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.actions {
+  margin-top: 16px;
+  display: flex;
+  gap: 8px;
+}
+
+.time-text {
+  font-size: 12px;
+  color: #909399;
+}
+
+:deep(.el-card__header) {
+  padding: 12px 20px;
+  border-bottom: 1px solid #ebeef5;
+}
+</style>

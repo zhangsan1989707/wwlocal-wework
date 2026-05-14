@@ -205,7 +205,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, watch } from 'vue'
-import { logAPI } from '../api'
+import { logAPI, syncFeatureAPI, contactAPI } from '../api'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh, DataAnalysis, Plus, Delete, Close, QuestionFilled, Download } from '@element-plus/icons-vue'
 
@@ -239,6 +239,7 @@ const pagination = reactive({
 const features = ref<any[]>([])
 const fieldPaths = ref<string[]>([])
 const expandedRows = reactive(new Set<number>())
+const contactNames = ref<Record<string, string>>({})
 
 const timeShortcuts = [
   { label: '最近1小时', hours: 1 },
@@ -250,9 +251,9 @@ const timeShortcuts = [
 
 onMounted(async () => {
   try {
-    const res: any = await logAPI.getFeatures()
+    const res: any = await syncFeatureAPI.list()
     if (res.code === 0) {
-      features.value = res.data
+      features.value = (res.data || []).map((f: any) => ({ id: f.feature_id, name: f.name }))
     }
     const timeRes: any = await logAPI.getTimeRange()
     if (timeRes.code === 0) {
@@ -367,6 +368,33 @@ const buildConditions = () => {
   return Object.keys(result).length > 0 ? result : null
 }
 
+const extractOpenids = (data: any[]): string[] => {
+  const ids = new Set<string>()
+  for (const row of data) {
+    if (row.openid) ids.add(row.openid)
+    if (row.sender?.openid) ids.add(row.sender.openid)
+    if (row.tolist) {
+      for (const u of row.tolist) {
+        if (u?.userid) ids.add(u.userid)
+      }
+    }
+  }
+  return Array.from(ids)
+}
+
+const fetchContactNames = async (data: any[]) => {
+  const ids = extractOpenids(data)
+  if (ids.length === 0) return
+  try {
+    const res: any = await contactAPI.getNames(ids)
+    if (res.code === 0 && res.data) {
+      contactNames.value = { ...contactNames.value, ...res.data }
+    }
+  } catch {
+    // ignore
+  }
+}
+
 const handleQuery = async () => {
   if (form.feature_ids.length === 0) {
     ElMessage.warning('请选择至少一个数据类型')
@@ -392,6 +420,7 @@ const handleQuery = async () => {
       rawTableData.value = res.data.data
       rawTotal.value = res.data.total
       applyClientFilter()
+      fetchContactNames(res.data.data)
     } else {
       ElMessage.error(res.msg || '查询失败')
     }
@@ -464,12 +493,17 @@ const formatData = (row: any) => {
 const formatPreview = (row: any) => {
   const { feature_id, log_date, _decrypt_failed, ...rest } = row
   if (_decrypt_failed) return '[解密失败]'
-  // 优先展示关键字段摘要
   const parts: string[] = []
-  if (rest.openid) parts.push(`openid:${rest.openid}`)
+  if (rest.openid) {
+    const name = contactNames.value[rest.openid]
+    parts.push(name ? `${rest.openid}(${name})` : rest.openid)
+  }
   if (rest.msg_type != null) parts.push(`msg:${rest.msg_type}`)
   if (rest.chat_type != null) parts.push(`chat:${rest.chat_type}`)
-  if (rest.sender?.openid) parts.push(`from:${rest.sender.openid}`)
+  if (rest.sender?.openid) {
+    const name = contactNames.value[rest.sender.openid]
+    parts.push(name ? `from:${rest.sender.openid}(${name})` : `from:${rest.sender.openid}`)
+  }
   if (parts.length > 0) return parts.join(' | ')
   const str = JSON.stringify(rest)
   return str.length > 80 ? str.slice(0, 80) + '...' : str

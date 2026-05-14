@@ -16,6 +16,7 @@ import (
 
 	"wwlocal-wework/config"
 	"wwlocal-wework/internal/handler"
+	"wwlocal-wework/internal/model"
 	"wwlocal-wework/internal/repository"
 	"wwlocal-wework/internal/router"
 	"wwlocal-wework/internal/service"
@@ -57,16 +58,38 @@ func main() {
 		log.Fatalf("migrate contact repository failed: %v", err)
 	}
 
+	syncFeatureRepo := repository.NewSyncFeatureRepository(db)
+	if err := syncFeatureRepo.AutoMigrate(); err != nil {
+		log.Fatalf("migrate sync feature repository failed: %v", err)
+	}
+	// 从 config.yaml 初始化 feature 列表到数据库
+	var initFeatures []model.SyncFeature
+	for _, id := range cfg.Features.IDs {
+		initFeatures = append(initFeatures, model.SyncFeature{
+			FeatureID: id,
+			Name:      cfg.Features.Names[id],
+			Enabled:   true,
+		})
+	}
+	if err := syncFeatureRepo.BatchUpsert(initFeatures); err != nil {
+		log.Fatalf("init sync features failed: %v", err)
+	}
+
+	syncHistoryRepo := repository.NewSyncHistoryRepository(db)
+	if err := syncHistoryRepo.AutoMigrate(); err != nil {
+		log.Fatalf("migrate sync history repository failed: %v", err)
+	}
+
 	weworkSvc := service.NewWeWorkService(&cfg.WeWork)
 	decryptSvc := service.NewDecryptService(keyRepo)
-	syncSvc := service.NewSyncService(weworkSvc, decryptSvc, logRepo, keyRepo, syncStateRepo, cfg)
-	querySvc := service.NewQueryService(logRepo, contactRepo, weworkSvc, decryptSvc, cfg)
+	syncSvc := service.NewSyncService(weworkSvc, decryptSvc, logRepo, keyRepo, syncStateRepo, syncHistoryRepo, syncFeatureRepo, cfg)
+	querySvc := service.NewQueryService(logRepo, contactRepo, weworkSvc, decryptSvc, syncFeatureRepo, cfg)
 	keySvc := service.NewKeyService(keyRepo)
 
 	// 启动时校验 sync_state 与实际数据是否一致
 	syncSvc.VerifySyncState()
 
-	healthHandler := handler.NewHealthHandler()
+	healthHandler := handler.NewHealthHandler(db)
 	authHandler := handler.NewAuthHandler(&cfg.Auth)
 	logHandler := handler.NewLogHandler(querySvc)
 	keyHandler := handler.NewKeyHandler(keySvc)
@@ -82,7 +105,7 @@ func main() {
 	schedulerHandler := handler.NewSchedulerHandler(schedulerSvc, syncSvc)
 
 	contactSvc := service.NewContactService(&cfg.WeWork)
-	contactSyncSvc := service.NewContactSyncService(contactSvc, contactRepo)
+	contactSyncSvc := service.NewContactSyncService(contactSvc, contactRepo, syncHistoryRepo)
 	contactHandler := handler.NewContactHandler(contactSyncSvc, contactRepo)
 
 	operationLogRepo := repository.NewOperationLogRepository(db)
@@ -93,12 +116,14 @@ func main() {
 	operationLogHandler := handler.NewOperationLogHandler(operationLogSvc)
 
 	dashboardHandler := handler.NewDashboardHandler(db, logRepo, contactRepo, cfg)
+	syncHistoryHandler := handler.NewSyncHistoryHandler(syncHistoryRepo)
+	syncFeatureHandler := handler.NewSyncFeatureHandler(syncFeatureRepo)
 
 	if cfg.Scheduler.Enabled {
-		schedulerSvc.Start()
+		schedulerSvc.Start(interval)
 	}
 
-	r := router.NewRouter(healthHandler, authHandler, logHandler, keyHandler, syncHandler, schedulerHandler, contactHandler, operationLogHandler, dashboardHandler, operationLogSvc, cfg.Auth.JWTSecret)
+	r := router.NewRouter(healthHandler, authHandler, logHandler, keyHandler, syncHandler, schedulerHandler, contactHandler, operationLogHandler, dashboardHandler, syncHistoryHandler, syncFeatureHandler, operationLogSvc, cfg.Auth.JWTSecret)
 
 	e := echo.New()
 	r.Setup(e)

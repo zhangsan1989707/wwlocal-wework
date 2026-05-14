@@ -18,11 +18,13 @@ type Router struct {
 	contactHandler       *handler.ContactHandler
 	operationLogHandler  *handler.OperationLogHandler
 	dashboardHandler     *handler.DashboardHandler
+	syncHistoryHandler   *handler.SyncHistoryHandler
+	syncFeatureHandler   *handler.SyncFeatureHandler
 	operationLogSvc      *service.OperationLogService
 	jwtSecret            string
 }
 
-func NewRouter(healthHandler *handler.HealthHandler, authHandler *handler.AuthHandler, logHandler *handler.LogHandler, keyHandler *handler.KeyHandler, syncHandler *handler.SyncHandler, schedulerHandler *handler.SchedulerHandler, contactHandler *handler.ContactHandler, operationLogHandler *handler.OperationLogHandler, dashboardHandler *handler.DashboardHandler, operationLogSvc *service.OperationLogService, jwtSecret string) *Router {
+func NewRouter(healthHandler *handler.HealthHandler, authHandler *handler.AuthHandler, logHandler *handler.LogHandler, keyHandler *handler.KeyHandler, syncHandler *handler.SyncHandler, schedulerHandler *handler.SchedulerHandler, contactHandler *handler.ContactHandler, operationLogHandler *handler.OperationLogHandler, dashboardHandler *handler.DashboardHandler, syncHistoryHandler *handler.SyncHistoryHandler, syncFeatureHandler *handler.SyncFeatureHandler, operationLogSvc *service.OperationLogService, jwtSecret string) *Router {
 	return &Router{
 		healthHandler:       healthHandler,
 		authHandler:         authHandler,
@@ -33,6 +35,8 @@ func NewRouter(healthHandler *handler.HealthHandler, authHandler *handler.AuthHa
 		contactHandler:      contactHandler,
 		operationLogHandler: operationLogHandler,
 		dashboardHandler:    dashboardHandler,
+		syncHistoryHandler:  syncHistoryHandler,
+		syncFeatureHandler:  syncFeatureHandler,
 		operationLogSvc:     operationLogSvc,
 		jwtSecret:           jwtSecret,
 	}
@@ -86,6 +90,17 @@ func (r *Router) Setup(e *echo.Echo) {
 			scheduler.PUT("/interval", r.schedulerHandler.SetInterval)
 		}
 
+		syncHistory := api.Group("/sync-history")
+		{
+			syncHistory.GET("", r.syncHistoryHandler.List)
+		}
+
+		syncFeatures := api.Group("/sync-features")
+		{
+			syncFeatures.GET("", r.syncFeatureHandler.List)
+			syncFeatures.PUT("", r.syncFeatureHandler.Update)
+		}
+
 		contacts := api.Group("/contacts")
 		{
 			contacts.GET("/tree", r.contactHandler.GetDeptTree)
@@ -96,6 +111,7 @@ func (r *Router) Setup(e *echo.Echo) {
 			contacts.POST("/sync/incremental", r.contactHandler.SyncIncremental)
 			contacts.POST("/sync/cancel", r.contactHandler.Cancel)
 			contacts.GET("/sync/status", r.contactHandler.Status)
+			contacts.POST("/names", r.contactHandler.GetNames)
 			contacts.GET("/:userId", r.contactHandler.GetContact)
 		}
 

@@ -68,6 +68,9 @@ func (h *ContactHandler) Sync(c echo.Context) error {
 				log.Printf("contact sync goroutine panic: %v\n%s", r, debug.Stack())
 			}
 		}()
+		if !h.contactSyncSvc.TryStartRunning() {
+			return
+		}
 		h.contactSyncSvc.SyncContactsFull()
 	}()
 
@@ -88,6 +91,9 @@ func (h *ContactHandler) SyncIncremental(c echo.Context) error {
 				log.Printf("contact incremental sync goroutine panic: %v\n%s", r, debug.Stack())
 			}
 		}()
+		if !h.contactSyncSvc.TryStartRunning() {
+			return
+		}
 		h.contactSyncSvc.SyncContactsIncremental()
 	}()
 
@@ -169,6 +175,28 @@ func (h *ContactHandler) GetDeptMembers(c echo.Context) error {
 		"page_size": pageSize,
 		"data":      contacts,
 	})
+}
+
+type GetNamesRequest struct {
+	UserIDs []string `json:"user_ids"`
+}
+
+func (h *ContactHandler) GetNames(c echo.Context) error {
+	var req GetNamesRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, 400, "invalid request body")
+	}
+	if len(req.UserIDs) == 0 {
+		return response.Success(c, map[string]string{})
+	}
+	if len(req.UserIDs) > 200 {
+		return response.Error(c, 400, "too many user_ids (max 200)")
+	}
+	names, err := h.contactRepo.GetNamesByUserIDs(req.UserIDs)
+	if err != nil {
+		return response.Error(c, 500, "query contact names failed")
+	}
+	return response.Success(c, names)
 }
 
 func (h *ContactHandler) GetContact(c echo.Context) error {

@@ -20,8 +20,20 @@ func NewSchedulerHandler(schedulerSvc *service.SchedulerService, syncSvc *servic
 	return &SchedulerHandler{schedulerSvc: schedulerSvc, syncSvc: syncSvc}
 }
 
+type StartSchedulerRequest struct {
+	StartDelay string `json:"start_delay"` // "10m", "30m", "1h"
+}
+
 func (h *SchedulerHandler) Start(c echo.Context) error {
-	h.schedulerSvc.Start()
+	var req StartSchedulerRequest
+	if err := c.Bind(&req); err == nil && req.StartDelay != "" {
+		d, err := time.ParseDuration(req.StartDelay)
+		if err == nil && d >= time.Minute {
+			h.schedulerSvc.Start(d)
+			return response.Success(c, h.schedulerSvc.GetStatus())
+		}
+	}
+	h.schedulerSvc.Start(h.schedulerSvc.GetInterval())
 	return response.Success(c, h.schedulerSvc.GetStatus())
 }
 
@@ -55,6 +67,9 @@ func (h *SchedulerHandler) IncrementalSync(c echo.Context) error {
 				log.Printf("incremental sync goroutine panic: %v\n%s", r, debug.Stack())
 			}
 		}()
+		if !h.syncSvc.TryStartRunning() {
+			return
+		}
 		if req.SyncAll {
 			h.syncSvc.SyncAllFeaturesIncremental()
 		} else if len(req.FeatureIDs) > 0 {

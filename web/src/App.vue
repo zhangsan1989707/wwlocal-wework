@@ -25,6 +25,9 @@
             <el-menu-item index="sync">
               <span>数据同步</span>
             </el-menu-item>
+            <el-menu-item index="features">
+              <span>数据类型</span>
+            </el-menu-item>
             <el-menu-item index="keys">
               <span>密钥管理</span>
             </el-menu-item>
@@ -40,6 +43,7 @@
           <Dashboard v-if="activeMenu === 'dashboard'" />
           <LogQuery v-else-if="activeMenu === 'query'" />
           <DataSync v-else-if="activeMenu === 'sync'" />
+          <FeatureConfig v-else-if="activeMenu === 'features'" />
           <KeyManagement v-else-if="activeMenu === 'keys'" />
           <ContactList v-else-if="activeMenu === 'contacts'" />
           <OperationLog v-else-if="activeMenu === 'opslog'" />
@@ -58,6 +62,7 @@ import DataSync from './components/DataSync.vue'
 import KeyManagement from './components/KeyManagement.vue'
 import ContactList from './components/ContactList.vue'
 import OperationLog from './components/OperationLog.vue'
+import FeatureConfig from './components/FeatureConfig.vue'
 
 const activeMenu = ref('dashboard')
 const isLoggedIn = ref(!!localStorage.getItem('token'))

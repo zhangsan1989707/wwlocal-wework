@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -11,11 +12,12 @@ import (
 )
 
 type ContactSyncService struct {
-	contactSvc  *ContactService
-	contactRepo *repository.ContactRepository
-	mu          sync.Mutex
-	status      *ContactSyncStatus
-	cancelCh    chan struct{}
+	contactSvc      *ContactService
+	contactRepo     *repository.ContactRepository
+	syncHistoryRepo *repository.SyncHistoryRepository
+	mu              sync.Mutex
+	status          *ContactSyncStatus
+	cancelCh        chan struct{}
 }
 
 type ContactSyncStatus struct {
@@ -29,25 +31,17 @@ type ContactSyncStatus struct {
 	LastSync    time.Time `json:"last_sync,omitempty"`
 }
 
-func NewContactSyncService(contactSvc *ContactService, contactRepo *repository.ContactRepository) *ContactSyncService {
+func NewContactSyncService(contactSvc *ContactService, contactRepo *repository.ContactRepository, syncHistoryRepo *repository.SyncHistoryRepository) *ContactSyncService {
 	return &ContactSyncService{
-		contactSvc:  contactSvc,
-		contactRepo: contactRepo,
-		status:      &ContactSyncStatus{},
+		contactSvc:      contactSvc,
+		contactRepo:     contactRepo,
+		syncHistoryRepo: syncHistoryRepo,
+		status:          &ContactSyncStatus{},
 	}
 }
 
 func (s *ContactSyncService) SyncContactsFull() {
-	s.mu.Lock()
-	s.status.Running = true
-	s.status.Phase = "departments"
-	s.status.Progress = 0
-	s.status.Total = 0
-	s.status.NewCount = 0
-	s.status.FailedCount = 0
-	s.status.ErrorMsg = ""
-	s.cancelCh = make(chan struct{})
-	s.mu.Unlock()
+	startTime := time.Now()
 
 	finish := func(phase string, errMsg string) {
 		s.mu.Lock()
@@ -81,22 +75,30 @@ func (s *ContactSyncService) SyncContactsFull() {
 	s.status.Phase = "members"
 	s.mu.Unlock()
 
-	// 2. 拉取所有成员简略列表 — 尝试各根部门直到成功
+	// 2. 拉取所有根部门的成员简略列表（合并去重）
 	var simpleUsers []model.SimpleUser
-	var simpleErr error
+	userSeen := make(map[string]bool)
+	var lastErr error
 	for _, d := range depts {
 		if d.ParentID == 0 {
-			simpleUsers, simpleErr = s.contactSvc.GetSimpleUserList(d.ID, 1)
-			if simpleErr == nil {
-				log.Printf("contact sync: got %d users from department %d (%s)", len(simpleUsers), d.ID, d.Name)
-				break
+			users, err := s.contactSvc.GetSimpleUserList(d.ID, 1)
+			if err != nil {
+				log.Printf("contact sync: department %d (%s) failed: %v", d.ID, d.Name, err)
+				lastErr = err
+				continue
 			}
-			log.Printf("contact sync: department %d (%s) failed: %v", d.ID, d.Name, simpleErr)
+			log.Printf("contact sync: got %d users from department %d (%s)", len(users), d.ID, d.Name)
+			for _, u := range users {
+				if !userSeen[u.UserID] {
+					userSeen[u.UserID] = true
+					simpleUsers = append(simpleUsers, u)
+				}
+			}
 		}
 	}
-	if simpleErr != nil {
+	if len(simpleUsers) == 0 && lastErr != nil {
 		log.Printf("contact sync: all root departments failed")
-		finish("members", fmt.Sprintf("拉取成员列表失败: %v", simpleErr))
+		finish("members", fmt.Sprintf("拉取成员列表失败: %v", lastErr))
 		return
 	}
 
@@ -149,20 +151,12 @@ func (s *ContactSyncService) SyncContactsFull() {
 	}
 
 	log.Printf("contact sync: completed. new=%d, failed=%d", s.status.NewCount, s.status.FailedCount)
+	s.saveContactSyncHistory("full", startTime, "")
 	finish("", "")
 }
 
 func (s *ContactSyncService) SyncContactsIncremental() {
-	s.mu.Lock()
-	s.status.Running = true
-	s.status.Phase = "departments"
-	s.status.Progress = 0
-	s.status.Total = 0
-	s.status.NewCount = 0
-	s.status.FailedCount = 0
-	s.status.ErrorMsg = ""
-	s.cancelCh = make(chan struct{})
-	s.mu.Unlock()
+	startTime := time.Now()
 
 	finish := func(errMsg string) {
 		s.mu.Lock()
@@ -194,22 +188,30 @@ func (s *ContactSyncService) SyncContactsIncremental() {
 	s.status.Phase = "members"
 	s.mu.Unlock()
 
-	// 2. 拉取所有成员简略列表 — 尝试各根部门直到成功
+	// 2. 拉取所有根部门的成员简略列表（合并去重）
 	var simpleUsers []model.SimpleUser
-	var simpleErr error
+	userSeen := make(map[string]bool)
+	var lastErr error
 	for _, d := range depts {
 		if d.ParentID == 0 {
-			simpleUsers, simpleErr = s.contactSvc.GetSimpleUserList(d.ID, 1)
-			if simpleErr == nil {
-				log.Printf("contact incremental sync: got %d users from department %d (%s)", len(simpleUsers), d.ID, d.Name)
-				break
+			users, err := s.contactSvc.GetSimpleUserList(d.ID, 1)
+			if err != nil {
+				log.Printf("contact incremental sync: department %d (%s) failed: %v", d.ID, d.Name, err)
+				lastErr = err
+				continue
 			}
-			log.Printf("contact incremental sync: department %d (%s) failed: %v", d.ID, d.Name, simpleErr)
+			log.Printf("contact incremental sync: got %d users from department %d (%s)", len(users), d.ID, d.Name)
+			for _, u := range users {
+				if !userSeen[u.UserID] {
+					userSeen[u.UserID] = true
+					simpleUsers = append(simpleUsers, u)
+				}
+			}
 		}
 	}
-	if simpleErr != nil {
+	if len(simpleUsers) == 0 && lastErr != nil {
 		log.Printf("contact incremental sync: all root departments failed")
-		finish(fmt.Sprintf("拉取成员列表失败: %v", simpleErr))
+		finish(fmt.Sprintf("拉取成员列表失败: %v", lastErr))
 		return
 	}
 
@@ -268,6 +270,7 @@ func (s *ContactSyncService) SyncContactsIncremental() {
 	}
 
 	log.Printf("contact incremental sync: completed. new=%d, failed=%d", s.status.NewCount, s.status.FailedCount)
+	s.saveContactSyncHistory("incremental", startTime, "")
 	finish("")
 }
 
@@ -286,9 +289,58 @@ func (s *ContactSyncService) IsRunning() bool {
 	return s.status.Running
 }
 
+// TryStartRunning 原子性地检查并设置运行状态
+func (s *ContactSyncService) TryStartRunning() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.status.Running {
+		return false
+	}
+	s.status.Running = true
+	s.status.Phase = "departments"
+	s.status.Progress = 0
+	s.status.Total = 0
+	s.status.NewCount = 0
+	s.status.FailedCount = 0
+	s.status.ErrorMsg = ""
+	s.cancelCh = make(chan struct{})
+	return true
+}
+
 func (s *ContactSyncService) GetStatus() *ContactSyncStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	copy := *s.status
 	return &copy
+}
+
+func (s *ContactSyncService) saveContactSyncHistory(trigger string, startTime time.Time, errMsg string) {
+	s.mu.Lock()
+	newCount := s.status.NewCount
+	failedCount := s.status.FailedCount
+	total := s.status.Total
+	s.mu.Unlock()
+
+	detailsMap := map[string]interface{}{
+		"new_count":    newCount,
+		"failed_count": failedCount,
+		"total_users":  total,
+	}
+	detailsJSON, _ := json.Marshal(detailsMap)
+
+	history := &model.SyncHistory{
+		SyncType:   "contact",
+		Trigger:    trigger,
+		StartTime:  startTime,
+		EndTime:    time.Now(),
+		DurationMs: time.Since(startTime).Milliseconds(),
+		Total:      total,
+		Succeeded:  newCount,
+		Failed:     failedCount,
+		Details:    string(detailsJSON),
+		ErrorMsg:   errMsg,
+	}
+	if err := s.syncHistoryRepo.Create(history); err != nil {
+		log.Printf("save contact sync history failed: %v", err)
+	}
 }

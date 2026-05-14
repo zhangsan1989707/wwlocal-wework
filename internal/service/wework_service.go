@@ -83,6 +83,7 @@ func (s *WeWorkService) GetLogList(featureID int, startTime, endTime int64, star
 		return nil, err
 	}
 
+	log.Printf("GetLogList: feature=%d, start=%d, end=%d, index=%d, limit=%d", featureID, startTime, endTime, startIndex, limit)
 	path := "/cgi-bin/corp/get_log_list"
 	reqBody := map[string]interface{}{
 		"feature_id":  featureID,
@@ -110,6 +111,8 @@ func (s *WeWorkService) GetLogList(featureID int, startTime, endTime int64, star
 	if err := json.Unmarshal(resp, &result); err != nil {
 		return nil, fmt.Errorf("parse log list response failed: %w", err)
 	}
+
+	log.Printf("GetLogList: feature=%d, index=%d, got %d items", featureID, startIndex, len(result.LogList))
 
 	if result.ErrCode != 0 {
 		log.Printf("get log list error: feature=%d, errcode=%d, errmsg=%s", featureID, result.ErrCode, result.ErrMsg)

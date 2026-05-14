@@ -13,15 +13,16 @@ import (
 )
 
 type QueryService struct {
-	logRepo     *repository.LogRepository
-	contactRepo *repository.ContactRepository
-	weworkSvc   *WeWorkService
-	decryptSvc  *DecryptService
-	cfg         *config.Config
+	logRepo         *repository.LogRepository
+	contactRepo     *repository.ContactRepository
+	weworkSvc       *WeWorkService
+	decryptSvc      *DecryptService
+	syncFeatureRepo *repository.SyncFeatureRepository
+	cfg             *config.Config
 }
 
-func NewQueryService(logRepo *repository.LogRepository, contactRepo *repository.ContactRepository, weworkSvc *WeWorkService, decryptSvc *DecryptService, cfg *config.Config) *QueryService {
-	return &QueryService{logRepo: logRepo, contactRepo: contactRepo, weworkSvc: weworkSvc, decryptSvc: decryptSvc, cfg: cfg}
+func NewQueryService(logRepo *repository.LogRepository, contactRepo *repository.ContactRepository, weworkSvc *WeWorkService, decryptSvc *DecryptService, syncFeatureRepo *repository.SyncFeatureRepository, cfg *config.Config) *QueryService {
+	return &QueryService{logRepo: logRepo, contactRepo: contactRepo, weworkSvc: weworkSvc, decryptSvc: decryptSvc, syncFeatureRepo: syncFeatureRepo, cfg: cfg}
 }
 
 type QueryRequest struct {
@@ -167,7 +168,15 @@ func (s *QueryService) parseEntry(entry *model.LogEntry) map[string]interface{} 
 }
 
 func (s *QueryService) GetFeatureIDs() []int {
-	return s.cfg.Features.IDs
+	ids, err := s.syncFeatureRepo.GetEnabledIDs()
+	if err != nil {
+		log.Printf("get feature ids failed: %v", err)
+		return s.cfg.Features.IDs
+	}
+	if len(ids) == 0 {
+		return s.cfg.Features.IDs
+	}
+	return ids
 }
 
 func (s *QueryService) GetFeatureName(featureID int) string {
@@ -178,7 +187,7 @@ func (s *QueryService) GetFeatureName(featureID int) string {
 }
 
 func (s *QueryService) GetFieldPaths() []string {
-	samples := s.logRepo.SampleParsedJSON(s.cfg.Features.IDs, 20)
+	samples := s.logRepo.SampleParsedJSON(s.GetFeatureIDs(), 20)
 	pathSet := make(map[string]struct{})
 	for _, sample := range samples {
 		var data map[string]interface{}

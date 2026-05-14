@@ -41,6 +41,9 @@ func (h *SyncHandler) Sync(c echo.Context) error {
 				log.Printf("sync goroutine panic: %v\n%s", r, debug.Stack())
 			}
 		}()
+		if !h.syncSvc.TryStartRunning() {
+			return
+		}
 		if req.SyncAll {
 			h.syncSvc.SyncAllFeatures(req.StartTime, req.EndTime)
 		} else if len(req.FeatureIDs) > 0 {

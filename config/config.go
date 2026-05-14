@@ -124,6 +124,9 @@ func Load(path string) (*Config, error) {
 	if cfg.WeWork.Secret == "" {
 		missing = append(missing, "WEWORK_SECRET")
 	}
+	if cfg.WeWork.ContactSecret == "" {
+		missing = append(missing, "WEWORK_CONTACT_SECRET")
+	}
 	if cfg.Auth.Password == "" {
 		missing = append(missing, "AUTH_PASSWORD")
 	}

@@ -1,8 +1,13 @@
 .git
 .gitignore
 *.md
+*.pem
+*.tar.gz
 .env
 .env.*
+.DS_Store
+server
 web/node_modules
 web/dist
+deploy/
 mysql/

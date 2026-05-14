@@ -68,14 +68,19 @@ func (r *ContactRepository) BatchUpdateBasicInfo(contacts []model.Contact) error
 			end = len(contacts)
 		}
 		batch := contacts[i:end]
-		for _, c := range batch {
-			if err := r.db.Model(&model.Contact{}).Where("user_id = ?", c.UserID).Updates(map[string]interface{}{
-				"name":      c.Name,
-				"department": c.Department,
-				"synced_at": c.SyncedAt,
-			}).Error; err != nil {
-				return err
+
+		sql := "INSERT INTO contacts (user_id, name, department, synced_at) VALUES "
+		var args []interface{}
+		for j, c := range batch {
+			if j > 0 {
+				sql += ","
 			}
+			sql += "(?,?,?,?)"
+			args = append(args, c.UserID, c.Name, c.Department, c.SyncedAt)
+		}
+		sql += " ON DUPLICATE KEY UPDATE name=VALUES(name), department=VALUES(department), synced_at=VALUES(synced_at)"
+		if err := r.db.Exec(sql, args...).Error; err != nil {
+			return err
 		}
 	}
 	return nil
@@ -170,6 +175,25 @@ func (r *ContactRepository) GetContactsByDepartmentID(deptID int, page, pageSize
 	return contacts, total, nil
 }
 
+func (r *ContactRepository) GetNamesByUserIDs(userIDs []string) (map[string]string, error) {
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+	type result struct {
+		UserID string
+		Name   string
+	}
+	var rows []result
+	if err := r.db.Model(&model.Contact{}).Select("user_id, name").Where("user_id IN ?", userIDs).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	m := make(map[string]string, len(rows))
+	for _, r := range rows {
+		m[r.UserID] = r.Name
+	}
+	return m, nil
+}
+
 func (r *ContactRepository) GetContactByUserID(userID string) (*model.Contact, error) {
 	var c model.Contact
 	if err := r.db.Where("user_id = ?", userID).First(&c).Error; err != nil {
@@ -187,11 +211,29 @@ func (r *ContactRepository) GetTotalContacts() (int64, error) {
 func (r *ContactRepository) GetMemberCountByDepartmentIDs(deptIDs []int) (map[int]int, error) {
 	counts := make(map[int]int, len(deptIDs))
 	for _, id := range deptIDs {
-		var count int64
-		if err := r.db.Model(&model.Contact{}).Where("JSON_CONTAINS(department, ?)", fmt.Sprintf("%d", id)).Count(&count).Error; err != nil {
-			return nil, err
-		}
-		counts[id] = int(count)
+		counts[id] = 0
+	}
+	if len(deptIDs) == 0 {
+		return counts, nil
+	}
+
+	var results []struct {
+		DeptID int
+		Count  int64
+	}
+	err := r.db.Raw(`
+		SELECT dept_id, COUNT(*) AS count
+		FROM contacts, JSON_TABLE(
+			department,
+			'$[*]' COLUMNS(dept_id INT PATH '$')
+		) AS jt
+		GROUP BY dept_id
+	`).Scan(&results).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range results {
+		counts[r.DeptID] = int(r.Count)
 	}
 	return counts, nil
 }

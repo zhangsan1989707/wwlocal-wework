@@ -4,6 +4,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"time"
@@ -68,11 +69,61 @@ func (r *LogRepository) CreateTableIfNotExists(featureID int, month time.Time) e
 	return nil
 }
 
-// MigrateLogTable 为已存在的表添加 enc_data_hash 列和去重索引
+// MigrateLogTable 为已存在的表添加缺失的列和索引
 func (r *LogRepository) MigrateLogTable(tableName string) {
 	// MySQL 不支持 ADD COLUMN IF NOT EXISTS，直接忽略已存在的错误
 	r.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN enc_data_hash CHAR(32) AFTER parsed_json", tableName))
 	r.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD UNIQUE INDEX uk_dedup (feature_id, log_time, enc_data_hash)", tableName))
+	// JSON 路径虚拟列 + 索引，加速 openid 查询
+	r.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN login_openid VARCHAR(64) AS (JSON_UNQUOTE(JSON_EXTRACT(parsed_json, '$.login_user.openid'))) VIRTUAL", tableName))
+	r.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD INDEX idx_login_openid (login_openid)", tableName))
+}
+
+// CreateUserDailyStatsTable 创建用户日活跃汇总表
+func (r *LogRepository) CreateUserDailyStatsTable() error {
+	return r.db.Exec(`
+		CREATE TABLE IF NOT EXISTS user_daily_stats (
+			mobile VARCHAR(32) NOT NULL,
+			feature_id INT NOT NULL,
+			stat_date DATE NOT NULL,
+			PRIMARY KEY (mobile, feature_id, stat_date)
+		) ENGINE=InnoDB
+	`).Error
+}
+
+// BatchUpsertDailyStats 将 distinct 手机号写入日活跃汇总表，每批 2000 条
+func (r *LogRepository) BatchUpsertDailyStats(featureID int, mobiles map[string]bool, logTime int64) {
+	if len(mobiles) == 0 {
+		return
+	}
+	statDate := time.Unix(logTime, 0).Format("2006-01-02")
+
+	const batchSize = 2000
+	mobileList := make([]string, 0, len(mobiles))
+	for m := range mobiles {
+		mobileList = append(mobileList, m)
+	}
+
+	for i := 0; i < len(mobileList); i += batchSize {
+		end := i + batchSize
+		if end > len(mobileList) {
+			end = len(mobileList)
+		}
+		batch := mobileList[i:end]
+
+		sql := "INSERT IGNORE INTO user_daily_stats (mobile, feature_id, stat_date) VALUES "
+		var args []interface{}
+		for j, mobile := range batch {
+			if j > 0 {
+				sql += ","
+			}
+			sql += "(?,?,?)"
+			args = append(args, mobile, featureID, statDate)
+		}
+		if err := r.db.Exec(sql, args...).Error; err != nil {
+			log.Printf("upsert daily stats failed (batch %d-%d): %v", i, end, err)
+		}
+	}
 }
 
 func (r *LogRepository) Save(featureID int, entry *model.LogEntry) error {
@@ -464,104 +515,91 @@ func (r *LogRepository) GetExistingLogTables(featureIDs []int, months []time.Tim
 	return existing
 }
 
-// GetInactiveUsers 查询近 N 个月没有任何 login/wake 日志的联系人
-// startTime > 0 时，对当前月表额外加 log_time 过滤（周维度）
-// deptID > 0 时，按部门过滤
-func (r *LogRepository) GetInactiveUsers(featureIDs []int, months []time.Time, existingTables map[string]bool, startTime int64, deptID int) ([]InactiveUser, error) {
-	currentMonth := time.Date(time.Now().Year(), time.Now().Month(), 1, 0, 0, 0, 0, time.Now().Location())
-
-	var notExistsClauses []string
-	for _, fid := range featureIDs {
-		for _, m := range months {
-			tableName := r.GetTableName(fid, m)
-			if !existingTables[tableName] {
-				continue
-			}
-			cond := fmt.Sprintf("JSON_UNQUOTE(JSON_EXTRACT(parsed_json,'$.login_user.openid')) = c.mobile")
-			if startTime > 0 && m.Equal(currentMonth) {
-				cond += fmt.Sprintf(" AND log_time >= %d", startTime)
-			}
-			notExistsClauses = append(notExistsClauses,
-				fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s WHERE %s)", tableName, cond),
-			)
-		}
-	}
-
-	where := "c.status = 1"
-	for _, clause := range notExistsClauses {
-		where += "\nAND " + clause
-	}
-	if deptID > 0 {
-		where += fmt.Sprintf("\nAND JSON_CONTAINS(c.department, '%d')", deptID)
-	}
-
-	sql := fmt.Sprintf(`
-		SELECT c.name, c.mobile, c.position, c.department, c.user_id
-		FROM contacts c
-		WHERE %s
-	`, where)
-
-	var users []InactiveUser
-	if err := r.db.Raw(sql).Scan(&users).Error; err != nil {
-		return nil, err
-	}
-	return users, nil
-}
-
-// GetUsersWithDayStats 查询联系人的活跃/未使用天数，支持阈值过滤
-// totalDays: 统计周期总天数
-// startTime > 0 时，对当前月表额外加 log_time 过滤
-// minInactiveDays: 最少未使用天数（0 = 不过滤）
-func (r *LogRepository) GetUsersWithDayStats(featureIDs []int, months []time.Time, existingTables map[string]bool, startTime int64, deptID int, totalDays int, minInactiveDays int) ([]InactiveUser, error) {
-	currentMonth := time.Date(time.Now().Year(), time.Now().Month(), 1, 0, 0, 0, 0, time.Now().Location())
-
-	// 构建 UNION ALL 子查询：每个活跃表中提取 openid + 日期
-	var unionParts []string
-	for _, fid := range featureIDs {
-		for _, m := range months {
-			tableName := r.GetTableName(fid, m)
-			if !existingTables[tableName] {
-				continue
-			}
-			timeCond := ""
-			if startTime > 0 && m.Equal(currentMonth) {
-				timeCond = fmt.Sprintf(" AND log_time >= %d", startTime)
-			}
-			unionParts = append(unionParts,
-				fmt.Sprintf("SELECT DISTINCT JSON_UNQUOTE(JSON_EXTRACT(parsed_json,'$.login_user.openid')) AS mobile, DATE(FROM_UNIXTIME(log_time)) AS day FROM %s WHERE 1=1%s", tableName, timeCond),
-			)
-		}
-	}
-
+// GetInactiveUsers 从预聚合表查询完全没有活跃记录的联系人
+func (r *LogRepository) GetInactiveUsers(featureIDs []int, startTime int64, deptID int) ([]InactiveUser, error) {
 	deptFilter := ""
 	if deptID > 0 {
 		deptFilter = fmt.Sprintf("AND JSON_CONTAINS(c.department, '%d')", deptID)
 	}
 
-	var sql string
-	if len(unionParts) == 0 {
-		// 没有任何日志表，所有人 active_days = 0
-		sql = fmt.Sprintf(`
-			SELECT c.name, c.mobile, c.position, c.department, c.user_id,
-			       0 AS active_days, %d AS inactive_days
-			FROM contacts c
-			WHERE 1=1 %s
-		`, totalDays, deptFilter)
-	} else {
-		unionSQL := strings.Join(unionParts, " UNION ALL ")
-		sql = fmt.Sprintf(`
-			SELECT c.name, c.mobile, c.position, c.department, c.user_id,
-			       COALESCE(stats.active_days, 0) AS active_days,
-			       %d - COALESCE(stats.active_days, 0) AS inactive_days
-			FROM contacts c
-			LEFT JOIN (
-				SELECT mobile, COUNT(DISTINCT day) AS active_days
-				FROM (%s) AS all_days
-				GROUP BY mobile
-			) stats ON stats.mobile = c.mobile
-			WHERE 1=1 %s
-		`, totalDays, unionSQL, deptFilter)
+	timeFilter := ""
+	var timeArgs []interface{}
+	if startTime > 0 {
+		startDate := time.Unix(startTime, 0).Format("2006-01-02")
+		timeFilter = "AND uds.stat_date >= ?"
+		timeArgs = append(timeArgs, startDate)
 	}
+
+	fidPlaceholders := make([]string, len(featureIDs))
+	fidArgs := make([]interface{}, len(featureIDs))
+	for i, fid := range featureIDs {
+		fidPlaceholders[i] = "?"
+		fidArgs[i] = fid
+	}
+
+	sql := fmt.Sprintf(`
+		SELECT c.name, c.mobile, c.position, c.department, c.user_id,
+		       0 AS active_days, 0 AS inactive_days
+		FROM contacts c
+		LEFT JOIN (
+			SELECT mobile
+			FROM user_daily_stats
+			WHERE feature_id IN (%s) %s
+			GROUP BY mobile
+		) uds ON uds.mobile = c.mobile
+		WHERE uds.mobile IS NULL AND c.status = 1 %s
+	`, strings.Join(fidPlaceholders, ","), timeFilter, deptFilter)
+
+	var args []interface{}
+	args = append(args, fidArgs...)
+	args = append(args, timeArgs...)
+
+	var users []InactiveUser
+	if err := r.db.Raw(sql, args...).Scan(&users).Error; err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
+// GetUsersWithDayStats 从预聚合表查询联系人的活跃/未使用天数
+func (r *LogRepository) GetUsersWithDayStats(featureIDs []int, startTime int64, deptID int, totalDays int, minInactiveDays int) ([]InactiveUser, error) {
+	deptFilter := ""
+	if deptID > 0 {
+		deptFilter = fmt.Sprintf("AND JSON_CONTAINS(c.department, '%d')", deptID)
+	}
+
+	fidPlaceholders := make([]string, len(featureIDs))
+	fidArgs := make([]interface{}, len(featureIDs))
+	for i, fid := range featureIDs {
+		fidPlaceholders[i] = "?"
+		fidArgs[i] = fid
+	}
+
+	timeFilter := ""
+	var timeArgs []interface{}
+	if startTime > 0 {
+		startDate := time.Unix(startTime, 0).Format("2006-01-02")
+		timeFilter = "AND stat_date >= ?"
+		timeArgs = append(timeArgs, startDate)
+	}
+
+	sql := fmt.Sprintf(`
+		SELECT c.name, c.mobile, c.position, c.department, c.user_id,
+		       COALESCE(stats.active_days, 0) AS active_days,
+		       %d - COALESCE(stats.active_days, 0) AS inactive_days
+		FROM contacts c
+		LEFT JOIN (
+			SELECT mobile, COUNT(DISTINCT stat_date) AS active_days
+			FROM user_daily_stats
+			WHERE feature_id IN (%s) %s
+			GROUP BY mobile
+		) stats ON stats.mobile = c.mobile
+		WHERE 1=1 %s
+	`, totalDays, strings.Join(fidPlaceholders, ","), timeFilter, deptFilter)
+
+	var args []interface{}
+	args = append(args, fidArgs...)
+	args = append(args, timeArgs...)
 
 	if minInactiveDays > 0 {
 		sql += fmt.Sprintf(" HAVING inactive_days >= %d", minInactiveDays)
@@ -569,7 +607,7 @@ func (r *LogRepository) GetUsersWithDayStats(featureIDs []int, months []time.Tim
 	sql += " ORDER BY inactive_days DESC, c.name ASC"
 
 	var users []InactiveUser
-	if err := r.db.Raw(sql).Scan(&users).Error; err != nil {
+	if err := r.db.Raw(sql, args...).Scan(&users).Error; err != nil {
 		return nil, err
 	}
 	return users, nil

@@ -33,6 +33,16 @@
           <el-icon><VideoPlay /></el-icon>
           启动定时同步
         </el-button>
+        <el-select
+          v-if="!schedulerStatus.running"
+          v-model="startDelay"
+          size="large"
+          style="width: 130px"
+        >
+          <el-option label="10分钟后开始" value="10m" />
+          <el-option label="30分钟后开始" value="30m" />
+          <el-option label="1小时后开始" value="1h" />
+        </el-select>
         <el-button
           v-else
           type="danger"
@@ -157,7 +167,7 @@
           :format="progressFormat"
           status="success"
         />
-        <p class="progress-text">正在同步第 {{ syncStatus.progress }} / {{ syncStatus.total }} 个数据类型...</p>
+        <p class="progress-text">正在同步第 {{ syncStatus.progress }} / {{ syncStatus.total }} 个数据类型<span v-if="syncStatus.current_feature"> (当前: {{ syncStatus.current_feature }})</span>...</p>
         <el-button type="danger" size="small" @click="handleCancel" style="margin-top: 12px">
           取消同步
         </el-button>
@@ -194,12 +204,68 @@
 
       <el-empty v-if="!syncStatus.running && (!syncStatus.results || Object.keys(syncStatus.results).length === 0)" description="暂无同步记录" />
     </el-card>
+
+    <el-card class="history-card">
+      <template #header>
+        <div class="card-header">
+          <span class="card-title">同步历史</span>
+          <el-button size="small" @click="loadSyncHistory" :loading="historyLoading">
+            刷新
+          </el-button>
+        </div>
+      </template>
+      <el-table :data="syncHistory" stripe size="small" v-loading="historyLoading">
+        <el-table-column label="时间" width="170">
+          <template #default="{ row }">{{ formatTime(row.start_time) }}</template>
+        </el-table-column>
+        <el-table-column prop="sync_type" label="类型" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.sync_type === 'log' ? 'primary' : 'success'" size="small">
+              {{ row.sync_type === 'log' ? '日志' : '通讯录' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="trigger" label="触发方式" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.trigger === 'scheduler' ? 'warning' : 'info'" size="small">
+              {{ row.trigger === 'scheduler' ? '定时' : '手动' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="total" label="总数" width="70" align="center" />
+        <el-table-column prop="succeeded" label="成功" width="70" align="center">
+          <template #default="{ row }">
+            <span :class="row.succeeded > 0 ? 'success-text' : ''">{{ row.succeeded }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="failed" label="失败" width="70" align="center">
+          <template #default="{ row }">
+            <span :class="row.failed > 0 ? 'error-text' : ''">{{ row.failed }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="耗时" width="90" align="center">
+          <template #default="{ row }">{{ formatDuration(row.duration_ms) }}</template>
+        </el-table-column>
+        <el-table-column prop="error_msg" label="错误信息" min-width="180" show-overflow-tooltip />
+      </el-table>
+      <el-pagination
+        v-if="historyTotal > 0"
+        :current-page="historyPage"
+        :page-size="historyPageSize"
+        :total="historyTotal"
+        :page-sizes="[10, 20, 50]"
+        layout="total, sizes, prev, pager, next"
+        @current-change="handleHistoryPageChange"
+        @size-change="handleHistorySizeChange"
+        style="margin-top: 12px; justify-content: center"
+      />
+    </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
-import { syncAPI, schedulerAPI, logAPI } from '../api'
+import { syncAPI, schedulerAPI, syncHistoryAPI, syncFeatureAPI } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { VideoPlay, VideoPause, Refresh, Clock } from '@element-plus/icons-vue'
 
@@ -215,12 +281,19 @@ const schedulerStatus = ref<any>({
   running: false,
   interval: '',
 })
+const startDelay = ref('1h')
 const syncAll = ref(true)
 const form = reactive({
   feature_ids: [] as number[],
 })
 const features = ref<any[]>([])
 let pollTimer: ReturnType<typeof setInterval> | null = null
+
+const syncHistory = ref<any[]>([])
+const historyTotal = ref(0)
+const historyPage = ref(1)
+const historyPageSize = ref(10)
+const historyLoading = ref(false)
 
 const timeShortcuts = [
   { label: '最近1天', hours: 24 },
@@ -260,18 +333,18 @@ const formatTime = (timeStr: string) => {
 
 onMounted(async () => {
   try {
-    const res: any = await logAPI.getFeatures()
+    const res: any = await syncFeatureAPI.list()
     if (res.code === 0) {
-      features.value = res.data
-    }
-    await checkStatus()
-    await checkSchedulerStatus()
-    if (syncStatus.value.running) {
-      startPolling()
+      // 只显示启用的 feature 用于同步下拉
+      features.value = (res.data || []).filter((f: any) => f.enabled)
     }
   } catch (err) {
     console.error(err)
   }
+  await checkStatus()
+  await checkSchedulerStatus()
+  await loadSyncHistory()
+  if (syncStatus.value.running) startPolling()
 })
 
 onUnmounted(() => {
@@ -308,7 +381,7 @@ const handleDateChange = () => {
 
 const handleSchedulerStart = async () => {
   try {
-    const res: any = await schedulerAPI.start()
+    const res: any = await schedulerAPI.start({ start_delay: startDelay.value })
     if (res.code === 0) {
       ElMessage.success('定时同步已启动')
       schedulerStatus.value = res.data
@@ -459,6 +532,44 @@ const checkSchedulerStatus = async () => {
     console.error(err)
   }
 }
+
+const loadSyncHistory = async () => {
+  historyLoading.value = true
+  try {
+    const res: any = await syncHistoryAPI.list({
+      page: historyPage.value,
+      page_size: historyPageSize.value,
+    })
+    if (res.code === 0) {
+      syncHistory.value = res.data.data || []
+      historyTotal.value = res.data.total || 0
+    }
+  } catch (err) {
+    console.error(err)
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+const handleHistoryPageChange = (p: number) => {
+  historyPage.value = p
+  loadSyncHistory()
+}
+
+const handleHistorySizeChange = (size: number) => {
+  historyPageSize.value = size
+  historyPage.value = 1
+  loadSyncHistory()
+}
+
+const formatDuration = (ms: number) => {
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  const min = Math.floor(ms / 60000)
+  const sec = Math.round((ms % 60000) / 1000)
+  return `${min}m${sec}s`
+}
+
 </script>
 
 <style scoped>
@@ -467,7 +578,8 @@ const checkSchedulerStatus = async () => {
 }
 
 .sync-card,
-.status-card {
+.status-card,
+.history-card {
   margin-bottom: 16px;
 }
 
@@ -533,6 +645,10 @@ const checkSchedulerStatus = async () => {
 .error-text {
   color: #f56c6c;
   font-size: 12px;
+}
+
+.success-text {
+  color: #67c23a;
 }
 
 :deep(.el-form-item__label) {

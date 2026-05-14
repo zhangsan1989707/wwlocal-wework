@@ -55,7 +55,7 @@ export const keyAPI = {
 }
 
 export const schedulerAPI = {
-  start: () => api.post('/scheduler/start'),
+  start: (data?: any) => api.post('/scheduler/start', data),
   stop: () => api.post('/scheduler/stop'),
   status: () => api.get('/scheduler/status'),
   incrementalSync: (data: any) => api.post('/scheduler/sync', data),
@@ -68,6 +68,7 @@ export const contactAPI = {
   getDeptTree: () => api.get('/contacts/tree'),
   getDeptMembers: (deptId: number, params: any) => api.get(`/contacts/departments/${deptId}/members`, { params }),
   getContact: (userId: string) => api.get(`/contacts/${userId}`),
+  getNames: (user_ids: string[]) => api.post('/contacts/names', { user_ids }),
   sync: () => api.post('/contacts/sync'),
   syncIncremental: () => api.post('/contacts/sync/incremental'),
   cancel: () => api.post('/contacts/sync/cancel'),
@@ -81,6 +82,15 @@ export const operationLogAPI = {
 
 export const dashboardAPI = {
   getInactiveUsers: (params?: { range?: string; dept_id?: number; min_inactive_days?: number }) => api.get('/dashboard/inactive-users', { params }),
+}
+
+export const syncHistoryAPI = {
+  list: (params: any) => api.get('/sync-history', { params }),
+}
+
+export const syncFeatureAPI = {
+  list: () => api.get('/sync-features'),
+  update: (data: any) => api.put('/sync-features', data),
 }
 
 export default api

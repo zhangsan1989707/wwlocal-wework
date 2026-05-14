@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -12,25 +13,30 @@ import (
 )
 
 type SyncService struct {
-	weworkSvc     *WeWorkService
-	decryptSvc    *DecryptService
-	logRepo       *repository.LogRepository
-	keyRepo       *repository.KeyRepository
-	syncStateRepo *repository.SyncStateRepository
-	cfg           *config.Config
-	mu            sync.Mutex
-	status        *SyncStatus
-	cancelCh      chan struct{}
+	weworkSvc       *WeWorkService
+	decryptSvc      *DecryptService
+	logRepo         *repository.LogRepository
+	keyRepo         *repository.KeyRepository
+	syncStateRepo   *repository.SyncStateRepository
+	syncHistoryRepo *repository.SyncHistoryRepository
+	syncFeatureRepo *repository.SyncFeatureRepository
+	cfg             *config.Config
+	mu              sync.Mutex
+	status          *SyncStatus
+	cancelCh        chan struct{}
 }
 
-func NewSyncService(weworkSvc *WeWorkService, decryptSvc *DecryptService, logRepo *repository.LogRepository, keyRepo *repository.KeyRepository, syncStateRepo *repository.SyncStateRepository, cfg *config.Config) *SyncService {
+func NewSyncService(weworkSvc *WeWorkService, decryptSvc *DecryptService, logRepo *repository.LogRepository, keyRepo *repository.KeyRepository, syncStateRepo *repository.SyncStateRepository, syncHistoryRepo *repository.SyncHistoryRepository, syncFeatureRepo *repository.SyncFeatureRepository, cfg *config.Config) *SyncService {
+	logRepo.CreateUserDailyStatsTable()
 	return &SyncService{
-		weworkSvc:     weworkSvc,
-		decryptSvc:    decryptSvc,
-		logRepo:       logRepo,
-		keyRepo:       keyRepo,
-		syncStateRepo: syncStateRepo,
-		cfg:           cfg,
+		weworkSvc:       weworkSvc,
+		decryptSvc:      decryptSvc,
+		logRepo:         logRepo,
+		keyRepo:         keyRepo,
+		syncStateRepo:   syncStateRepo,
+		syncHistoryRepo: syncHistoryRepo,
+		syncFeatureRepo: syncFeatureRepo,
+		cfg:             cfg,
 		status: &SyncStatus{
 			Running: false,
 			Results: make(map[int]int),
@@ -54,9 +60,13 @@ func (s *SyncService) SyncFeature(featureID int, startTime, endTime int64) (int,
 
 	// 按天拆分，政务微信 API 要求 start_time 和 end_time 在同一天
 	days := s.splitByDay(startTime, endTime)
-	for _, day := range days {
+	log.Printf("SyncFeature: feature=%d, %d days to process", featureID, len(days))
+	for di, day := range days {
 		if s.isCancelled() {
 			return totalFetched, totalFailed, maxLogTime, nil
+		}
+		if di%5 == 0 {
+			log.Printf("SyncFeature: feature=%d, day %d/%d (ts=%d)", featureID, di+1, len(days), day.start)
 		}
 		fetched, failed, dayMax, err := s.syncFeatureDay(featureID, day.start, day.end, limit)
 		totalFetched += fetched
@@ -104,6 +114,7 @@ func (s *SyncService) syncFeatureDay(featureID int, startTime, endTime int64, li
 	totalFailed := 0
 	var maxLogTime int64
 	startIndex := 0
+	savedMobiles := make(map[string]bool)
 
 	for {
 		if s.isCancelled() {
@@ -119,6 +130,7 @@ func (s *SyncService) syncFeatureDay(featureID int, startTime, endTime int64, li
 		}
 
 		var entries []model.LogEntry
+		pageFailed := 0
 		for _, item := range logItems {
 			if item.LogTime > maxLogTime {
 				maxLogTime = item.LogTime
@@ -131,11 +143,17 @@ func (s *SyncService) syncFeatureDay(featureID int, startTime, endTime int64, li
 				EncData:   item.EncData,
 			}, "")
 			if err != nil {
-				log.Printf("decrypt failed for feature %d, log_time %d: %v", featureID, item.LogTime, err)
+				pageFailed++
 				totalFailed++
 				continue
 			}
 			entries = append(entries, *entry)
+		}
+
+		// 当前页全部解密失败，密钥不匹配，跳过该 feature
+		if pageFailed == len(logItems) {
+			log.Printf("feature %d: all %d items failed to decrypt (likely missing key), skipping", featureID, len(logItems))
+			break
 		}
 
 		if len(entries) > 0 {
@@ -144,6 +162,19 @@ func (s *SyncService) syncFeatureDay(featureID int, startTime, endTime int64, li
 				totalFailed += len(entries)
 			} else {
 				totalFetched += len(entries)
+				// 提取已保存条目中的手机号，用于日活跃汇总
+				for _, e := range entries {
+					if e.ParsedJSON != "" {
+						var parsed map[string]interface{}
+						if json.Unmarshal([]byte(e.ParsedJSON), &parsed) == nil {
+							if lu, ok := parsed["login_user"].(map[string]interface{}); ok {
+								if openid, ok := lu["openid"].(string); ok && openid != "" {
+									savedMobiles[openid] = true
+								}
+							}
+						}
+					}
+				}
 			}
 		}
 
@@ -152,6 +183,11 @@ func (s *SyncService) syncFeatureDay(featureID int, startTime, endTime int64, li
 		}
 
 		startIndex += len(logItems)
+	}
+
+	// 写入日活跃汇总表
+	if len(savedMobiles) > 0 {
+		s.logRepo.BatchUpsertDailyStats(featureID, savedMobiles, startTime)
 	}
 
 	return totalFetched, totalFailed, maxLogTime, nil
@@ -184,14 +220,21 @@ func (s *SyncService) SyncFeatureIncremental(featureID int) (int, int, error) {
 	if err != nil {
 		log.Printf("SyncFeatureIncremental: feature=%d returned error: %v", featureID, err)
 	} else if maxLogTime > 0 {
-		s.syncStateRepo.UpdateState(featureID, maxLogTime, fetched)
+		if updateErr := s.syncStateRepo.UpdateState(featureID, maxLogTime, fetched); updateErr != nil {
+			log.Printf("SyncFeatureIncremental: UpdateState failed for feature %d: %v", featureID, updateErr)
+		}
 	}
 	return fetched, failed, err
 }
 
-// SyncAllFeaturesIncremental 增量同步所有配置的 feature
+// SyncAllFeaturesIncremental 增量同步所有启用的 feature
 func (s *SyncService) SyncAllFeaturesIncremental() map[int]int {
-	return s.syncFeaturesIncremental(s.cfg.Features.IDs)
+	ids, err := s.syncFeatureRepo.GetEnabledIDs()
+	if err != nil {
+		log.Printf("get enabled features failed: %v", err)
+		return nil
+	}
+	return s.syncFeaturesIncremental(ids)
 }
 
 // SyncMultipleFeaturesIncremental 增量同步指定的 feature 列表
@@ -201,15 +244,10 @@ func (s *SyncService) SyncMultipleFeaturesIncremental(featureIDs []int) map[int]
 
 func (s *SyncService) syncFeaturesIncremental(featureIDs []int) map[int]int {
 	s.mu.Lock()
-	s.status.Running = true
-	s.status.Progress = 0
 	s.status.Total = len(featureIDs)
-	s.status.Results = make(map[int]int)
-	s.status.Errors = make(map[int]string)
-	s.status.Failed = 0
-	s.cancelCh = make(chan struct{})
 	s.mu.Unlock()
 
+	startTime := time.Now()
 	log.Printf("incremental sync started, %d features to sync", len(featureIDs))
 
 	defer func() {
@@ -219,6 +257,7 @@ func (s *SyncService) syncFeaturesIncremental(featureIDs []int) map[int]int {
 		errCount := len(s.status.Errors)
 		s.mu.Unlock()
 		log.Printf("incremental sync finished, errors=%d", errCount)
+		s.saveSyncHistory("log", "scheduler", startTime)
 	}()
 
 	results := make(map[int]int)
@@ -231,6 +270,9 @@ func (s *SyncService) syncFeaturesIncremental(featureIDs []int) map[int]int {
 		}
 
 		log.Printf("syncing feature %d (%d/%d)...", featureID, i+1, len(featureIDs))
+		s.mu.Lock()
+		s.status.CurrentFeature = featureID
+		s.mu.Unlock()
 		count, failed, err := s.SyncFeatureIncremental(featureID)
 		if err != nil {
 			log.Printf("incremental sync feature %d failed: %v", featureID, err)
@@ -257,7 +299,12 @@ func (s *SyncService) syncFeaturesIncremental(featureIDs []int) map[int]int {
 }
 
 func (s *SyncService) SyncAllFeatures(startTime, endTime int64) map[int]int {
-	return s.syncFeatures(s.cfg.Features.IDs, startTime, endTime)
+	ids, err := s.syncFeatureRepo.GetEnabledIDs()
+	if err != nil {
+		log.Printf("get enabled features failed: %v", err)
+		return nil
+	}
+	return s.syncFeatures(ids, startTime, endTime)
 }
 
 func (s *SyncService) SyncMultipleFeatures(featureIDs []int, startTime, endTime int64) map[int]int {
@@ -266,20 +313,16 @@ func (s *SyncService) SyncMultipleFeatures(featureIDs []int, startTime, endTime 
 
 func (s *SyncService) syncFeatures(featureIDs []int, startTime, endTime int64) map[int]int {
 	s.mu.Lock()
-	s.status.Running = true
-	s.status.Progress = 0
 	s.status.Total = len(featureIDs)
-	s.status.Results = make(map[int]int)
-	s.status.Errors = make(map[int]string)
-	s.status.Failed = 0
-	s.cancelCh = make(chan struct{})
 	s.mu.Unlock()
 
+	syncStart := time.Now()
 	defer func() {
 		s.mu.Lock()
 		s.status.Running = false
 		s.status.LastSync = time.Now()
 		s.mu.Unlock()
+		s.saveSyncHistory("log", "manual", syncStart)
 	}()
 
 	results := make(map[int]int)
@@ -301,7 +344,9 @@ func (s *SyncService) syncFeatures(featureIDs []int, startTime, endTime int64) m
 		} else {
 			results[featureID] = count
 			if maxLogTime > 0 {
-				s.syncStateRepo.UpdateState(featureID, maxLogTime, count)
+				if updateErr := s.syncStateRepo.UpdateState(featureID, maxLogTime, count); updateErr != nil {
+					log.Printf("sync feature %d: UpdateState failed: %v", featureID, updateErr)
+				}
 			}
 		}
 
@@ -347,6 +392,25 @@ func (s *SyncService) IsRunning() bool {
 	return s.status.Running
 }
 
+// TryStartRunning 原子性地检查并设置运行状态。
+// 如果当前没有同步在运行，初始化状态并返回 true；否则返回 false。
+// 用于防止定时调度和手动同步的竞争条件。
+func (s *SyncService) TryStartRunning() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.status.Running {
+		return false
+	}
+	s.status.Running = true
+	s.status.Progress = 0
+	s.status.Total = 0
+	s.status.Results = make(map[int]int)
+	s.status.Errors = make(map[int]string)
+	s.status.Failed = 0
+	s.cancelCh = make(chan struct{})
+	return true
+}
+
 func (s *SyncService) GetStatus() *SyncStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -368,13 +432,57 @@ func (s *SyncService) GetStatus() *SyncStatus {
 }
 
 type SyncStatus struct {
-	Running  bool            `json:"running"`
-	Progress int             `json:"progress"`
-	Total    int             `json:"total"`
-	Failed   int             `json:"failed"`
-	LastSync time.Time       `json:"last_sync,omitempty"`
-	Results  map[int]int     `json:"results,omitempty"`
-	Errors   map[int]string  `json:"errors,omitempty"`
+	Running        bool            `json:"running"`
+	Progress       int             `json:"progress"`
+	Total          int             `json:"total"`
+	Failed         int             `json:"failed"`
+	CurrentFeature int             `json:"current_feature,omitempty"`
+	LastSync       time.Time       `json:"last_sync,omitempty"`
+	Results        map[int]int     `json:"results,omitempty"`
+	Errors         map[int]string  `json:"errors,omitempty"`
+}
+
+func (s *SyncService) saveSyncHistory(syncType, trigger string, startTime time.Time) {
+	s.mu.Lock()
+	results := make(map[int]int)
+	errors := make(map[int]string)
+	for k, v := range s.status.Results {
+		results[k] = v
+	}
+	for k, v := range s.status.Errors {
+		errors[k] = v
+	}
+	total := s.status.Total
+	failed := s.status.Failed
+	s.mu.Unlock()
+
+	succeeded := 0
+	for _, count := range results {
+		if count > 0 {
+			succeeded += count
+		}
+	}
+
+	detailsMap := map[string]interface{}{
+		"results": results,
+		"errors":  errors,
+	}
+	detailsJSON, _ := json.Marshal(detailsMap)
+
+	history := &model.SyncHistory{
+		SyncType:   syncType,
+		Trigger:    trigger,
+		StartTime:  startTime,
+		EndTime:    time.Now(),
+		DurationMs: time.Since(startTime).Milliseconds(),
+		Total:      total,
+		Succeeded:  succeeded,
+		Failed:     failed,
+		Details:    string(detailsJSON),
+	}
+	if err := s.syncHistoryRepo.Create(history); err != nil {
+		log.Printf("save sync history failed: %v", err)
+	}
 }
 
 // VerifySyncState 校验 sync_state 与数据库实际数据是否一致，修复不一致的状态
@@ -390,7 +498,9 @@ func (s *SyncService) VerifySyncState() {
 		if actualMax > state.LastLogTime {
 			log.Printf("verify sync state: feature %d last_log_time corrected from %d to %d",
 				state.FeatureID, state.LastLogTime, actualMax)
-			s.syncStateRepo.UpdateState(state.FeatureID, actualMax, 0)
+			if updateErr := s.syncStateRepo.UpdateState(state.FeatureID, actualMax, 0); updateErr != nil {
+				log.Printf("verify sync state: UpdateState failed for feature %d: %v", state.FeatureID, updateErr)
+			}
 		} else if actualMax < state.LastLogTime && actualMax > 0 {
 			log.Printf("verify sync state: feature %d last_log_time %d ahead of actual max %d (state is fine, data may have been purged)",
 				state.FeatureID, state.LastLogTime, actualMax)
