@@ -307,6 +307,12 @@ func (s *ContactSyncService) TryStartRunning() bool {
 	return true
 }
 
+func (s *ContactSyncService) ResetRunning() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.status.Running = false
+}
+
 func (s *ContactSyncService) GetStatus() *ContactSyncStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()

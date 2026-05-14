@@ -416,8 +416,8 @@ func (r *LogRepository) buildJSONConditions(conditions map[string]interface{}, m
 	}
 
 	if mobile != "" {
-		parts = append(parts, "JSON_UNQUOTE(JSON_EXTRACT(parsed_json, '$.openid')) = ?")
-		args = append(args, mobile)
+		parts = append(parts, "(JSON_UNQUOTE(JSON_EXTRACT(parsed_json, '$.login_user.openid')) = ? OR JSON_UNQUOTE(JSON_EXTRACT(parsed_json, '$.openid')) = ? OR JSON_UNQUOTE(JSON_EXTRACT(parsed_json, '$.sender.openid')) = ?)")
+		args = append(args, mobile, mobile, mobile)
 	}
 
 	if len(parts) == 0 {

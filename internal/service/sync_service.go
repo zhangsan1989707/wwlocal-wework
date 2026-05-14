@@ -411,6 +411,13 @@ func (s *SyncService) TryStartRunning() bool {
 	return true
 }
 
+// ResetRunning 重置运行状态。用于 handler 层 defer 确保即使 panic 后状态也能恢复。
+func (s *SyncService) ResetRunning() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.status.Running = false
+}
+
 func (s *SyncService) GetStatus() *SyncStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()

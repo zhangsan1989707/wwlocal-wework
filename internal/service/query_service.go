@@ -54,7 +54,22 @@ func (s *QueryService) Query(req *QueryRequest) (*QueryResult, error) {
 		req.PageSize = 1000
 	}
 
+	// 限制最大时间跨度 90 天，防止内存溢出
+	const maxRangeSeconds = 90 * 24 * 3600
+	if req.EndTime-req.StartTime > int64(maxRangeSeconds) {
+		return nil, fmt.Errorf("时间范围不能超过 90 天")
+	}
+	if len(req.FeatureIDs) > 10 {
+		return nil, fmt.Errorf("最多同时查询 10 个数据类型")
+	}
+
 	hasConditions := len(req.Conditions) > 0 || req.Mobile != ""
+
+	// 多 feature 时，每个 feature 需拉取足够数据以支持正确合并分页
+	perPage := req.PageSize
+	if len(req.FeatureIDs) > 1 {
+		perPage = req.Page * req.PageSize
+	}
 
 	var allData []map[string]interface{}
 	var total int64
@@ -65,9 +80,9 @@ func (s *QueryService) Query(req *QueryRequest) (*QueryResult, error) {
 		var err error
 
 		if hasConditions {
-			entries, count, err = s.logRepo.QueryAcrossMonthsWithConditions(featureID, req.StartTime, req.EndTime, req.Conditions, req.Mobile, req.Page, req.PageSize)
+			entries, count, err = s.logRepo.QueryAcrossMonthsWithConditions(featureID, req.StartTime, req.EndTime, req.Conditions, req.Mobile, 1, perPage)
 		} else {
-			entries, count, err = s.logRepo.QueryAcrossMonths(featureID, req.StartTime, req.EndTime, req.Page, req.PageSize)
+			entries, count, err = s.logRepo.QueryAcrossMonths(featureID, req.StartTime, req.EndTime, 1, perPage)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("query feature %d failed: %w", featureID, err)

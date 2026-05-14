@@ -40,6 +40,7 @@ func (h *SyncHandler) Sync(c echo.Context) error {
 			if r := recover(); r != nil {
 				log.Printf("sync goroutine panic: %v\n%s", r, debug.Stack())
 			}
+			h.syncSvc.ResetRunning()
 		}()
 		if !h.syncSvc.TryStartRunning() {
 			return

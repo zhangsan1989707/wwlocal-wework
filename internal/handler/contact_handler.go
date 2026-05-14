@@ -67,6 +67,7 @@ func (h *ContactHandler) Sync(c echo.Context) error {
 			if r := recover(); r != nil {
 				log.Printf("contact sync goroutine panic: %v\n%s", r, debug.Stack())
 			}
+			h.contactSyncSvc.ResetRunning()
 		}()
 		if !h.contactSyncSvc.TryStartRunning() {
 			return
@@ -90,6 +91,7 @@ func (h *ContactHandler) SyncIncremental(c echo.Context) error {
 			if r := recover(); r != nil {
 				log.Printf("contact incremental sync goroutine panic: %v\n%s", r, debug.Stack())
 			}
+			h.contactSyncSvc.ResetRunning()
 		}()
 		if !h.contactSyncSvc.TryStartRunning() {
 			return

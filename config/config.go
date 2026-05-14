@@ -32,11 +32,12 @@ type DatabaseConfig struct {
 }
 
 type WeWorkConfig struct {
-	BaseURL       string `yaml:"base_url"`
-	CorpID        string `yaml:"corpid"`
-	Secret        string `yaml:"secret"`
-	ContactSecret string `yaml:"contact_secret"`
-	SyncLimit     int    `yaml:"sync_limit"`
+	BaseURL            string `yaml:"base_url"`
+	CorpID             string `yaml:"corpid"`
+	Secret             string `yaml:"secret"`
+	ContactSecret      string `yaml:"contact_secret"`
+	SyncLimit          int    `yaml:"sync_limit"`
+	InsecureSkipVerify bool   `yaml:"insecure_skip_verify"`
 }
 
 type KeysConfig struct {
@@ -103,6 +104,9 @@ func Load(path string) (*Config, error) {
 	cfg.WeWork.CorpID = getEnv("WEWORK_CORPID", cfg.WeWork.CorpID)
 	cfg.WeWork.Secret = getEnv("WEWORK_SECRET", cfg.WeWork.Secret)
 	cfg.WeWork.ContactSecret = getEnv("WEWORK_CONTACT_SECRET", cfg.WeWork.ContactSecret)
+	if v := os.Getenv("WEWORK_INSECURE_SKIP_VERIFY"); v != "" {
+		cfg.WeWork.InsecureSkipVerify = v == "true" || v == "1"
+	}
 
 	cfg.Auth.Username = getEnv("AUTH_USERNAME", cfg.Auth.Username)
 	cfg.Auth.Password = getEnv("AUTH_PASSWORD", cfg.Auth.Password)

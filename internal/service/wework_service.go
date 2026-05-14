@@ -25,7 +25,7 @@ type WeWorkService struct {
 
 func NewWeWorkService(cfg *config.WeWorkConfig) *WeWorkService {
 	tr := &http.Transport{
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig:     &tls.Config{InsecureSkipVerify: cfg.InsecureSkipVerify},
 		MaxIdleConnsPerHost: 20,
 		MaxIdleConns:        100,
 		IdleConnTimeout:     90 * time.Second,
