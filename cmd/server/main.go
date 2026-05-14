@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -45,6 +46,7 @@ func main() {
 	if err := keyRepo.AutoMigrate(); err != nil {
 		log.Fatalf("migrate key repository failed: %v", err)
 	}
+	checkKeyPermissions(cfg.Keys.StoragePath)
 
 	logRepo := repository.NewLogRepository(db)
 
@@ -89,7 +91,7 @@ func main() {
 	// 启动时校验 sync_state 与实际数据是否一致
 	syncSvc.VerifySyncState()
 
-	healthHandler := handler.NewHealthHandler(db)
+	healthHandler := handler.NewHealthHandler(db, cfg)
 	authHandler := handler.NewAuthHandler(&cfg.Auth)
 	logHandler := handler.NewLogHandler(querySvc)
 	keyHandler := handler.NewKeyHandler(keySvc)
@@ -162,4 +164,38 @@ func main() {
 	}
 
 	log.Println("server stopped")
+}
+
+func checkKeyPermissions(keysDir string) {
+	entries, err := os.ReadDir(keysDir)
+	if err != nil {
+		log.Printf("keys directory not readable: %v", err)
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if filepath.Ext(name) != ".pem" {
+			continue
+		}
+		path := filepath.Join(keysDir, name)
+		info, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		perm := info.Mode().Perm()
+		if perm&0077 != 0 {
+			log.Printf("WARNING: key file %s has overly permissive permissions (%o), fixing to 600", path, perm)
+			os.Chmod(path, 0600)
+		}
+	}
+	// 递归检查子目录（如 keys/v1/）
+	subdirs, _ := os.ReadDir(keysDir)
+	for _, sub := range subdirs {
+		if sub.IsDir() {
+			checkKeyPermissions(filepath.Join(keysDir, sub.Name()))
+		}
+	}
 }
