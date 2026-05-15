@@ -1,0 +1,64 @@
+version: "3.7"
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: wework-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: wework_logs
+    ports:
+      - "${MYSQL_PORT:-3307}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/my.cnf:/etc/mysql/conf.d/custom.cnf:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    image: wwlocal-wework-backend:latest
+    container_name: wework-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_PORT:-3010}:8080"
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: wework_logs
+      WEWORK_BASE_URL: ${WEWORK_BASE_URL}
+      WEWORK_CORPID: ${WEWORK_CORPID}
+      WEWORK_SECRET: ${WEWORK_SECRET}
+      WEWORK_CONTACT_SECRET: ${WEWORK_CONTACT_SECRET}
+      WEWORK_INSECURE_SKIP_VERIFY: ${WEWORK_INSECURE_SKIP_VERIFY:-false}
+      AUTH_USERNAME: ${AUTH_USERNAME}
+      AUTH_PASSWORD: ${AUTH_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      KEY_ENCRYPT_KEY: ${KEY_ENCRYPT_KEY:-}
+    volumes:
+      - ./keys:/app/keys
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  frontend:
+    image: wwlocal-wework-frontend:latest
+    container_name: wework-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+
+volumes:
+  mysql_data:
