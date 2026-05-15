@@ -1,5 +1,51 @@
 <template>
   <div class="data-sync">
+    <el-card class="options-card">
+      <template #header>
+        <div class="card-header">
+          <span class="card-title">同步选项</span>
+          <el-button size="small" @click="handleReset" :disabled="syncStatus.running">
+            <el-icon><Refresh /></el-icon>
+            重置选项
+          </el-button>
+        </div>
+      </template>
+
+      <el-form label-position="left" :inline="true">
+        <el-form-item label="日志类型">
+          <el-checkbox v-model="syncAll" :disabled="syncStatus.running">
+            同步所有 ({{ features.length }} 项)
+          </el-checkbox>
+          <el-select
+            v-if="!syncAll"
+            v-model="form.feature_ids"
+            multiple
+            placeholder="选择日志类型"
+            style="width: 400px; margin-left: 12px"
+            :disabled="syncStatus.running"
+            collapse-tags
+            collapse-tags-tooltip
+          >
+            <el-option
+              v-for="item in features"
+              :key="item.feature_id"
+              :label="item.name"
+              :value="item.feature_id"
+            >
+              <span style="float: left">{{ item.name }}</span>
+              <span style="float: right; color: #8492a6; font-size: 12px">{{ item.feature_id }}</span>
+            </el-option>
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="操作日志">
+          <el-checkbox v-model="syncAdminOperLog" :disabled="syncStatus.running">
+            同步企微操作日志
+          </el-checkbox>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
     <el-card class="sync-card">
       <template #header>
         <div class="card-header">
@@ -77,66 +123,30 @@
       </template>
 
       <el-form label-position="top">
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <el-form-item label="时间范围">
-              <div class="time-range-container">
-                <el-button-group class="time-shortcuts">
-                  <el-button
-                    v-for="shortcut in timeShortcuts"
-                    :key="shortcut.label"
-                    :type="activeShortcut === shortcut.label ? 'primary' : 'default'"
-                    size="small"
-                    @click="applyTimeShortcut(shortcut)"
-                  >
-                    {{ shortcut.label }}
-                  </el-button>
-                </el-button-group>
-                <el-date-picker
-                  v-model="dateRange"
-                  type="datetimerange"
-                  range-separator="至"
-                  start-placeholder="开始时间"
-                  end-placeholder="结束时间"
-                  style="width: 100%; margin-top: 8px"
-                  @change="handleDateChange"
-                />
-              </div>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="同步选项">
-              <div class="sync-options">
-                <el-checkbox v-model="syncAll" :disabled="syncStatus.running">
-                  同步所有日志类型 ({{ features.length }} 项)
-                </el-checkbox>
-                <el-select
-                  v-if="!syncAll"
-                  v-model="form.feature_ids"
-                  multiple
-                  placeholder="请选择要同步的日志类型"
-                  style="width: 100%; margin-top: 8px"
-                  :disabled="syncStatus.running"
-                  collapse-tags
-                  collapse-tags-tooltip
-                >
-                  <el-option
-                    v-for="item in features"
-                    :key="item.id"
-                    :label="item.name"
-                    :value="item.id"
-                  >
-                    <span style="float: left">{{ item.name }}</span>
-                    <span style="float: right; color: #8492a6; font-size: 12px">{{ item.id }}</span>
-                  </el-option>
-                </el-select>
-                <el-checkbox v-model="syncAdminOperLog" :disabled="syncStatus.running" style="margin-top: 12px">
-                  同步企微操作日志
-                </el-checkbox>
-              </div>
-            </el-form-item>
-          </el-col>
-        </el-row>
+        <el-form-item label="时间范围">
+          <div class="time-range-container">
+            <el-button-group class="time-shortcuts">
+              <el-button
+                v-for="shortcut in timeShortcuts"
+                :key="shortcut.label"
+                :type="activeShortcut === shortcut.label ? 'primary' : 'default'"
+                size="small"
+                @click="applyTimeShortcut(shortcut)"
+              >
+                {{ shortcut.label }}
+              </el-button>
+            </el-button-group>
+            <el-date-picker
+              v-model="dateRange"
+              type="datetimerange"
+              range-separator="至"
+              start-placeholder="开始时间"
+              end-placeholder="结束时间"
+              style="width: 100%; margin-top: 8px"
+              @change="handleDateChange"
+            />
+          </div>
+        </el-form-item>
 
         <el-form-item>
           <el-button
@@ -148,10 +158,6 @@
           >
             <el-icon><VideoPlay /></el-icon>
             {{ syncStatus.running ? '同步进行中...' : '开始同步' }}
-          </el-button>
-          <el-button @click="handleReset" :disabled="syncStatus.running" size="large">
-            <el-icon><Refresh /></el-icon>
-            重置
           </el-button>
         </el-form-item>
       </el-form>
@@ -338,7 +344,7 @@ const resultTableData = computed(() => {
 })
 
 const getFeatureName = (featureId: number) => {
-  const feature = features.value.find(f => f.id === featureId)
+  const feature = features.value.find(f => f.feature_id === featureId)
   return feature ? feature.name : `Feature ${featureId}`
 }
 
@@ -537,8 +543,6 @@ const handleSync = async () => {
 }
 
 const handleReset = () => {
-  dateRange.value = null
-  activeShortcut.value = null
   syncAll.value = true
   syncAdminOperLog.value = false
   form.feature_ids = []
@@ -631,6 +635,45 @@ const formatDuration = (ms: number) => {
 <style scoped>
 .data-sync {
   padding: 0;
+}
+
+.options-card {
+  margin-bottom: 16px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+}
+
+.options-card :deep(.el-card__header) {
+  background: rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
+.options-card :deep(.el-card__body) {
+  background: rgba(255, 255, 255, 0.95);
+  padding: 20px;
+}
+
+.options-card .card-title {
+  color: white;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.options-card :deep(.el-form-item__label) {
+  color: #606266;
+  font-weight: 600;
+  padding-right: 12px;
+}
+
+.options-card :deep(.el-button) {
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+}
+
+.options-card :deep(.el-button:hover) {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .sync-card,
