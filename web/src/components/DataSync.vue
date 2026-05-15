@@ -466,11 +466,9 @@ const handleRetryFeature = async (featureId: number) => {
   } catch { return }
 
   try {
-    const res: any = await syncAPI.sync({
+    const res: any = await schedulerAPI.incrementalSync({
       sync_all: false,
       feature_ids: [featureId],
-      start_time: 0,
-      end_time: 0,
     })
     if (res.code === 0) {
       ElMessage.success('重试同步已启动')

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -32,9 +33,13 @@ func (h *SystemHandler) GetStatus(c echo.Context) error {
 
 	// 1. 系统健康
 	health := make(map[string]interface{})
-	sqlDB, _ := h.db.DB()
-	dbErr := sqlDB.Ping()
-	health["db_connected"] = dbErr == nil
+	sqlDB, err := h.db.DB()
+	if err != nil || sqlDB == nil {
+		health["db_connected"] = false
+	} else {
+		dbErr := sqlDB.Ping()
+		health["db_connected"] = dbErr == nil
+	}
 	health["uptime_seconds"] = int(time.Since(h.startTime).Seconds())
 
 	// 2. 同步覆盖
@@ -47,9 +52,13 @@ func (h *SystemHandler) GetStatus(c echo.Context) error {
 			"total_synced":  s.TotalSynced,
 		}
 		if s.LastLogTime > 0 {
-			info["data_age_hours"] = int(time.Since(time.Unix(s.LastLogTime, 0)).Hours())
+			age := int(time.Since(time.Unix(s.LastLogTime, 0)).Hours())
+			if age < 0 {
+				age = 0
+			}
+			info["data_age_hours"] = age
 		}
-		coverage[string(rune('0'+s.FeatureID))] = info
+		coverage[strconv.Itoa(s.FeatureID)] = info
 	}
 
 	// 3. 数据库表大小

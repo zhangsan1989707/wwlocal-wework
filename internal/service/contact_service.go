@@ -29,7 +29,7 @@ type ContactService struct {
 
 func NewContactService(cfg *config.WeWorkConfig) *ContactService {
 	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.InsecureSkipVerify},
 	}
 	return &ContactService{
 		baseURL:       cfg.BaseURL,
