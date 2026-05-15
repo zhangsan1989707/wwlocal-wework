@@ -14,7 +14,7 @@ RUN apk --no-cache add ca-certificates tzdata
 WORKDIR /app
 COPY --from=builder /app/server .
 COPY --from=builder /app/config.yaml .
-COPY --from=builder /app/keys ./keys
+RUN mkdir -p keys && chown nobody:nobody keys
 
 EXPOSE 8080
 
