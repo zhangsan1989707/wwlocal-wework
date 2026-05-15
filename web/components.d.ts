@@ -44,6 +44,7 @@ declare module 'vue' {
     ElRadioGroup: typeof import('element-plus/es')['ElRadioGroup']
     ElRow: typeof import('element-plus/es')['ElRow']
     ElSelect: typeof import('element-plus/es')['ElSelect']
+    ElSkeleton: typeof import('element-plus/es')['ElSkeleton']
     ElSwitch: typeof import('element-plus/es')['ElSwitch']
     ElTable: typeof import('element-plus/es')['ElTable']
     ElTableColumn: typeof import('element-plus/es')['ElTableColumn']
@@ -56,6 +57,7 @@ declare module 'vue' {
     Login: typeof import('./src/components/Login.vue')['default']
     LogQuery: typeof import('./src/components/LogQuery.vue')['default']
     OperationLog: typeof import('./src/components/OperationLog.vue')['default']
+    SystemStatus: typeof import('./src/components/SystemStatus.vue')['default']
   }
   export interface GlobalDirectives {
     vLoading: typeof import('element-plus/es')['ElLoadingDirective']

@@ -3,7 +3,7 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <span class="card-title">数据类型管理</span>
+          <span class="card-title">日志类型配置</span>
           <el-button type="primary" @click="handleSave" :loading="saving" size="small">
             保存更改
           </el-button>
@@ -11,7 +11,7 @@
       </template>
 
       <el-table :data="features" stripe size="small" v-loading="loading">
-        <el-table-column prop="feature_id" label="Feature ID" width="120" align="center" />
+        <el-table-column prop="feature_id" label="日志类型编号" width="120" align="center" />
         <el-table-column prop="name" label="名称" min-width="150" />
         <el-table-column label="启用同步" width="100" align="center">
           <template #default="{ row }">
@@ -26,27 +26,35 @@
             <span>{{ row.total_synced > 0 ? formatNumber(row.total_synced) : '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="同步进度" width="120">
+        <el-table-column label="最新日志时间" width="120">
           <template #default="{ row }">
             <span v-if="row.last_log_time > 0" class="time-text">{{ formatUnixTime(row.last_log_time) }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
-      </el-table>
+          <el-table-column label="操作" width="120" align="center">
+            <template #default="{ row }">
+              <el-button type="primary" size="small" link @click="viewRecentLogs(row.feature_id)">
+                查看最近日志
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
 
       <div class="actions">
         <el-button @click="handleEnableAll" size="small">全部启用</el-button>
-        <el-button @click="handleDisableAll" size="small">全部禁用</el-button>
+        <el-button @click="handleDisableAll" size="small" type="danger" plain>停用全部日志类型</el-button>
       </div>
     </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, inject } from 'vue'
 import { syncFeatureAPI } from '../api'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
+const navigate = inject('navigate') as (menu: string, params?: any) => void
 const features = ref<any[]>([])
 const loading = ref(false)
 const saving = ref(false)
@@ -94,8 +102,24 @@ const handleEnableAll = () => {
   features.value.forEach(f => { f.enabled = true })
 }
 
-const handleDisableAll = () => {
+const handleDisableAll = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '停用后所有日志类型将不再参与定时同步，确定继续吗？',
+      '确认停用全部',
+      { type: 'warning', confirmButtonText: '确定停用', cancelButtonText: '取消' }
+    )
+  } catch { return }
   features.value.forEach(f => { f.enabled = false })
+}
+
+const viewRecentLogs = (featureId: number) => {
+  const end = new Date()
+  const start = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000)
+  navigate('query', {
+    feature_ids: [featureId],
+    dateRange: [start, end],
+  })
 }
 
 const formatTime = (timeStr: string) => {

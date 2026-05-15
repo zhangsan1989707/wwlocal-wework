@@ -22,16 +22,16 @@
           {{ phaseText }} {{ syncStatus.progress }} / {{ syncStatus.total }}
         </p>
         <el-button type="danger" size="small" @click="handleCancel" style="margin-top: 12px">
-          取消同步
+          请求停止同步
         </el-button>
       </div>
 
       <div v-else class="sync-actions">
         <el-button type="primary" @click="handleSyncFull" size="large">
-          全量同步
+          同步全部通讯录
         </el-button>
         <el-button type="primary" plain @click="handleSyncIncremental" size="large">
-          增量同步
+          同步新增人员
         </el-button>
         <span v-if="syncStatus.last_sync" class="last-sync">
           上次同步: {{ formatTime(syncStatus.last_sync) }}
@@ -169,14 +169,23 @@
         </el-descriptions-item>
         <el-descriptions-item label="所属部门">{{ deptNames }}</el-descriptions-item>
       </el-descriptions>
+      <div v-if="drawerContact?.mobile" style="margin-top: 16px">
+        <el-button type="primary" @click="viewUserLogs">
+          <el-icon><Search /></el-icon>
+          查看该人员日志
+        </el-button>
+      </div>
     </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, inject } from 'vue'
 import { contactAPI } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Search } from '@element-plus/icons-vue'
+
+const navigate = inject('navigate') as (menu: string, params?: any) => void
 
 const contacts = ref<any[]>([])
 const total = ref(0)
@@ -367,6 +376,13 @@ const handleRowClick = async (row: any) => {
   }
 }
 
+const viewUserLogs = () => {
+  if (drawerContact.value?.mobile) {
+    drawerVisible.value = false
+    navigate('query', { mobile: drawerContact.value.mobile })
+  }
+}
+
 const filterNode = (value: string, data: any) => {
   if (!value) return true
   return data.name.includes(value)
@@ -375,8 +391,8 @@ const filterNode = (value: string, data: any) => {
 const handleSyncFull = async () => {
   try {
     await ElMessageBox.confirm(
-      '全量同步将从政务微信拉取所有通讯录数据（对新用户逐个获取详情），确定开始吗？',
-      '确认全量同步',
+      '将从政务微信拉取所有通讯录数据（对新用户逐个获取详情），确定开始吗？',
+      '确认同步',
       { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' }
     )
   } catch { return }
@@ -384,7 +400,7 @@ const handleSyncFull = async () => {
   try {
     const res: any = await contactAPI.sync()
     if (res.code === 0) {
-      ElMessage.success('通讯录全量同步已启动')
+      ElMessage.success('通讯录同步已启动')
       await checkSyncStatus()
       startPolling()
     }
@@ -396,8 +412,8 @@ const handleSyncFull = async () => {
 const handleSyncIncremental = async () => {
   try {
     await ElMessageBox.confirm(
-      '增量同步将只拉取新增用户详情，确定开始吗？',
-      '确认增量同步',
+      '将只拉取新增用户详情，确定开始吗？',
+      '确认同步',
       { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' }
     )
   } catch { return }
@@ -405,7 +421,7 @@ const handleSyncIncremental = async () => {
   try {
     const res: any = await contactAPI.syncIncremental()
     if (res.code === 0) {
-      ElMessage.success('通讯录增量同步已启动')
+      ElMessage.success('通讯录同步已启动')
       await checkSyncStatus()
       startPolling()
     }

@@ -20,11 +20,11 @@
       <el-form :model="form" label-position="top">
         <el-row :gutter="20">
           <el-col :span="12">
-            <el-form-item label="数据类型">
+            <el-form-item label="日志类型">
               <el-select
                 v-model="form.feature_ids"
                 multiple
-                placeholder="请选择数据类型（可多选）"
+                placeholder="请选择日志类型（可多选）"
                 style="width: 100%"
                 collapse-tags
                 collapse-tags-tooltip
@@ -85,7 +85,7 @@
           <el-col :span="16">
             <el-form-item label="&nbsp;">
               <el-checkbox v-model="form.realtime">
-                <el-tooltip content="当数据库中没有数据时，自动从政务微信 API 实时查询" placement="top">
+                <el-tooltip content="数据库无结果时自动从政务微信实时拉取" placement="top">
                   <span>实时查询 <el-icon><QuestionFilled /></el-icon></span>
                 </el-tooltip>
               </el-checkbox>
@@ -100,7 +100,7 @@
                 <div class="conditions-header">
                   <el-button type="primary" link @click="addCondition">
                     <el-icon><Plus /></el-icon>
-                    添加条件
+                    添加字段条件
                   </el-button>
                   <el-button v-if="conditions.length > 0" type="danger" link @click="clearConditions">
                     <el-icon><Delete /></el-icon>
@@ -108,7 +108,7 @@
                   </el-button>
                 </div>
                 <div v-if="conditions.length === 0" class="empty-conditions">
-                  暂无筛选条件，点击"添加条件"开始配置
+                  可按 openid、sender.openid、msg_type 等字段筛选
                 </div>
                 <div v-else class="conditions-list">
                   <div v-for="(condition, index) in conditions" :key="index" class="condition-item">
@@ -168,7 +168,7 @@
         stripe
         highlight-current-row
       >
-        <el-table-column prop="feature_id" label="FeatureID" width="100" align="center" />
+        <el-table-column prop="feature_id" label="日志类型编号" width="100" align="center" />
         <el-table-column prop="log_date" label="时间" width="180" align="center" />
         <el-table-column label="数据内容" min-width="400">
           <template #default="{ row, $index }">
@@ -204,7 +204,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, onMounted, watch, inject } from 'vue'
 import { logAPI, syncFeatureAPI, contactAPI } from '../api'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh, DataAnalysis, Plus, Delete, Close, QuestionFilled, Download } from '@element-plus/icons-vue'
@@ -249,23 +249,64 @@ const timeShortcuts = [
   { label: '最近30天', hours: 720 },
 ]
 
+const navigateParams = inject('navigateParams') as any
+
 onMounted(async () => {
   try {
     const res: any = await syncFeatureAPI.list()
     if (res.code === 0) {
       features.value = (res.data || []).map((f: any) => ({ id: f.feature_id, name: f.name }))
     }
-    const timeRes: any = await logAPI.getTimeRange()
-    if (timeRes.code === 0) {
-      dateRange.value = [
-        new Date(timeRes.data.start_time * 1000),
-        new Date(timeRes.data.end_time * 1000),
-      ]
-    }
   } catch (err) {
     ElMessage.error('加载数据失败')
   }
   loadFieldPaths()
+
+  // 处理跨页面导航参数
+  if (navigateParams?.value) {
+    const params = navigateParams.value
+    if (params.mobile) {
+      form.mobile = params.mobile
+    }
+    if (params.feature_ids) {
+      form.feature_ids = params.feature_ids
+    }
+    if (params.dateRange) {
+      dateRange.value = params.dateRange
+      activeShortcut.value = '最近7天'
+    }
+    // 自动执行查询
+    if (params.mobile || (params.feature_ids?.length > 0)) {
+      if (form.feature_ids.length > 0 && dateRange.value) {
+        handleQuery()
+      } else if (!dateRange.value) {
+        // 没有指定时间范围，用默认时间范围
+        try {
+          const timeRes: any = await logAPI.getTimeRange()
+          if (timeRes.code === 0) {
+            dateRange.value = [
+              new Date(timeRes.data.start_time * 1000),
+              new Date(timeRes.data.end_time * 1000),
+            ]
+          }
+        } catch { /* ignore */ }
+        if (form.feature_ids.length > 0) {
+          handleQuery()
+        }
+      }
+    }
+  } else {
+    // 默认行为：加载时间范围
+    try {
+      const timeRes: any = await logAPI.getTimeRange()
+      if (timeRes.code === 0) {
+        dateRange.value = [
+          new Date(timeRes.data.start_time * 1000),
+          new Date(timeRes.data.end_time * 1000),
+        ]
+      }
+    } catch { /* ignore */ }
+  }
 })
 
 const loadFieldPaths = async () => {
@@ -397,7 +438,7 @@ const fetchContactNames = async (data: any[]) => {
 
 const handleQuery = async () => {
   if (form.feature_ids.length === 0) {
-    ElMessage.warning('请选择至少一个数据类型')
+    ElMessage.warning('请选择至少一个日志类型')
     return
   }
   if (!dateRange.value) {
@@ -520,7 +561,7 @@ const toggleRow = (index: number) => {
 const handleExport = () => {
   if (tableData.value.length === 0) return
 
-  const headers = ['FeatureID', '时间', '数据内容']
+  const headers = ['日志类型编号', '时间', '数据内容']
   const rows = tableData.value.map(row => [
     row.feature_id,
     row.log_date,

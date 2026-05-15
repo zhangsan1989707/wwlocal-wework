@@ -52,6 +52,7 @@ export const keyAPI = {
   list: () => api.get('/keys'),
   add: (data: any) => api.post('/keys', data),
   activate: (data: any) => api.put('/keys/activate', data),
+  test: (version: string) => api.get('/keys/test', { params: { version } }),
 }
 
 export const schedulerAPI = {
@@ -81,7 +82,12 @@ export const operationLogAPI = {
 }
 
 export const dashboardAPI = {
+  getOverview: () => api.get('/dashboard/overview'),
   getInactiveUsers: (params?: { range?: string; dept_id?: number; min_inactive_days?: number }) => api.get('/dashboard/inactive-users', { params }),
+}
+
+export const systemAPI = {
+  getStatus: () => api.get('/system/status'),
 }
 
 export const syncHistoryAPI = {

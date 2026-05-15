@@ -117,15 +117,16 @@ func main() {
 	operationLogSvc := service.NewOperationLogService(operationLogRepo)
 	operationLogHandler := handler.NewOperationLogHandler(operationLogSvc)
 
-	dashboardHandler := handler.NewDashboardHandler(db, logRepo, contactRepo, cfg)
+	dashboardHandler := handler.NewDashboardHandler(db, logRepo, contactRepo, syncHistoryRepo, syncStateRepo, keyRepo, cfg)
 	syncHistoryHandler := handler.NewSyncHistoryHandler(syncHistoryRepo)
 	syncFeatureHandler := handler.NewSyncFeatureHandler(syncFeatureRepo)
+	systemHandler := handler.NewSystemHandler(db, syncStateRepo, keyRepo, contactRepo)
 
 	if cfg.Scheduler.Enabled {
 		schedulerSvc.Start(interval)
 	}
 
-	r := router.NewRouter(healthHandler, authHandler, logHandler, keyHandler, syncHandler, schedulerHandler, contactHandler, operationLogHandler, dashboardHandler, syncHistoryHandler, syncFeatureHandler, operationLogSvc, cfg.Auth.JWTSecret)
+	r := router.NewRouter(healthHandler, authHandler, logHandler, keyHandler, syncHandler, schedulerHandler, contactHandler, operationLogHandler, dashboardHandler, syncHistoryHandler, syncFeatureHandler, systemHandler, operationLogSvc, cfg.Auth.JWTSecret)
 
 	e := echo.New()
 	r.Setup(e)

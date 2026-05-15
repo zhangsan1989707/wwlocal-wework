@@ -7,11 +7,11 @@
       <el-table :data="keys" border style="width: 100%">
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="version" label="版本" width="120" />
-        <el-table-column prop="private_key_path" label="密钥路径" />
+        <el-table-column prop="private_key_path" label="服务器存储路径" />
         <el-table-column prop="is_active" label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="row.is_active ? 'success' : 'info'">
-              {{ row.is_active ? '已激活' : '未激活' }}
+              {{ row.is_active ? '当前密钥' : '备用' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -20,7 +20,7 @@
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120">
+        <el-table-column label="操作" width="200">
           <template #default="{ row }">
             <el-button
               type="primary"
@@ -28,7 +28,13 @@
               :disabled="row.is_active"
               @click="handleActivate(row.version)"
             >
-              激活
+              设为当前密钥
+            </el-button>
+            <el-button
+              size="small"
+              @click="handleTest(row.version)"
+            >
+              测试密钥
             </el-button>
           </template>
         </el-table-column>
@@ -40,6 +46,13 @@
         <span>添加新密钥</span>
       </template>
       <el-form :model="form" label-width="120px">
+        <el-alert
+          title="私钥只存储在本机服务器，不会上传外部服务"
+          type="info"
+          show-icon
+          :closable="false"
+          style="margin-bottom: 16px"
+        />
         <el-form-item label="版本号">
           <el-input v-model="form.version" placeholder="如: v2" />
         </el-form-item>
@@ -109,9 +122,9 @@ const handleAdd = async () => {
 const handleActivate = async (version: string) => {
   try {
     await ElMessageBox.confirm(
-      `确定要激活密钥版本 "${version}" 吗？激活后其他版本将被停用。`,
-      '确认激活',
-      { type: 'warning', confirmButtonText: '确定', cancelButtonText: '取消' }
+      `确定将密钥版本 "${version}" 设为当前密钥吗？新密钥只影响后续解密，历史数据不会重新解密。`,
+      '切换解密密钥',
+      { type: 'warning', confirmButtonText: '确定切换', cancelButtonText: '取消' }
     )
   } catch {
     return
@@ -127,6 +140,19 @@ const handleActivate = async (version: string) => {
     }
   } catch (err: any) {
     ElMessage.error(err.message || '激活失败')
+  }
+}
+
+const handleTest = async (version: string) => {
+  try {
+    const res: any = await keyAPI.test(version)
+    if (res.code === 0) {
+      ElMessage.success(`密钥验证通过：${res.data.key_size} 位 RSA (${res.data.key_type})`)
+    } else {
+      ElMessage.error(res.msg || '密钥验证失败')
+    }
+  } catch (err: any) {
+    ElMessage.error(err.message || '密钥验证失败')
   }
 }
 

@@ -2,7 +2,7 @@
   <div class="login-container">
     <el-card class="login-card">
       <template #header>
-        <h2 style="text-align: center; margin: 0">政务微信数据查询平台</h2>
+        <h2 style="text-align: center; margin: 0">政务微信开放数据审计平台</h2>
       </template>
       <el-form :model="form" @submit.prevent="handleLogin">
         <el-form-item>

@@ -58,3 +58,17 @@ func (h *KeyHandler) Activate(c echo.Context) error {
 
 	return response.Success(c, map[string]string{"message": "key activated", "version": req.Version})
 }
+
+func (h *KeyHandler) Test(c echo.Context) error {
+	version := c.QueryParam("version")
+	if version == "" {
+		return response.Error(c, 400, "version is required")
+	}
+
+	result, err := h.keySvc.TestKey(version)
+	if err != nil {
+		return response.Error(c, 500, err.Error())
+	}
+
+	return response.Success(c, result)
+}

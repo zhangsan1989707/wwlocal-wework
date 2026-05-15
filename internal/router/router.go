@@ -20,11 +20,12 @@ type Router struct {
 	dashboardHandler     *handler.DashboardHandler
 	syncHistoryHandler   *handler.SyncHistoryHandler
 	syncFeatureHandler   *handler.SyncFeatureHandler
+	systemHandler        *handler.SystemHandler
 	operationLogSvc      *service.OperationLogService
 	jwtSecret            string
 }
 
-func NewRouter(healthHandler *handler.HealthHandler, authHandler *handler.AuthHandler, logHandler *handler.LogHandler, keyHandler *handler.KeyHandler, syncHandler *handler.SyncHandler, schedulerHandler *handler.SchedulerHandler, contactHandler *handler.ContactHandler, operationLogHandler *handler.OperationLogHandler, dashboardHandler *handler.DashboardHandler, syncHistoryHandler *handler.SyncHistoryHandler, syncFeatureHandler *handler.SyncFeatureHandler, operationLogSvc *service.OperationLogService, jwtSecret string) *Router {
+func NewRouter(healthHandler *handler.HealthHandler, authHandler *handler.AuthHandler, logHandler *handler.LogHandler, keyHandler *handler.KeyHandler, syncHandler *handler.SyncHandler, schedulerHandler *handler.SchedulerHandler, contactHandler *handler.ContactHandler, operationLogHandler *handler.OperationLogHandler, dashboardHandler *handler.DashboardHandler, syncHistoryHandler *handler.SyncHistoryHandler, syncFeatureHandler *handler.SyncFeatureHandler, systemHandler *handler.SystemHandler, operationLogSvc *service.OperationLogService, jwtSecret string) *Router {
 	return &Router{
 		healthHandler:       healthHandler,
 		authHandler:         authHandler,
@@ -37,6 +38,7 @@ func NewRouter(healthHandler *handler.HealthHandler, authHandler *handler.AuthHa
 		dashboardHandler:    dashboardHandler,
 		syncHistoryHandler:  syncHistoryHandler,
 		syncFeatureHandler:  syncFeatureHandler,
+		systemHandler:       systemHandler,
 		operationLogSvc:     operationLogSvc,
 		jwtSecret:           jwtSecret,
 	}
@@ -79,6 +81,7 @@ func (r *Router) Setup(e *echo.Echo) {
 			keys.GET("", r.keyHandler.List)
 			keys.POST("", r.keyHandler.Add)
 			keys.PUT("/activate", r.keyHandler.Activate)
+			keys.GET("/test", r.keyHandler.Test)
 		}
 
 		scheduler := api.Group("/scheduler")
@@ -117,7 +120,13 @@ func (r *Router) Setup(e *echo.Echo) {
 
 		dashboard := api.Group("/dashboard")
 		{
+			dashboard.GET("/overview", r.dashboardHandler.GetOverview)
 			dashboard.GET("/inactive-users", r.dashboardHandler.GetInactiveUsers)
+		}
+
+		system := api.Group("/system")
+		{
+			system.GET("/status", r.systemHandler.GetStatus)
 		}
 	}
 }

@@ -3,7 +3,7 @@
     <el-card class="filter-card">
       <template #header>
         <div class="card-header">
-          <span class="card-title">操作日志</span>
+          <span class="card-title">操作审计</span>
           <div class="header-actions">
             <el-button type="primary" @click="handleQuery" :loading="loading">
               <el-icon><Search /></el-icon>
@@ -26,6 +26,8 @@
           <el-select v-model="filter.status" clearable placeholder="全部" style="width: 120px">
             <el-option label="成功" value="success" />
             <el-option label="失败" value="fail" />
+            <el-option label="未授权" value="unauthorized" />
+            <el-option label="参数错误" value="bad_request" />
           </el-select>
         </el-form-item>
       </el-form>
@@ -105,7 +107,7 @@ const actionLabels: Record<string, string> = {
   key_management: '密钥管理',
   scheduler: '定时任务',
   contacts: '通讯录',
-  operation_log: '操作日志',
+  operation_log: '操作审计',
 }
 
 const filter = reactive({
@@ -146,6 +148,10 @@ const handleQuery = async () => {
       params.status_code = 200
     } else if (filter.status === 'fail') {
       params.status_code = 500
+    } else if (filter.status === 'unauthorized') {
+      params.status_code = 401
+    } else if (filter.status === 'bad_request') {
+      params.status_code = 400
     }
 
     const res: any = await operationLogAPI.list(params)

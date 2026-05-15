@@ -61,7 +61,7 @@
           plain
         >
           <el-icon><Refresh /></el-icon>
-          立即增量同步
+          同步新增数据
         </el-button>
       </div>
     </el-card>
@@ -69,7 +69,7 @@
     <el-card class="sync-card">
       <template #header>
         <div class="card-header">
-          <span class="card-title">全量同步</span>
+          <span class="card-title">按时间范围同步</span>
           <el-tag :type="syncStatus.running ? 'warning' : 'success'" size="large">
             {{ syncStatus.running ? '同步中...' : '空闲' }}
           </el-tag>
@@ -108,13 +108,13 @@
             <el-form-item label="同步选项">
               <div class="sync-options">
                 <el-checkbox v-model="syncAll" :disabled="syncStatus.running">
-                  同步所有数据类型 ({{ features.length }} 项)
+                  同步所有日志类型 ({{ features.length }} 项)
                 </el-checkbox>
                 <el-select
                   v-if="!syncAll"
                   v-model="form.feature_ids"
                   multiple
-                  placeholder="请选择要同步的数据类型"
+                  placeholder="请选择要同步的日志类型"
                   style="width: 100%; margin-top: 8px"
                   :disabled="syncStatus.running"
                   collapse-tags
@@ -144,7 +144,7 @@
             size="large"
           >
             <el-icon><VideoPlay /></el-icon>
-            {{ syncStatus.running ? '同步进行中...' : '开始全量同步' }}
+            {{ syncStatus.running ? '同步进行中...' : '开始同步' }}
           </el-button>
           <el-button @click="handleReset" :disabled="syncStatus.running" size="large">
             <el-icon><Refresh /></el-icon>
@@ -167,9 +167,9 @@
           :format="progressFormat"
           status="success"
         />
-        <p class="progress-text">正在同步第 {{ syncStatus.progress }} / {{ syncStatus.total }} 个数据类型<span v-if="syncStatus.current_feature"> (当前: {{ syncStatus.current_feature }})</span>...</p>
+        <p class="progress-text">正在同步第 {{ syncStatus.progress }} / {{ syncStatus.total }} 个日志类型<span v-if="syncStatus.current_feature"> (当前: {{ syncStatus.current_feature }})</span>...</p>
         <el-button type="danger" size="small" @click="handleCancel" style="margin-top: 12px">
-          取消同步
+          请求停止同步
         </el-button>
       </div>
 
@@ -184,7 +184,7 @@
       <div v-if="syncStatus.results && Object.keys(syncStatus.results).length > 0" class="sync-results">
         <h4>同步结果</h4>
         <el-table :data="resultTableData" border max-height="300" size="small">
-          <el-table-column prop="feature_id" label="Feature ID" width="120" align="center" />
+          <el-table-column prop="feature_id" label="日志类型编号" width="120" align="center" />
           <el-table-column prop="name" label="数据类型" min-width="150" />
           <el-table-column prop="count" label="同步数量" width="120" align="center">
             <template #default="{ row }">
@@ -197,6 +197,19 @@
             <template #default="{ row }">
               <span v-if="row.error" class="error-text">{{ row.error }}</span>
               <span v-else>-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="100" align="center">
+            <template #default="{ row }">
+              <el-button
+                v-if="row.count < 0 || row.error"
+                type="primary"
+                size="small"
+                link
+                @click="handleRetryFeature(row.feature_id)"
+              >
+                重试
+              </el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -419,8 +432,8 @@ const handleIncrementalSync = async () => {
 
   try {
     await ElMessageBox.confirm(
-      '增量同步将从上次同步进度继续拉取新数据，确定开始吗？',
-      '确认增量同步',
+      '同步新增数据将从上次同步进度继续拉取新数据，确定开始吗？',
+      '确认同步',
       { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' }
     )
   } catch { return }
@@ -428,13 +441,45 @@ const handleIncrementalSync = async () => {
   try {
     const res: any = await schedulerAPI.incrementalSync({ sync_all: true })
     if (res.code === 0) {
-      ElMessage.success('增量同步已启动')
+      ElMessage.success('同步任务已启动')
       startPolling()
     } else {
       ElMessage.error(res.msg || '增量同步启动失败')
     }
   } catch (err: any) {
     ElMessage.error(err.message || '增量同步启动失败')
+  }
+}
+
+const handleRetryFeature = async (featureId: number) => {
+  if (syncStatus.value.running) {
+    ElMessage.warning('已有同步任务在执行中')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `将重新同步日志类型 ${featureId} 的数据，确定开始吗？`,
+      '确认重试',
+      { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' }
+    )
+  } catch { return }
+
+  try {
+    const res: any = await syncAPI.sync({
+      sync_all: false,
+      feature_ids: [featureId],
+      start_time: 0,
+      end_time: 0,
+    })
+    if (res.code === 0) {
+      ElMessage.success('重试同步已启动')
+      startPolling()
+    } else {
+      ElMessage.error(res.msg || '重试启动失败')
+    }
+  } catch (err: any) {
+    ElMessage.error(err.message || '重试启动失败')
   }
 }
 
@@ -451,8 +496,8 @@ const handleSync = async () => {
 
   try {
     await ElMessageBox.confirm(
-      '全量同步将从政务微信 API 拉取指定时间范围的数据并解密存储，确定开始吗？',
-      '确认全量同步',
+      '将按选定时间范围从政务微信拉取数据并解密存储，确定开始吗？',
+      '确认同步',
       { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' }
     )
   } catch {
