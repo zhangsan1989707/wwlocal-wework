@@ -27,7 +27,7 @@ declare module 'vue' {
     ElDatePicker: typeof import('element-plus/es')['ElDatePicker']
     ElDescriptions: typeof import('element-plus/es')['ElDescriptions']
     ElDescriptionsItem: typeof import('element-plus/es')['ElDescriptionsItem']
-    ElDialog: typeof import('element-plus/es')['ElDialog']
+    ElDivider: typeof import('element-plus/es')['ElDivider']
     ElDrawer: typeof import('element-plus/es')['ElDrawer']
     ElEmpty: typeof import('element-plus/es')['ElEmpty']
     ElForm: typeof import('element-plus/es')['ElForm']
@@ -58,7 +58,6 @@ declare module 'vue' {
     KeyManagement: typeof import('./src/components/KeyManagement.vue')['default']
     Login: typeof import('./src/components/Login.vue')['default']
     LogQuery: typeof import('./src/components/LogQuery.vue')['default']
-    OperationLog: typeof import('./src/components/OperationLog.vue')['default']
     SystemStatus: typeof import('./src/components/SystemStatus.vue')['default']
   }
   export interface GlobalDirectives {

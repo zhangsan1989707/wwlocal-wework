@@ -29,13 +29,25 @@
         </el-form-item>
         <el-form-item label="操作类型">
           <el-select v-model="filter.operation" clearable placeholder="全部" style="width: 200px">
-            <el-option label="添加" value="add" />
-            <el-option label="删除" value="delete" />
-            <el-option label="修改" value="update" />
+            <el-option label="全部" value="" />
+            <el-option
+              v-for="type in operTypes"
+              :key="type"
+              :label="getOperationLabel(type)"
+              :value="type"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="操作者">
-          <el-input v-model="filter.operator" clearable placeholder="请输入" style="width: 150px" />
+          <el-select v-model="filter.operator" clearable placeholder="全部" style="width: 200px" filterable>
+            <el-option label="全部" value="" />
+            <el-option
+              v-for="user in operUsers"
+              :key="user"
+              :label="user"
+              :value="user"
+            />
+          </el-select>
         </el-form-item>
       </el-form>
     </el-card>
@@ -65,14 +77,14 @@
             {{ row.oper_name || row.oper_userid }}
           </template>
         </el-table-column>
-        <el-table-column prop="oper_type" label="操作类型" width="100" align="center">
+        <el-table-column prop="oper_type" label="操作类型" width="150" align="center">
           <template #default="{ row }">
             <el-tag size="small" :type="getOperationTag(row.oper_type)">{{ getOperationLabel(row.oper_type) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="oper_type_id" label="操作对象" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">
-            {{ row.oper_type_id }} - {{ row.oper_type }}
+            {{ row.oper_type_id }}
           </template>
         </el-table-column>
         <el-table-column prop="oper_data" label="详情" min-width="300" show-overflow-tooltip>
@@ -112,6 +124,8 @@ const filter = reactive({
 const loading = ref(false)
 const tableData = ref<any[]>([])
 const total = ref(0)
+const operTypes = ref<string[]>([])
+const operUsers = ref<string[]>([])
 const pagination = reactive({
   page: 1,
   page_size: 20,
@@ -127,8 +141,34 @@ const setTodayRange = () => {
 
 onMounted(async () => {
   setTodayRange()
+  await Promise.all([
+    loadOperTypes(),
+    loadOperUsers(),
+  ])
   await handleQuery()
 })
+
+const loadOperTypes = async () => {
+  try {
+    const res: any = await adminOperLogAPI.getTypes()
+    if (res.code === 0) {
+      operTypes.value = res.data || []
+    }
+  } catch (err) {
+    console.error('Failed to load oper types:', err)
+  }
+}
+
+const loadOperUsers = async () => {
+  try {
+    const res: any = await adminOperLogAPI.getUsers()
+    if (res.code === 0) {
+      operUsers.value = res.data || []
+    }
+  } catch (err) {
+    console.error('Failed to load oper users:', err)
+  }
+}
 
 const handleQuery = async () => {
   loading.value = true
@@ -174,18 +214,38 @@ const formatTime = (ts: number | string) => {
 
 const getOperationLabel = (op: string) => {
   const map: Record<string, string> = {
-    add: '添加',
-    delete: '删除',
-    update: '修改',
+    'member_dept': '成员与部门变更',
+    'permission': '权限管理变更',
+    'app': '应用与小程序',
+    'admin_tool': '管理工具变更',
+    'audit': '审计',
+    'external_service': '对外服务',
+    'contact_chat': '通讯录与聊天管理',
+    'login': '登录管理',
+    'external_contact': '外部联系人管理',
+    'security': '安全与保密',
+    'help': '帮助与反馈',
+    'data_protection': '数据防泄漏',
+    'other': '其他',
   }
   return map[op] || op
 }
 
 const getOperationTag = (op: string) => {
   const map: Record<string, string> = {
-    add: 'success',
-    delete: 'danger',
-    update: 'warning',
+    'member_dept': 'primary',
+    'permission': 'success',
+    'app': 'warning',
+    'admin_tool': 'danger',
+    'audit': 'info',
+    'external_service': '',
+    'contact_chat': 'primary',
+    'login': 'success',
+    'external_contact': 'warning',
+    'security': 'danger',
+    'help': 'info',
+    'data_protection': '',
+    'other': 'info',
   }
   return map[op] || 'info'
 }

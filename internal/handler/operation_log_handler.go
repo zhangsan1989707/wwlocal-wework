@@ -32,8 +32,10 @@ func (h *OperationLogHandler) List(c echo.Context) error {
 		return response.Error(c, 500, "query operation logs failed")
 	}
 	return response.Success(c, map[string]interface{}{
-		"data":  logs,
-		"total": total,
+		"data":       logs,
+		"total":      total,
+		"page":       page,
+		"page_size":  pageSize,
 	})
 }
 

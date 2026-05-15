@@ -27,6 +27,61 @@ api.interceptors.response.use(
   }
 )
 
+export interface LogQueryParams {
+  feature_ids?: number[]
+  start_time?: number
+  end_time?: number
+  mobile?: string
+  conditions?: { key: string; operator: string; value: string }[]
+  page?: number
+  page_size?: number
+  realtime?: boolean
+}
+
+export interface SyncParams {
+  sync_all: boolean
+  feature_ids?: number[]
+  start_time?: number
+  end_time?: number
+}
+
+export interface PaginatedParams {
+  page?: number
+  page_size?: number
+}
+
+export interface ContactListParams extends PaginatedParams {
+  department_id?: number
+  keyword?: string
+  name?: string
+  mobile?: string
+}
+
+export interface ContactMemberParams extends PaginatedParams {
+  keyword?: string
+}
+
+export interface SyncHistoryParams extends PaginatedParams {
+  sync_type?: string
+}
+
+export interface SyncFeatureItem {
+  feature_id: number
+  enabled: boolean
+}
+
+export interface AdminOperLogParams extends PaginatedParams {
+  start_time?: number
+  end_time?: number
+  oper_type?: string
+  oper_userid?: string
+}
+
+export interface AdminOperLogSync {
+  start_time?: number
+  end_time?: number
+}
+
 export const authAPI = {
   login: (data: { username: string; password: string }) => api.post('/auth/login', data),
 }
@@ -36,38 +91,38 @@ export const healthAPI = {
 }
 
 export const logAPI = {
-  query: (data: any) => api.post('/logs/query', data),
+  query: (data: LogQueryParams) => api.post('/logs/query', data),
   getFeatures: () => api.get('/logs/features'),
   getTimeRange: () => api.get('/logs/time-range'),
   getFieldPaths: () => api.get('/logs/field-paths'),
 }
 
 export const syncAPI = {
-  sync: (data: any) => api.post('/logs/sync', data),
+  sync: (data: SyncParams) => api.post('/logs/sync', data),
   cancel: () => api.post('/logs/sync/cancel'),
   status: () => api.get('/logs/sync/status'),
 }
 
 export const keyAPI = {
   list: () => api.get('/keys'),
-  add: (data: any) => api.post('/keys', data),
-  activate: (data: any) => api.put('/keys/activate', data),
+  add: (data: { version: string; pem_content?: string }) => api.post('/keys', data),
+  activate: (data: { version: string }) => api.put('/keys/activate', data),
   test: (version: string) => api.get('/keys/test', { params: { version } }),
 }
 
 export const schedulerAPI = {
-  start: (data?: any) => api.post('/scheduler/start', data),
+  start: (data?: { start_delay?: string }) => api.post('/scheduler/start', data),
   stop: () => api.post('/scheduler/stop'),
   status: () => api.get('/scheduler/status'),
-  incrementalSync: (data: any) => api.post('/scheduler/sync', data),
+  incrementalSync: (data: SyncParams) => api.post('/scheduler/sync', data),
   setInterval: (data: { interval: string }) => api.put('/scheduler/interval', data),
 }
 
 export const contactAPI = {
-  list: (params: any) => api.get('/contacts', { params }),
+  list: (params: ContactListParams) => api.get('/contacts', { params }),
   getDepartments: () => api.get('/contacts/departments'),
   getDeptTree: () => api.get('/contacts/tree'),
-  getDeptMembers: (deptId: number, params: any) => api.get(`/contacts/departments/${deptId}/members`, { params }),
+  getDeptMembers: (deptId: number, params: ContactMemberParams) => api.get(`/contacts/departments/${deptId}/members`, { params }),
   getContact: (userId: string) => api.get(`/contacts/${userId}`),
   getNames: (user_ids: string[]) => api.post('/contacts/names', { user_ids }),
   sync: () => api.post('/contacts/sync'),
@@ -89,18 +144,20 @@ export const systemAPI = {
 }
 
 export const syncHistoryAPI = {
-  list: (params: any) => api.get('/sync-history', { params }),
+  list: (params: SyncHistoryParams) => api.get('/sync-history', { params }),
 }
 
 export const syncFeatureAPI = {
   list: () => api.get('/sync-features'),
-  update: (data: any) => api.put('/sync-features', data),
+  update: (data: { features: SyncFeatureItem[] }) => api.put('/sync-features', data),
 }
 
 export const adminOperLogAPI = {
-  query: (params: any) => api.get('/admin-oper-logs', { params }),
-  sync: (data: any) => api.post('/admin-oper-logs/sync', data),
+  query: (params: AdminOperLogParams) => api.get('/admin-oper-logs', { params }),
+  sync: (data: AdminOperLogSync) => api.post('/admin-oper-logs/sync', data),
   syncStatus: () => api.get('/admin-oper-logs/sync/status'),
+  getTypes: () => api.get('/admin-oper-logs/types'),
+  getUsers: () => api.get('/admin-oper-logs/users'),
 }
 
 export default api

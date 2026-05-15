@@ -12,7 +12,7 @@
           <el-button type="text" style="color: rgba(255,255,255,.85)" @click="handleLogout">退出</el-button>
         </div>
       </el-header>
-      <el-container>
+      <el-container class="main-container">
         <el-aside :width="isCollapsed ? '64px' : '200px'">
           <div class="collapse-btn" @click="isCollapsed = !isCollapsed">
             <el-icon :size="16">
@@ -61,7 +61,7 @@
             </el-menu-item>
           </el-menu>
         </el-aside>
-        <el-main>
+        <el-main class="main-content">
           <Dashboard v-if="activeMenu === 'dashboard'" />
           <LogQuery v-else-if="activeMenu === 'query'" />
           <DataSync v-else-if="activeMenu === 'sync'" />
@@ -133,6 +133,7 @@ const handleLogout = () => {
 
 html, body, #app {
   height: 100%;
+  overflow: hidden;
 }
 
 .app-container {
@@ -148,6 +149,8 @@ html, body, #app {
   padding: 0 24px;
   height: 52px !important;
   box-shadow: 0 1px 4px rgba(0,0,0,.15);
+  position: relative;
+  z-index: 100;
 }
 
 .header-left {
@@ -179,12 +182,20 @@ html, body, #app {
   color: rgba(255,255,255,.85);
 }
 
+.main-container {
+  height: calc(100vh - 52px);
+  overflow: hidden;
+}
+
 .el-aside {
   background-color: #f8f9fa;
   border-right: 1px solid #e8e8e8;
   transition: width 0.3s ease;
   overflow: hidden;
   flex-shrink: 0;
+  height: 100%;
+  position: sticky;
+  top: 0;
 }
 
 .collapse-btn {
@@ -205,6 +216,8 @@ html, body, #app {
 
 .el-menu-vertical {
   border-right: none;
+  height: calc(100% - 40px);
+  overflow-y: auto;
 }
 
 /* 折叠态：隐藏文字 */
@@ -217,10 +230,12 @@ html, body, #app {
   position: relative;
 }
 
-.el-main {
+.main-content {
   background-color: #f0f2f5;
   padding: 16px;
   flex: 1;
   min-width: 0;
+  overflow-y: auto;
+  height: 100%;
 }
 </style>

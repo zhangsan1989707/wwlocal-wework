@@ -50,6 +50,7 @@ func (s *SchedulerService) Stop() {
 	close(s.stopCh)
 	s.ticker.Stop()
 	s.running = false
+	s.syncSvc.Cancel()
 	log.Printf("scheduler stopped")
 }
 

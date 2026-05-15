@@ -47,6 +47,9 @@ func (s *DecryptService) getDecryptor(version string) (*crypto.RSADecryptor, err
 	}
 
 	s.cacheMu.Lock()
+	if len(s.cache) > 20 {
+		s.cache = make(map[string]*crypto.RSADecryptor)
+	}
 	s.cache[version] = dec
 	s.cacheMu.Unlock()
 	return dec, nil

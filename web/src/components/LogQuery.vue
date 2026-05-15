@@ -173,10 +173,10 @@
         <el-table-column label="数据内容" min-width="400">
           <template #default="{ row, $index }">
             <div class="data-cell">
-              <pre v-if="expandedRows.has($index)" class="data-content">{{ formatData(row) }}</pre>
+              <pre v-if="isRowExpanded($index)" class="data-content">{{ formatData(row) }}</pre>
               <span v-else class="data-preview" @click="toggleRow($index)">{{ formatPreview(row) }}</span>
               <el-button
-                v-if="expandedRows.has($index)"
+                v-if="isRowExpanded($index)"
                 type="primary"
                 link
                 size="small"
@@ -238,7 +238,7 @@ const pagination = reactive({
 })
 const features = ref<any[]>([])
 const fieldPaths = ref<string[]>([])
-const expandedRows = reactive(new Set<number>())
+const expandedRows = ref<number[]>([])
 const contactNames = ref<Record<string, string>>({})
 
 const timeShortcuts = [
@@ -550,11 +550,16 @@ const formatPreview = (row: any) => {
   return str.length > 80 ? str.slice(0, 80) + '...' : str
 }
 
+const isRowExpanded = (index: number) => {
+  return expandedRows.value.includes(index)
+}
+
 const toggleRow = (index: number) => {
-  if (expandedRows.has(index)) {
-    expandedRows.delete(index)
+  const idx = expandedRows.value.indexOf(index)
+  if (idx >= 0) {
+    expandedRows.value.splice(idx, 1)
   } else {
-    expandedRows.add(index)
+    expandedRows.value.push(index)
   }
 }
 

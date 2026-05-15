@@ -31,7 +31,7 @@ func (h *TaskHandler) SubmitTask(c echo.Context) error {
 
 	req := new(SubmitTaskRequest)
 	if err := c.Bind(req); err != nil {
-		return response.ValidationError(c, err)
+		return response.Error(c, 400, "invalid request body")
 	}
 
 	task := &model.SyncTask{

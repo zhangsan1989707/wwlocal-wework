@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -18,6 +19,7 @@ import (
 type LogRepository struct {
 	DB           *gorm.DB
 	tableCreated map[string]bool // 缓存已确认存在的表
+	tableMu      sync.RWMutex
 }
 
 func NewLogRepository(db *gorm.DB) *LogRepository {
@@ -30,8 +32,7 @@ func (r *LogRepository) GetTableName(featureID int, t time.Time) string {
 
 func (r *LogRepository) TableExists(tableName string) bool {
 	var result int
-	sql := fmt.Sprintf("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = '%s'", tableName)
-	r.DB.Raw(sql).Scan(&result)
+	r.DB.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?", tableName).Scan(&result)
 	return result > 0
 }
 
@@ -42,7 +43,10 @@ func encDataHash(encData string) string {
 
 func (r *LogRepository) CreateTableIfNotExists(featureID int, month time.Time) error {
 	tableName := r.GetTableName(featureID, month)
-	if r.tableCreated[tableName] {
+	r.tableMu.RLock()
+	cached := r.tableCreated[tableName]
+	r.tableMu.RUnlock()
+	if cached {
 		return nil
 	}
 	err := r.DB.Exec(fmt.Sprintf(`
@@ -67,7 +71,9 @@ func (r *LogRepository) CreateTableIfNotExists(featureID int, month time.Time) e
 	}
 	// 对已有表补列和索引（CREATE TABLE IF NOT EXISTS 不会修改已有表结构）
 	r.MigrateLogTable(tableName)
+	r.tableMu.Lock()
 	r.tableCreated[tableName] = true
+	r.tableMu.Unlock()
 	return nil
 }
 

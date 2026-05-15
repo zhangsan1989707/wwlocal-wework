@@ -13,7 +13,6 @@ type KeyRepository struct {
 	DB         *gorm.DB
 	keysDir    string
 	encryptKey string // hex 编码的 AES 密钥，为空则不加密
-	keyCache   map[string]*model.RSAKeyVersion
 }
 
 func NewKeyRepository(db *gorm.DB, keysDir, encryptKey string) *KeyRepository {
@@ -21,7 +20,6 @@ func NewKeyRepository(db *gorm.DB, keysDir, encryptKey string) *KeyRepository {
 		DB:         db,
 		keysDir:    keysDir,
 		encryptKey: encryptKey,
-		keyCache:   make(map[string]*model.RSAKeyVersion),
 	}
 }
 

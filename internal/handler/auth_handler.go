@@ -22,6 +22,10 @@ func NewAuthHandler(cfg *config.AuthConfig) *AuthHandler {
 	return &AuthHandler{cfg: cfg, passwordHash: hash, limiter: newLoginLimiter()}
 }
 
+func (h *AuthHandler) Stop() {
+	h.limiter.stop()
+}
+
 type LoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -70,7 +74,7 @@ type attemptEntry struct {
 }
 
 func newLoginLimiter() *loginLimiter {
-	l := &loginLimiter{attempts: make(map[string]*attemptEntry)}
+	l := &loginLimiter{attempts: make(map[string]*attemptEntry), stopCh: make(chan struct{})}
 	go l.cleanup()
 	return l
 }
@@ -112,16 +116,22 @@ func (l *loginLimiter) RecordFailure(ip string) {
 }
 
 func (l *loginLimiter) cleanup() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
 	for {
-		time.Sleep(5 * time.Minute)
-		l.mu.Lock()
-		for ip, e := range l.attempts {
-			if e.blocked && time.Since(e.blockedAt) >= time.Minute {
-				delete(l.attempts, ip)
-			} else if !e.blocked && time.Since(e.firstAt) >= time.Minute {
-				delete(l.attempts, ip)
+		select {
+		case <-l.stopCh:
+			return
+		case <-ticker.C:
+			l.mu.Lock()
+			for ip, e := range l.attempts {
+				if e.blocked && time.Since(e.blockedAt) >= time.Minute {
+					delete(l.attempts, ip)
+				} else if !e.blocked && time.Since(e.firstAt) >= time.Minute {
+					delete(l.attempts, ip)
+				}
 			}
+			l.mu.Unlock()
 		}
-		l.mu.Unlock()
 	}
 }

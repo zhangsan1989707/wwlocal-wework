@@ -249,11 +249,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, inject } from 'vue'
+import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
 import { dashboardAPI, contactAPI } from '../api'
 import { ElMessage } from 'element-plus'
 
 const navigate = inject('navigate') as (menu: string, params?: any) => void
+
+const isMounted = { value: true }
+onUnmounted(() => { isMounted.value = false })
 
 // 总览看板
 const overview = ref<any>(null)
@@ -295,25 +298,27 @@ const loadOverview = async () => {
   overviewLoading.value = true
   try {
     const res: any = await dashboardAPI.getOverview()
+    if (!isMounted.value) return
     if (res.code === 0) {
       overview.value = res.data
     }
   } catch (err) {
     console.error(err)
   } finally {
-    overviewLoading.value = false
+    if (isMounted.value) overviewLoading.value = false
   }
 }
 
 const loadDeptTree = async () => {
   try {
     const res: any = await contactAPI.getDeptTree()
+    if (!isMounted.value) return
     if (res.code === 0) {
       deptTree.value = res.data?.tree || []
       expandedKeys.value = deptTree.value.map((n: any) => n.id)
     }
   } catch (err: any) {
-    ElMessage.error(err.response?.data?.msg || '加载部门树失败')
+    if (isMounted.value) ElMessage.error(err.response?.data?.msg || '加载部门树失败')
   }
 }
 
@@ -323,14 +328,15 @@ const fetchData = async () => {
     const params: any = { range: rangeVal.value, min_inactive_days: minDays.value }
     if (deptVal.value) params.dept_id = deptVal.value
     const res: any = await dashboardAPI.getInactiveUsers(params)
+    if (!isMounted.value) return
     if (res.code === 0) {
       data.value = res.data
       totalDays.value = res.data.total_days || totalDays.value
     }
   } catch (err: any) {
-    ElMessage.error(err.response?.data?.msg || '加载使用分析失败')
+    if (isMounted.value) ElMessage.error(err.response?.data?.msg || '加载使用分析失败')
   } finally {
-    loading.value = false
+    if (isMounted.value) loading.value = false
   }
 }
 
@@ -351,11 +357,19 @@ const handleUserClick = (row: any) => {
   }
 }
 
+const csvEscape = (val: any) => {
+  const s = String(val ?? '')
+  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+    return '"' + s.replace(/"/g, '""') + '"'
+  }
+  return s
+}
+
 const exportCSV = () => {
   if (!data.value?.inactive_users?.length) return
   const header = '姓名,手机号,职位,所属部门,活跃天数,未使用天数,UserID\n'
   const rows = data.value.inactive_users.map((u: any) =>
-    `${u.name},${u.mobile},${u.position},${u.department},${u.active_days},${u.inactive_days},${u.user_id}`
+    [u.name, u.mobile, u.position, u.department, u.active_days, u.inactive_days, u.user_id].map(csvEscape).join(',')
   ).join('\n')
   const blob = new Blob(['﻿' + header + rows], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)

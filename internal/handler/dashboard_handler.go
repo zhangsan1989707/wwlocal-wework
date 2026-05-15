@@ -79,7 +79,7 @@ func (h *DashboardHandler) GetOverview(c echo.Context) error {
 		kpis["contact_last_sync"] = nil
 	}
 
-	featureIDs := []int{90000031, 90000032}
+	featureIDs := h.cfg.Features.IDs
 	now := time.Now()
 	totalDays := int(now.Sub(now.AddDate(0, -3, 0)).Hours()/24) + 1
 	startTime := now.AddDate(0, -3, 0).Unix()
@@ -161,7 +161,7 @@ func (h *DashboardHandler) GetInactiveUsers(c echo.Context) error {
 	deptID, _ := strconv.Atoi(c.QueryParam("dept_id"))
 	minInactiveDays, _ := strconv.Atoi(c.QueryParam("min_inactive_days"))
 
-	featureIDs := []int{90000031, 90000032}
+	featureIDs := h.cfg.Features.IDs
 
 	now := time.Now()
 	var startTime int64
@@ -191,8 +191,12 @@ func (h *DashboardHandler) GetInactiveUsers(c echo.Context) error {
 	totalContacts, _ := h.contactRepo.GetCountByDeptID(deptID)
 
 	featureNames := make(map[int]string)
+	validIDs := make(map[int]bool)
+	for _, id := range h.cfg.Features.IDs {
+		validIDs[id] = true
+	}
 	for fid, name := range h.cfg.Features.Names {
-		if fid == 90000031 || fid == 90000032 {
+		if validIDs[fid] {
 			featureNames[fid] = name
 		}
 	}
