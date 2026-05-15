@@ -108,7 +108,11 @@ func main() {
 
 	contactSvc := service.NewContactService(&cfg.WeWork)
 	contactSyncSvc := service.NewContactSyncService(contactSvc, contactRepo, syncHistoryRepo)
-	contactHandler := handler.NewContactHandler(contactSyncSvc, contactRepo)
+	asyncExportSvc := service.NewAsyncExportService(&cfg.WeWork)
+	mediaSvc := service.NewMediaService(&cfg.WeWork)
+	csvExportSvc := service.NewCSVExportService()
+	asyncSyncSvc := service.NewContactAsyncSyncService(asyncExportSvc, mediaSvc, csvExportSvc, contactRepo, syncHistoryRepo, contactSvc)
+	contactHandler := handler.NewContactHandler(contactSyncSvc, contactRepo, asyncSyncSvc)
 
 	operationLogRepo := repository.NewOperationLogRepository(db)
 	if err := operationLogRepo.AutoMigrate(); err != nil {
@@ -178,7 +182,10 @@ func main() {
 		log.Printf("shutdown error: %v", err)
 	}
 
-	// 5. 关闭数据库连接
+	// 5. 停止后台 goroutine
+	authHandler.Stop()
+
+	// 6. 关闭数据库连接
 	sqlDB, _ = db.DB()
 	if sqlDB != nil {
 		sqlDB.Close()

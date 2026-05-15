@@ -35,25 +35,25 @@
               <el-icon><Document /></el-icon>
               <span>日志审计</span>
             </el-menu-item>
-            <el-menu-item index="sync" title="同步任务">
-              <el-icon><Refresh /></el-icon>
-              <span>同步任务</span>
-            </el-menu-item>
             <el-menu-item index="contacts" title="通讯录">
               <el-icon><User /></el-icon>
               <span>通讯录</span>
             </el-menu-item>
-            <el-menu-item index="features" title="数据类型配置">
+            <el-menu-item index="sync" title="同步任务">
+              <el-icon><Refresh /></el-icon>
+              <span>同步任务</span>
+            </el-menu-item>
+            <el-menu-item index="adminoper" title="企微操作日志">
               <el-icon><Setting /></el-icon>
-              <span>数据类型配置</span>
+              <span>企微操作日志</span>
             </el-menu-item>
             <el-menu-item index="keys" title="密钥管理">
               <el-icon><Key /></el-icon>
               <span>密钥管理</span>
             </el-menu-item>
-            <el-menu-item index="adminoper" title="企微操作日志">
+            <el-menu-item index="features" title="数据类型配置">
               <el-icon><Setting /></el-icon>
-              <span>企微操作日志</span>
+              <span>数据类型配置</span>
             </el-menu-item>
             <el-menu-item index="system" title="系统状态">
               <el-icon><Monitor /></el-icon>

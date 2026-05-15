@@ -35,50 +35,92 @@ func (r *ContactRepository) BatchUpsertContacts(contacts []model.Contact) error 
 			end = len(contacts)
 		}
 		batch := contacts[i:end]
-		if err := r.DB.Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "user_id"}},
-			DoUpdates: clause.Assignments(map[string]interface{}{
-				"name":        gorm.Expr("VALUES(name)"),
-				"mobile":      gorm.Expr("VALUES(mobile)"),
-				"gender":      gorm.Expr("VALUES(gender)"),
-				"email":       gorm.Expr("VALUES(email)"),
-				"position":    gorm.Expr("VALUES(position)"),
-				"department":  gorm.Expr("VALUES(department)"),
-				"positions":   gorm.Expr("VALUES(positions)"),
-				"avatar":      gorm.Expr("VALUES(avatar)"),
-				"status":      gorm.Expr("VALUES(status)"),
-				"raw_json":    gorm.Expr("VALUES(raw_json)"),
-				"synced_at":   gorm.Expr("VALUES(synced_at)"),
-			}),
-		}).CreateInBatches(batch, 100).Error; err != nil {
+		if err := r.doBatchUpsertContacts(batch); err != nil {
 			return err
 		}
-		// 同时更新 contact_departments 中间表
-		for _, contact := range batch {
-			// 先删除旧的关联
-			r.DB.Where("user_id = ?", contact.UserID).Delete(&model.ContactDepartment{})
-			// 解析 department 字段为 int 数组
-			var deptIDs []int
-			if err := json.Unmarshal([]byte(contact.Department), &deptIDs); err == nil {
-				var deptLinks []model.ContactDepartment
-				for _, deptID := range deptIDs {
-					deptLinks = append(deptLinks, model.ContactDepartment{
-						UserID:     contact.UserID,
-						Department: deptID,
-					})
-				}
-				if len(deptLinks) > 0 {
-					if err := r.DB.Clauses(clause.OnConflict{
-						Columns:   []clause.Column{{Name: "user_id"}, {Name: "department"}},
-						DoNothing: true,
-					}).CreateInBatches(deptLinks, 100).Error; err != nil {
-						log.Printf("update contact_departments for %s failed: %v", contact.UserID, err)
-					}
+	}
+	return nil
+}
+
+func (r *ContactRepository) doBatchUpsertContacts(batch []model.Contact) error {
+	if err := r.DB.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "user_id"}},
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"name":        gorm.Expr("VALUES(name)"),
+			"mobile":      gorm.Expr("VALUES(mobile)"),
+			"gender":      gorm.Expr("VALUES(gender)"),
+			"email":       gorm.Expr("VALUES(email)"),
+			"position":    gorm.Expr("VALUES(position)"),
+			"department":  gorm.Expr("VALUES(department)"),
+			"positions":   gorm.Expr("VALUES(positions)"),
+			"avatar":      gorm.Expr("VALUES(avatar)"),
+			"status":      gorm.Expr("VALUES(status)"),
+			"raw_json":    gorm.Expr("VALUES(raw_json)"),
+			"synced_at":   gorm.Expr("VALUES(synced_at)"),
+		}),
+	}).CreateInBatches(batch, 100).Error; err != nil {
+		return err
+	}
+	for _, contact := range batch {
+		r.DB.Where("user_id = ?", contact.UserID).Delete(&model.ContactDepartment{})
+		var deptIDs []int
+		if err := json.Unmarshal([]byte(contact.Department), &deptIDs); err == nil {
+			var deptLinks []model.ContactDepartment
+			for _, deptID := range deptIDs {
+				deptLinks = append(deptLinks, model.ContactDepartment{
+					UserID:     contact.UserID,
+					Department: deptID,
+				})
+			}
+			if len(deptLinks) > 0 {
+				if err := r.DB.Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: "user_id"}, {Name: "department"}},
+					DoNothing: true,
+				}).CreateInBatches(deptLinks, 100).Error; err != nil {
+					log.Printf("update contact_departments for %s failed: %v", contact.UserID, err)
 				}
 			}
 		}
 	}
 	return nil
+}
+
+func (r *ContactRepository) BatchUpsertContactsFromExport(contacts []interface{}) (int, int, error) {
+	if len(contacts) == 0 {
+		return 0, 0, nil
+	}
+
+	batchSize := 100
+	imported := 0
+	failed := 0
+
+	for i := 0; i < len(contacts); i += batchSize {
+		end := i + batchSize
+		if end > len(contacts) {
+			end = len(contacts)
+		}
+		batch := contacts[i:end]
+
+		var batchContacts []model.Contact
+		for _, c := range batch {
+			if contact, ok := c.(model.Contact); ok {
+				batchContacts = append(batchContacts, contact)
+			}
+		}
+
+		if err := r.doBatchUpsertContacts(batchContacts); err != nil {
+			log.Printf("BatchUpsertContactsFromExport: batch %d-%d failed: %v", i, end, err)
+			failed += len(batchContacts)
+			continue
+		}
+		imported += len(batchContacts)
+
+		if (i+batchSize)%1000 == 0 || end == len(contacts) {
+			log.Printf("BatchUpsertContactsFromExport: progress %d/%d", end, len(contacts))
+		}
+	}
+
+	return imported, failed, nil
 }
 
 // BatchUpdateBasicInfo 只更新已有用户的基础字段（姓名、部门、同步时间），不覆盖 mobile/email/avatar 等详情
