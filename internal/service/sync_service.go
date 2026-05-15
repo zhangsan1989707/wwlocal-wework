@@ -434,7 +434,6 @@ func (s *SyncService) GetStatus() *SyncStatus {
 			statusCopy.Errors[k] = v
 		}
 	}
-	log.Printf("GetStatus: running=%v, errors_count=%d, errors=%v", statusCopy.Running, len(statusCopy.Errors), statusCopy.Errors)
 	return &statusCopy
 }
 

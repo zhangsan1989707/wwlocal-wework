@@ -36,12 +36,6 @@ func (s *DecryptService) getDecryptor(version string) (*crypto.RSADecryptor, err
 		return dec, nil
 	}
 
-	key, err := s.keyRepo.GetByVersion(version)
-	if err != nil {
-		return nil, fmt.Errorf("get key version %s failed: %w", version, err)
-	}
-	_ = key
-
 	pemBytes, err := s.keyRepo.ReadKeyFile(version)
 	if err != nil {
 		return nil, fmt.Errorf("read key file failed: %w", err)

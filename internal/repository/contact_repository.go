@@ -208,6 +208,38 @@ func (r *ContactRepository) GetTotalContacts() (int64, error) {
 	return count, err
 }
 
+func (r *ContactRepository) GetLastSyncTime() (*time.Time, error) {
+	var result *time.Time
+	err := r.db.Model(&model.Contact{}).Select("MAX(synced_at)").Scan(&result).Error
+	return result, err
+}
+
+func (r *ContactRepository) GetCountByDeptID(deptID int) (int64, error) {
+	var count int64
+	query := r.db.Model(&model.Contact{})
+	if deptID > 0 {
+		query = query.Where("JSON_CONTAINS(department, ?)", fmt.Sprintf("%d", deptID))
+	}
+	err := query.Count(&count).Error
+	return count, err
+}
+
+type DeptMemberCount struct {
+	DeptID int
+	Count  int64
+}
+
+func (r *ContactRepository) GetDeptMemberCounts() ([]DeptMemberCount, error) {
+	var results []DeptMemberCount
+	err := r.db.Raw(`
+		SELECT d.id AS dept_id, COUNT(c.user_id) AS count
+		FROM departments d
+		LEFT JOIN contacts c ON JSON_CONTAINS(c.department, CAST(d.id AS CHAR))
+		GROUP BY d.id
+	`).Scan(&results).Error
+	return results, err
+}
+
 func (r *ContactRepository) GetMemberCountByDepartmentIDs(deptIDs []int) (map[int]int, error) {
 	counts := make(map[int]int, len(deptIDs))
 	for _, id := range deptIDs {

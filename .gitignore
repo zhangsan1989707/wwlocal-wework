@@ -4,7 +4,7 @@ env.txt
 keys/
 *.pem
 .DS_Store
-server
+/server
 *.tar.gz
 deploy/
 web/node_modules/

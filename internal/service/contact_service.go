@@ -257,27 +257,50 @@ func (s *ContactService) FetchAllDetails(userIDs []string, concurrency int, canc
 }
 
 func (s *ContactService) doRequest(method, path string, body interface{}, token ...string) ([]byte, error) {
-	var reqBody io.Reader
-	if body != nil {
-		bodyBytes, _ := json.Marshal(body)
-		reqBody = strings.NewReader(string(bodyBytes))
-	}
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(1<<(attempt-1)) * time.Second)
+		}
 
-	req, err := http.NewRequest(method, s.baseURL+path, reqBody)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if len(token) > 0 {
-		q := req.URL.Query()
-		q.Set("access_token", token[0])
-		req.URL.RawQuery = q.Encode()
-	}
+		var reqBody io.Reader
+		if body != nil {
+			bodyBytes, _ := json.Marshal(body)
+			reqBody = strings.NewReader(string(bodyBytes))
+		}
 
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("http request failed: %w", err)
+		req, err := http.NewRequest(method, s.baseURL+path, reqBody)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if len(token) > 0 {
+			q := req.URL.Query()
+			q.Set("access_token", token[0])
+			req.URL.RawQuery = q.Encode()
+		}
+
+		resp, err := s.client.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("http request failed: %w", err)
+			log.Printf("contact request attempt %d failed: %v", attempt+1, err)
+			continue
+		}
+
+		data, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			lastErr = fmt.Errorf("read response failed: %w", err)
+			continue
+		}
+
+		if resp.StatusCode >= 500 {
+			lastErr = fmt.Errorf("server error: HTTP %d", resp.StatusCode)
+			log.Printf("contact request attempt %d got HTTP %d", attempt+1, resp.StatusCode)
+			continue
+		}
+
+		return data, nil
 	}
-	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
+	return nil, lastErr
 }

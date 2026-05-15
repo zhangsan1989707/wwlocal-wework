@@ -613,6 +613,29 @@ func (r *LogRepository) GetUsersWithDayStats(featureIDs []int, startTime int64, 
 	return users, nil
 }
 
+type TableSizeInfo struct {
+	TableName  string `gorm:"column:TABLE_NAME"`
+	RowCount   int64  `gorm:"column:TABLE_ROWS"`
+	DataSize   string `gorm:"column:DATA_LENGTH"`
+	IndexSize  string `gorm:"column:INDEX_LENGTH"`
+}
+
+func (r *LogRepository) GetTableSizes(limit int) ([]TableSizeInfo, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	var tables []TableSizeInfo
+	err := r.db.Raw(`
+		SELECT TABLE_NAME, TABLE_ROWS, DATA_LENGTH, INDEX_LENGTH
+		FROM information_schema.TABLES
+		WHERE TABLE_SCHEMA = DATABASE()
+		AND TABLE_NAME LIKE 'log_%'
+		ORDER BY TABLE_ROWS DESC
+		LIMIT ?
+	`, limit).Scan(&tables).Error
+	return tables, err
+}
+
 // GetActualMaxLogTime 查询指定 feature 在数据库中实际存储的最大 log_time
 func (r *LogRepository) GetActualMaxLogTime(featureID int) int64 {
 	now := time.Now()

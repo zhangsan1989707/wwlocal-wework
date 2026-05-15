@@ -62,3 +62,11 @@ func (r *SyncStateRepository) GetAll() ([]model.SyncState, error) {
 	}
 	return states, nil
 }
+
+func (r *SyncStateRepository) Ping() error {
+	sqlDB, err := r.db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Ping()
+}

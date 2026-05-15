@@ -67,13 +67,9 @@ func (r *Router) Setup(e *echo.Echo) {
 			logs.GET("/features", r.logHandler.GetFeatures)
 			logs.GET("/time-range", r.logHandler.GetTimeRange)
 			logs.GET("/field-paths", r.logHandler.GetFieldPaths)
-		}
-
-		sync := api.Group("/logs")
-		{
-			sync.POST("/sync", r.syncHandler.Sync)
-			sync.POST("/sync/cancel", r.syncHandler.Cancel)
-			sync.GET("/sync/status", r.syncHandler.Status)
+			logs.POST("/sync", r.syncHandler.Sync)
+			logs.POST("/sync/cancel", r.syncHandler.Cancel)
+			logs.GET("/sync/status", r.syncHandler.Status)
 		}
 
 		keys := api.Group("/keys")

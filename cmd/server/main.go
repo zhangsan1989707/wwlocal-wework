@@ -117,10 +117,10 @@ func main() {
 	operationLogSvc := service.NewOperationLogService(operationLogRepo)
 	operationLogHandler := handler.NewOperationLogHandler(operationLogSvc)
 
-	dashboardHandler := handler.NewDashboardHandler(db, logRepo, contactRepo, syncHistoryRepo, syncStateRepo, keyRepo, cfg)
+	dashboardHandler := handler.NewDashboardHandler(logRepo, contactRepo, syncHistoryRepo, syncStateRepo, keyRepo, cfg)
 	syncHistoryHandler := handler.NewSyncHistoryHandler(syncHistoryRepo)
 	syncFeatureHandler := handler.NewSyncFeatureHandler(syncFeatureRepo)
-	systemHandler := handler.NewSystemHandler(db, syncStateRepo, keyRepo, contactRepo)
+	systemHandler := handler.NewSystemHandler(syncStateRepo, keyRepo, contactRepo, logRepo)
 
 	if cfg.Scheduler.Enabled {
 		schedulerSvc.Start(interval)

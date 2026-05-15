@@ -2,28 +2,26 @@ package handler
 
 import (
 	"encoding/json"
-	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"gorm.io/gorm"
 	"wwlocal-wework/config"
 	"wwlocal-wework/internal/repository"
+	"wwlocal-wework/pkg/response"
 )
 
 type DashboardHandler struct {
-	db               *gorm.DB
-	logRepo          *repository.LogRepository
-	contactRepo      *repository.ContactRepository
-	syncHistoryRepo  *repository.SyncHistoryRepository
-	syncStateRepo    *repository.SyncStateRepository
-	keyRepo          *repository.KeyRepository
-	cfg              *config.Config
+	logRepo         *repository.LogRepository
+	contactRepo     *repository.ContactRepository
+	syncHistoryRepo *repository.SyncHistoryRepository
+	syncStateRepo   *repository.SyncStateRepository
+	keyRepo         *repository.KeyRepository
+	cfg             *config.Config
 }
 
-func NewDashboardHandler(db *gorm.DB, logRepo *repository.LogRepository, contactRepo *repository.ContactRepository, syncHistoryRepo *repository.SyncHistoryRepository, syncStateRepo *repository.SyncStateRepository, keyRepo *repository.KeyRepository, cfg *config.Config) *DashboardHandler {
-	return &DashboardHandler{db: db, logRepo: logRepo, contactRepo: contactRepo, syncHistoryRepo: syncHistoryRepo, syncStateRepo: syncStateRepo, keyRepo: keyRepo, cfg: cfg}
+func NewDashboardHandler(logRepo *repository.LogRepository, contactRepo *repository.ContactRepository, syncHistoryRepo *repository.SyncHistoryRepository, syncStateRepo *repository.SyncStateRepository, keyRepo *repository.KeyRepository, cfg *config.Config) *DashboardHandler {
+	return &DashboardHandler{logRepo: logRepo, contactRepo: contactRepo, syncHistoryRepo: syncHistoryRepo, syncStateRepo: syncStateRepo, keyRepo: keyRepo, cfg: cfg}
 }
 
 func (h *DashboardHandler) GetOverview(c echo.Context) error {
@@ -31,7 +29,6 @@ func (h *DashboardHandler) GetOverview(c echo.Context) error {
 	recentSyncs := make([]map[string]interface{}, 0)
 	problems := make([]map[string]interface{}, 0)
 
-	// 1. 最新同步时间 & 最新日志时间
 	states, _ := h.syncStateRepo.GetAll()
 	var latestSyncAt time.Time
 	var latestLogTime int64
@@ -46,12 +43,10 @@ func (h *DashboardHandler) GetOverview(c echo.Context) error {
 	kpis["latest_sync_time"] = latestSyncAt
 	kpis["latest_log_time"] = latestLogTime
 
-	// 2. 近 7 日同步记录数
 	since7d := time.Now().AddDate(0, 0, -7)
 	_, synced7d, _, _ := h.syncHistoryRepo.GetStats("log", since7d)
 	kpis["synced_7d_count"] = synced7d
 
-	// 3. 同步失败数据类型数
 	latestLog, err := h.syncHistoryRepo.GetLatest("log")
 	if err == nil && latestLog.Failed > 0 {
 		kpis["failed_feature_count"] = latestLog.Failed
@@ -59,7 +54,6 @@ func (h *DashboardHandler) GetOverview(c echo.Context) error {
 		kpis["failed_feature_count"] = 0
 	}
 
-	// 4. 当前激活密钥版本 & 使用天数
 	activeKey, keyErr := h.keyRepo.GetActive()
 	if keyErr == nil && activeKey != nil {
 		kpis["active_key_version"] = activeKey.Version
@@ -75,20 +69,16 @@ func (h *DashboardHandler) GetOverview(c echo.Context) error {
 	allKeys, _ := h.keyRepo.GetAll()
 	kpis["key_count"] = len(allKeys)
 
-	// 5. 通讯录人数 & 上次同步时间
-	var contactCount int64
-	h.db.Table("contacts").Count(&contactCount)
+	contactCount, _ := h.contactRepo.GetTotalContacts()
 	kpis["contact_count"] = contactCount
 
-	var contactLastSync *time.Time
-	h.db.Table("contacts").Select("MAX(synced_at)").Scan(&contactLastSync)
+	contactLastSync, _ := h.contactRepo.GetLastSyncTime()
 	if contactLastSync != nil {
 		kpis["contact_last_sync"] = *contactLastSync
 	} else {
 		kpis["contact_last_sync"] = nil
 	}
 
-	// 6. 未使用率（简化版，取季度默认值）
 	featureIDs := []int{90000031, 90000032}
 	now := time.Now()
 	totalDays := int(now.Sub(now.AddDate(0, -3, 0)).Hours()/24) + 1
@@ -102,21 +92,18 @@ func (h *DashboardHandler) GetOverview(c echo.Context) error {
 	kpis["inactive_count"] = len(users)
 	kpis["total_contacts"] = contactCount
 
-	// 最近 5 条同步任务
 	historyItems, _, _ := h.syncHistoryRepo.List("", 1, 5)
-	for _, h := range historyItems {
+	for _, item := range historyItems {
 		recentSyncs = append(recentSyncs, map[string]interface{}{
-			"start_time": h.StartTime,
-			"sync_type":  h.SyncType,
-			"trigger":    h.Trigger,
-			"succeeded":  h.Succeeded,
-			"failed":     h.Failed,
-			"duration_ms": h.DurationMs,
+			"start_time":  item.StartTime,
+			"sync_type":   item.SyncType,
+			"trigger":     item.Trigger,
+			"succeeded":   item.Succeeded,
+			"failed":      item.Failed,
+			"duration_ms": item.DurationMs,
 		})
 	}
 
-	// 问题提醒
-	// 1. 最近一次日志同步有失败
 	if err == nil && latestLog.Failed > 0 {
 		problems = append(problems, map[string]interface{}{
 			"level":   "error",
@@ -125,7 +112,6 @@ func (h *DashboardHandler) GetOverview(c echo.Context) error {
 		})
 	}
 
-	// 2. 密钥使用超过 90 天
 	if keyErr == nil && activeKey != nil && activeKey.ActivatedAt != nil {
 		if time.Since(*activeKey.ActivatedAt) > 90*24*time.Hour {
 			problems = append(problems, map[string]interface{}{
@@ -136,7 +122,6 @@ func (h *DashboardHandler) GetOverview(c echo.Context) error {
 		}
 	}
 
-	// 3. 通讯录超过 7 天未同步
 	latestContact, contactErr := h.syncHistoryRepo.GetLatest("contact")
 	if contactErr != nil || time.Since(latestContact.StartTime) > 7*24*time.Hour {
 		problems = append(problems, map[string]interface{}{
@@ -146,7 +131,6 @@ func (h *DashboardHandler) GetOverview(c echo.Context) error {
 		})
 	}
 
-	// 4. 最近 24 小时无日志入库
 	hasRecent := false
 	for _, s := range states {
 		if s.LastLogTime > time.Now().Add(-24*time.Hour).Unix() {
@@ -162,13 +146,10 @@ func (h *DashboardHandler) GetOverview(c echo.Context) error {
 		})
 	}
 
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"code": 0,
-		"data": map[string]interface{}{
-			"kpis":         kpis,
-			"recent_syncs": recentSyncs,
-			"problems":     problems,
-		},
+	return response.Success(c, map[string]interface{}{
+		"kpis":         kpis,
+		"recent_syncs": recentSyncs,
+		"problems":     problems,
 	})
 }
 
@@ -191,9 +172,11 @@ func (h *DashboardHandler) GetInactiveUsers(c echo.Context) error {
 		startTime = now.AddDate(0, 0, -7).Unix()
 		totalDays = 7
 	case "month":
+		startTime = now.AddDate(0, 0, -now.Day()).Unix()
 		totalDays = now.Day()
-	default: // quarter
+	default:
 		totalDays = int(now.Sub(now.AddDate(0, -3, 0)).Hours()/24) + 1
+		startTime = now.AddDate(0, -3, 0).Unix()
 	}
 
 	if minInactiveDays <= 0 {
@@ -202,18 +185,10 @@ func (h *DashboardHandler) GetInactiveUsers(c echo.Context) error {
 
 	users, err := h.logRepo.GetUsersWithDayStats(featureIDs, startTime, deptID, totalDays, minInactiveDays)
 	if err != nil {
-		return c.JSON(http.StatusOK, map[string]interface{}{
-			"code": 500,
-			"msg":  "查询失败: " + err.Error(),
-		})
+		return response.Error(c, 500, "查询失败: "+err.Error())
 	}
 
-	var totalContacts int64
-	countQuery := h.db.Table("contacts")
-	if deptID > 0 {
-		countQuery = countQuery.Where("JSON_CONTAINS(department, ?)", strconv.Itoa(deptID))
-	}
-	countQuery.Count(&totalContacts)
+	totalContacts, _ := h.contactRepo.GetCountByDeptID(deptID)
 
 	featureNames := make(map[int]string)
 	for fid, name := range h.cfg.Features.Names {
@@ -224,23 +199,12 @@ func (h *DashboardHandler) GetInactiveUsers(c echo.Context) error {
 
 	depts, _ := h.contactRepo.GetAllDepartments()
 
-	// 部门总人数：一次 GROUP BY 查询
-	var deptCounts []struct {
-		DeptID int
-		Count  int64
-	}
-	h.db.Raw(`
-		SELECT d.id AS dept_id, COUNT(c.user_id) AS count
-		FROM departments d
-		LEFT JOIN contacts c ON JSON_CONTAINS(c.department, CAST(d.id AS CHAR))
-		GROUP BY d.id
-	`).Scan(&deptCounts)
+	deptCounts, _ := h.contactRepo.GetDeptMemberCounts()
 	deptCountMap := make(map[int]int64, len(deptCounts))
 	for _, dc := range deptCounts {
 		deptCountMap[dc.DeptID] = dc.Count
 	}
 
-	// 部门未达标人数：从已查出的 users 在内存中统计
 	inactiveByDept := make(map[int]int)
 	for _, u := range users {
 		var userDepts []int
@@ -274,18 +238,15 @@ func (h *DashboardHandler) GetInactiveUsers(c echo.Context) error {
 		})
 	}
 
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"code": 0,
-		"data": map[string]interface{}{
-			"total_contacts":    totalContacts,
-			"inactive_count":    len(users),
-			"inactive_users":    users,
-			"feature_names":     featureNames,
-			"departments":       deptList,
-			"dept_stats":        deptStats,
-			"range":             rangeParam,
-			"total_days":        totalDays,
-			"min_inactive_days": minInactiveDays,
-		},
+	return response.Success(c, map[string]interface{}{
+		"total_contacts":    totalContacts,
+		"inactive_count":    len(users),
+		"inactive_users":    users,
+		"feature_names":     featureNames,
+		"departments":       deptList,
+		"dept_stats":        deptStats,
+		"range":             rangeParam,
+		"total_days":        totalDays,
+		"min_inactive_days": minInactiveDays,
 	})
 }

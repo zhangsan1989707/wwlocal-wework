@@ -65,10 +65,12 @@ func (s *QueryService) Query(req *QueryRequest) (*QueryResult, error) {
 
 	hasConditions := len(req.Conditions) > 0 || req.Mobile != ""
 
-	// 多 feature 时，每个 feature 需拉取足够数据以支持正确合并分页
 	perPage := req.PageSize
 	if len(req.FeatureIDs) > 1 {
 		perPage = req.Page * req.PageSize
+		if perPage > 5000 {
+			perPage = 5000
+		}
 	}
 
 	var allData []map[string]interface{}

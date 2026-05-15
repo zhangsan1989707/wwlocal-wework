@@ -1,29 +1,28 @@
 package handler
 
 import (
-	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"gorm.io/gorm"
 	"wwlocal-wework/internal/repository"
+	"wwlocal-wework/pkg/response"
 )
 
 type SystemHandler struct {
-	db          *gorm.DB
 	syncStateRepo *repository.SyncStateRepository
 	keyRepo       *repository.KeyRepository
 	contactRepo   *repository.ContactRepository
+	logRepo       *repository.LogRepository
 	startTime     time.Time
 }
 
-func NewSystemHandler(db *gorm.DB, syncStateRepo *repository.SyncStateRepository, keyRepo *repository.KeyRepository, contactRepo *repository.ContactRepository) *SystemHandler {
+func NewSystemHandler(syncStateRepo *repository.SyncStateRepository, keyRepo *repository.KeyRepository, contactRepo *repository.ContactRepository, logRepo *repository.LogRepository) *SystemHandler {
 	return &SystemHandler{
-		db:            db,
 		syncStateRepo: syncStateRepo,
 		keyRepo:       keyRepo,
 		contactRepo:   contactRepo,
+		logRepo:       logRepo,
 		startTime:     time.Now(),
 	}
 }
@@ -31,18 +30,14 @@ func NewSystemHandler(db *gorm.DB, syncStateRepo *repository.SyncStateRepository
 func (h *SystemHandler) GetStatus(c echo.Context) error {
 	status := make(map[string]interface{})
 
-	// 1. 系统健康
 	health := make(map[string]interface{})
-	sqlDB, err := h.db.DB()
-	if err != nil || sqlDB == nil {
+	if err := h.syncStateRepo.Ping(); err != nil {
 		health["db_connected"] = false
 	} else {
-		dbErr := sqlDB.Ping()
-		health["db_connected"] = dbErr == nil
+		health["db_connected"] = true
 	}
 	health["uptime_seconds"] = int(time.Since(h.startTime).Seconds())
 
-	// 2. 同步覆盖
 	coverage := make(map[string]interface{})
 	states, _ := h.syncStateRepo.GetAll()
 	for _, s := range states {
@@ -61,32 +56,17 @@ func (h *SystemHandler) GetStatus(c echo.Context) error {
 		coverage[strconv.Itoa(s.FeatureID)] = info
 	}
 
-	// 3. 数据库表大小
-	tableSizes := make([]map[string]interface{}, 0)
-	var tables []struct {
-		TableName string `gorm:"column:TABLE_NAME"`
-		RowCount  int64  `gorm:"column:TABLE_ROWS"`
-		DataSize  string `gorm:"column:DATA_LENGTH"`
-		IndexSize string `gorm:"column:INDEX_LENGTH"`
-	}
-	h.db.Raw(`
-		SELECT TABLE_NAME, TABLE_ROWS, DATA_LENGTH, INDEX_LENGTH
-		FROM information_schema.TABLES
-		WHERE TABLE_SCHEMA = DATABASE()
-		AND TABLE_NAME LIKE 'log_%'
-		ORDER BY TABLE_ROWS DESC
-		LIMIT 20
-	`).Scan(&tables)
+	tables, _ := h.logRepo.GetTableSizes(20)
+	tableSizes := make([]map[string]interface{}, 0, len(tables))
 	for _, t := range tables {
 		tableSizes = append(tableSizes, map[string]interface{}{
-			"table":      t.TableName,
-			"rows":       t.RowCount,
-			"data_bytes": t.DataSize,
+			"table":       t.TableName,
+			"rows":        t.RowCount,
+			"data_bytes":  t.DataSize,
 			"index_bytes": t.IndexSize,
 		})
 	}
 
-	// 4. 密钥状态
 	keyStatus := make(map[string]interface{})
 	activeKey, _ := h.keyRepo.GetActive()
 	if activeKey != nil {
@@ -98,11 +78,8 @@ func (h *SystemHandler) GetStatus(c echo.Context) error {
 	allKeys, _ := h.keyRepo.GetAll()
 	keyStatus["total_keys"] = len(allKeys)
 
-	// 5. 通讯录
-	var contactCount int64
-	h.db.Table("contacts").Count(&contactCount)
-	var contactLastSync *time.Time
-	h.db.Table("contacts").Select("MAX(synced_at)").Scan(&contactLastSync)
+	contactCount, _ := h.contactRepo.GetTotalContacts()
+	contactLastSync, _ := h.contactRepo.GetLastSyncTime()
 	contactInfo := map[string]interface{}{
 		"total": contactCount,
 	}
@@ -117,8 +94,5 @@ func (h *SystemHandler) GetStatus(c echo.Context) error {
 	status["key_status"] = keyStatus
 	status["contacts"] = contactInfo
 
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"code": 0,
-		"data": status,
-	})
+	return response.Success(c, status)
 }
