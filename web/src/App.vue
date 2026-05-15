@@ -51,9 +51,9 @@
               <el-icon><Key /></el-icon>
               <span>密钥管理</span>
             </el-menu-item>
-            <el-menu-item index="opslog" title="操作审计">
-              <el-icon><List /></el-icon>
-              <span>操作审计</span>
+            <el-menu-item index="adminoper" title="企微操作日志">
+              <el-icon><Setting /></el-icon>
+              <span>企微操作日志</span>
             </el-menu-item>
             <el-menu-item index="system" title="系统状态">
               <el-icon><Monitor /></el-icon>
@@ -68,7 +68,7 @@
           <FeatureConfig v-else-if="activeMenu === 'features'" />
           <KeyManagement v-else-if="activeMenu === 'keys'" />
           <ContactList v-else-if="activeMenu === 'contacts'" />
-          <OperationLog v-else-if="activeMenu === 'opslog'" />
+          <AdminOperLog v-else-if="activeMenu === 'adminoper'" />
           <SystemStatus v-else-if="activeMenu === 'system'" />
         </el-main>
       </el-container>
@@ -84,11 +84,11 @@ import LogQuery from './components/LogQuery.vue'
 import DataSync from './components/DataSync.vue'
 import KeyManagement from './components/KeyManagement.vue'
 import ContactList from './components/ContactList.vue'
-import OperationLog from './components/OperationLog.vue'
+import AdminOperLog from './components/AdminOperLog.vue'
 import FeatureConfig from './components/FeatureConfig.vue'
 import SystemStatus from './components/SystemStatus.vue'
 import {
-  DataLine, Document, Refresh, User, Setting, Key, List, Monitor,
+  DataLine, Document, Refresh, User, Setting, Key, Monitor,
   DArrowLeft, DArrowRight,
 } from '@element-plus/icons-vue'
 

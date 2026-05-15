@@ -17,30 +17,34 @@ type Router struct {
 	schedulerHandler     *handler.SchedulerHandler
 	contactHandler       *handler.ContactHandler
 	operationLogHandler  *handler.OperationLogHandler
+	adminOperLogHandler *handler.AdminOperLogHandler
 	dashboardHandler     *handler.DashboardHandler
 	syncHistoryHandler   *handler.SyncHistoryHandler
 	syncFeatureHandler   *handler.SyncFeatureHandler
 	systemHandler        *handler.SystemHandler
+	taskHandler          *handler.TaskHandler
 	operationLogSvc      *service.OperationLogService
 	jwtSecret            string
 }
 
-func NewRouter(healthHandler *handler.HealthHandler, authHandler *handler.AuthHandler, logHandler *handler.LogHandler, keyHandler *handler.KeyHandler, syncHandler *handler.SyncHandler, schedulerHandler *handler.SchedulerHandler, contactHandler *handler.ContactHandler, operationLogHandler *handler.OperationLogHandler, dashboardHandler *handler.DashboardHandler, syncHistoryHandler *handler.SyncHistoryHandler, syncFeatureHandler *handler.SyncFeatureHandler, systemHandler *handler.SystemHandler, operationLogSvc *service.OperationLogService, jwtSecret string) *Router {
+func NewRouter(healthHandler *handler.HealthHandler, authHandler *handler.AuthHandler, logHandler *handler.LogHandler, keyHandler *handler.KeyHandler, syncHandler *handler.SyncHandler, schedulerHandler *handler.SchedulerHandler, contactHandler *handler.ContactHandler, operationLogHandler *handler.OperationLogHandler, adminOperLogHandler *handler.AdminOperLogHandler, dashboardHandler *handler.DashboardHandler, syncHistoryHandler *handler.SyncHistoryHandler, syncFeatureHandler *handler.SyncFeatureHandler, systemHandler *handler.SystemHandler, taskHandler *handler.TaskHandler, operationLogSvc *service.OperationLogService, jwtSecret string) *Router {
 	return &Router{
-		healthHandler:       healthHandler,
-		authHandler:         authHandler,
-		logHandler:          logHandler,
-		keyHandler:          keyHandler,
-		syncHandler:         syncHandler,
-		schedulerHandler:    schedulerHandler,
+		healthHandler:        healthHandler,
+		authHandler:          authHandler,
+		logHandler:           logHandler,
+		keyHandler:           keyHandler,
+		syncHandler:          syncHandler,
+		schedulerHandler:     schedulerHandler,
 		contactHandler:      contactHandler,
 		operationLogHandler: operationLogHandler,
+		adminOperLogHandler: adminOperLogHandler,
 		dashboardHandler:    dashboardHandler,
 		syncHistoryHandler:  syncHistoryHandler,
 		syncFeatureHandler:  syncFeatureHandler,
-		systemHandler:       systemHandler,
-		operationLogSvc:     operationLogSvc,
-		jwtSecret:           jwtSecret,
+		systemHandler:      systemHandler,
+		taskHandler:        taskHandler,
+		operationLogSvc:    operationLogSvc,
+		jwtSecret:          jwtSecret,
 	}
 }
 
@@ -61,9 +65,21 @@ func (r *Router) Setup(e *echo.Echo) {
 			operationLogs.GET("/actions", r.operationLogHandler.GetActions)
 		}
 
+		adminOperLogs := api.Group("/admin-oper-logs")
+		{
+			adminOperLogs.GET("", r.adminOperLogHandler.List)
+			adminOperLogs.POST("/sync", r.adminOperLogHandler.Sync)
+			adminOperLogs.GET("/sync/status", r.adminOperLogHandler.Status)
+			adminOperLogs.GET("/stats", r.adminOperLogHandler.GetStats)
+			adminOperLogs.GET("/types", r.adminOperLogHandler.GetOperTypes)
+			adminOperLogs.GET("/users", r.adminOperLogHandler.GetOperUsers)
+			adminOperLogs.DELETE("/cleanup", r.adminOperLogHandler.Cleanup)
+		}
+
 		logs := api.Group("/logs")
 		{
 			logs.POST("/query", r.logHandler.Query)
+			logs.POST("/query/cursor", r.logHandler.QueryByCursor)
 			logs.GET("/features", r.logHandler.GetFeatures)
 			logs.GET("/time-range", r.logHandler.GetTimeRange)
 			logs.GET("/field-paths", r.logHandler.GetFieldPaths)
@@ -123,6 +139,15 @@ func (r *Router) Setup(e *echo.Echo) {
 		system := api.Group("/system")
 		{
 			system.GET("/status", r.systemHandler.GetStatus)
+		}
+
+		tasks := api.Group("/tasks")
+		{
+			tasks.POST("", r.taskHandler.SubmitTask)
+			tasks.GET("", r.taskHandler.ListTasks)
+			tasks.GET("/:id", r.taskHandler.GetTask)
+			tasks.POST("/:id/cancel", r.taskHandler.CancelTask)
+			tasks.POST("/:id/retry", r.taskHandler.RetryTask)
 		}
 	}
 }

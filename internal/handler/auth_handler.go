@@ -59,6 +59,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 type loginLimiter struct {
 	mu       sync.Mutex
 	attempts map[string]*attemptEntry
+	stopCh   chan struct{}
 }
 
 type attemptEntry struct {
@@ -72,6 +73,10 @@ func newLoginLimiter() *loginLimiter {
 	l := &loginLimiter{attempts: make(map[string]*attemptEntry)}
 	go l.cleanup()
 	return l
+}
+
+func (l *loginLimiter) stop() {
+	close(l.stopCh)
 }
 
 func (l *loginLimiter) Allow(ip string) bool {

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"gorm.io/gorm"
 	"wwlocal-wework/config"
 	"wwlocal-wework/internal/model"
 	"wwlocal-wework/internal/repository"
@@ -193,6 +194,79 @@ func (s *SyncService) syncFeatureDay(featureID int, startTime, endTime int64, li
 	return totalFetched, totalFailed, maxLogTime, nil
 }
 
+func (s *SyncService) syncFeatureDayWithTx(tx *gorm.DB, featureID int, startTime, endTime int64, limit int) (int, int, int64, error) {
+	totalFetched := 0
+	totalFailed := 0
+	var maxLogTime int64
+	startIndex := 0
+
+	for {
+		if s.isCancelled() {
+			return totalFetched, totalFailed, maxLogTime, nil
+		}
+		logItems, err := s.weworkSvc.GetLogList(featureID, startTime, endTime, startIndex, limit)
+		if err != nil {
+			return totalFetched, totalFailed, maxLogTime, fmt.Errorf("fetch log list failed: %w", err)
+		}
+
+		if len(logItems) == 0 {
+			break
+		}
+
+		var entries []model.LogEntry
+		pageFailed := 0
+		for _, item := range logItems {
+			if item.LogTime > maxLogTime {
+				maxLogTime = item.LogTime
+			}
+			entry, err := s.decryptSvc.DecryptWithKey(&model.WeWorkLogItem{
+				FeatureID: item.FeatureID,
+				LogTime:   item.LogTime,
+				IDC:       item.IDC,
+				EncKey:    item.EncKey,
+				EncData:   item.EncData,
+			}, "")
+			if err != nil {
+				pageFailed++
+				totalFailed++
+				continue
+			}
+			entries = append(entries, *entry)
+		}
+
+		// 当前页全部解密失败，密钥不匹配，跳过该 feature
+		if pageFailed == len(logItems) {
+			log.Printf("feature %d: all %d items failed to decrypt (likely missing key), skipping", featureID, len(logItems))
+			break
+		}
+
+		if len(entries) > 0 {
+			savedMobiles, savedCount, err := s.logRepo.BatchSaveWithTx(tx, featureID, entries)
+			if err != nil {
+				log.Printf("batch save failed for feature %d: %v", featureID, err)
+				totalFailed += len(entries)
+				return totalFetched, totalFailed, maxLogTime, err
+			} else {
+				totalFetched += savedCount
+				if len(savedMobiles) > 0 {
+					if err := s.logRepo.BatchUpsertDailyStatsWithTx(tx, featureID, savedMobiles, startTime); err != nil {
+						log.Printf("upsert daily stats failed for feature %d: %v", featureID, err)
+						return totalFetched, totalFailed, maxLogTime, err
+					}
+				}
+			}
+		}
+
+		if len(logItems) < limit {
+			break
+		}
+
+		startIndex += len(logItems)
+	}
+
+	return totalFetched, totalFailed, maxLogTime, nil
+}
+
 // SyncFeatureIncremental 增量同步单个 feature，从 sync_state.last_log_time + 1 开始
 func (s *SyncService) SyncFeatureIncremental(featureID int) (int, int, error) {
 	lastLogTime := s.syncStateRepo.GetLastLogTime(featureID)
@@ -216,15 +290,66 @@ func (s *SyncService) SyncFeatureIncremental(featureID int) (int, int, error) {
 		return 0, 0, nil
 	}
 
-	fetched, failed, maxLogTime, err := s.SyncFeature(featureID, startTime, endTime)
-	if err != nil {
-		log.Printf("SyncFeatureIncremental: feature=%d returned error: %v", featureID, err)
-	} else if maxLogTime > 0 {
-		if updateErr := s.syncStateRepo.UpdateState(featureID, maxLogTime, fetched); updateErr != nil {
-			log.Printf("SyncFeatureIncremental: UpdateState failed for feature %d: %v", featureID, updateErr)
-		}
+	// 按天拆分，政务微信 API 要求 start_time 和 end_time 在同一天
+	days := s.splitByDay(startTime, endTime)
+	log.Printf("SyncFeature: feature=%d, %d days to process", featureID, len(days))
+
+	totalFetched := 0
+	totalFailed := 0
+	var maxLogTime int64
+	limit := s.cfg.WeWork.SyncLimit
+	if limit > 1000 {
+		limit = 1000
 	}
-	return fetched, failed, err
+	if limit < 1 {
+		limit = 1
+	}
+
+	for di, day := range days {
+		if s.isCancelled() {
+			return totalFetched, totalFailed, nil
+		}
+		if di%5 == 0 {
+			log.Printf("SyncFeature: feature=%d, day %d/%d (ts=%d)", featureID, di+1, len(days), day.start)
+		}
+
+		// 启动事务
+		tx := s.syncStateRepo.DB.Begin()
+		if tx.Error != nil {
+			log.Printf("SyncFeatureIncremental: failed to begin transaction for feature %d: %v", featureID, tx.Error)
+			continue
+		}
+
+		// 同步当天数据
+		fetched, failed, dayMax, err := s.syncFeatureDayWithTx(tx, featureID, day.start, day.end, limit)
+		if err != nil {
+			tx.Rollback()
+			log.Printf("SyncFeatureIncremental: failed to sync day for feature %d: %v", featureID, err)
+			totalFailed += failed
+			continue
+		}
+
+		// 更新 sync_state
+		if dayMax > maxLogTime {
+			maxLogTime = dayMax
+			if updateErr := s.syncStateRepo.UpdateStateWithTx(tx, featureID, maxLogTime, fetched); updateErr != nil {
+				tx.Rollback()
+				log.Printf("SyncFeatureIncremental: UpdateState failed for feature %d: %v", featureID, updateErr)
+				continue
+			}
+		}
+
+		// 提交事务
+		if commitErr := tx.Commit().Error; commitErr != nil {
+			log.Printf("SyncFeatureIncremental: commit failed for feature %d: %v", featureID, commitErr)
+			continue
+		}
+
+		totalFetched += fetched
+		totalFailed += failed
+	}
+
+	return totalFetched, totalFailed, nil
 }
 
 // SyncAllFeaturesIncremental 增量同步所有启用的 feature
@@ -512,4 +637,21 @@ func (s *SyncService) VerifySyncState() {
 				state.FeatureID, state.LastLogTime, actualMax)
 		}
 	}
+}
+
+// SyncFeaturesTask 处理来自队列的任务
+func (s *SyncService) SyncFeaturesTask(task *model.SyncTask) (map[string]interface{}, error) {
+	if len(task.FeatureIDs) == 0 {
+		// 默认同步所有启用的 feature
+		ids, err := s.syncFeatureRepo.GetEnabledIDs()
+		if err != nil {
+			return nil, err
+		}
+		task.FeatureIDs = ids
+	}
+
+	results := s.SyncMultipleFeatures(task.FeatureIDs, task.StartTime, task.EndTime)
+	return map[string]interface{}{
+		"results": results,
+	}, nil
 }

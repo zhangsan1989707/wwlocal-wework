@@ -46,21 +46,61 @@
         <el-button @click="handleDisableAll" size="small" type="danger" plain>停用全部日志类型</el-button>
       </div>
     </el-card>
+
+    <el-card class="admin-oper-card">
+      <template #header>
+        <div class="card-header">
+          <span class="card-title">企微操作日志</span>
+          <div class="header-actions">
+            <el-button type="success" size="small" @click="handleSyncAdminOperLog" :loading="adminSyncLoading">
+              同步
+            </el-button>
+            <el-button type="primary" size="small" @click="handleViewAdminOperLog">
+              查看日志
+            </el-button>
+          </div>
+        </div>
+      </template>
+      <el-descriptions :column="3" border size="small">
+        <el-descriptions-item label="状态">
+          <el-tag :type="adminOperLogStats.running ? 'success' : 'info'" size="small">
+            {{ adminOperLogStats.running ? '同步中' : '空闲' }}
+          </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="已同步总数">{{ adminOperLogStats.total > 0 ? formatNumber(adminOperLogStats.total) : '-' }}</el-descriptions-item>
+        <el-descriptions-item label="最新日志时间">
+          <span v-if="adminOperLogStats.last_time">{{ formatTime(adminOperLogStats.last_time) }}</span>
+          <span v-else>-</span>
+        </el-descriptions-item>
+      </el-descriptions>
+    </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, inject } from 'vue'
-import { syncFeatureAPI } from '../api'
+import { ref, onMounted, inject, onUnmounted } from 'vue'
+import { syncFeatureAPI, adminOperLogAPI } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const navigate = inject('navigate') as (menu: string, params?: any) => void
 const features = ref<any[]>([])
 const loading = ref(false)
 const saving = ref(false)
+const adminSyncLoading = ref(false)
+const adminOperLogStats = ref<any>({
+  running: false,
+  total: 0,
+  last_time: '',
+})
+let pollTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(async () => {
   await loadFeatures()
+  await loadAdminOperLogStats()
+})
+
+onUnmounted(() => {
+  stopPolling()
 })
 
 const loadFeatures = async () => {
@@ -74,6 +114,37 @@ const loadFeatures = async () => {
     console.error(err)
   } finally {
     loading.value = false
+  }
+}
+
+const loadAdminOperLogStats = async () => {
+  try {
+    const res: any = await adminOperLogAPI.syncStatus()
+    if (res.code === 0) {
+      adminOperLogStats.value = res.data || { running: false, total: 0, last_time: '' }
+      if (adminOperLogStats.value.running) {
+        startPolling()
+      }
+    }
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+const startPolling = () => {
+  stopPolling()
+  pollTimer = setInterval(async () => {
+    await loadAdminOperLogStats()
+    if (!adminOperLogStats.value.running) {
+      stopPolling()
+    }
+  }, 2000)
+}
+
+const stopPolling = () => {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
   }
 }
 
@@ -122,6 +193,36 @@ const viewRecentLogs = (featureId: number) => {
   })
 }
 
+const handleSyncAdminOperLog = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '将同步最新的管理员操作日志，确定开始吗？',
+      '确认同步',
+      { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' }
+    )
+  } catch { return }
+
+  adminSyncLoading.value = true
+  try {
+    const res: any = await adminOperLogAPI.sync({})
+    if (res.code === 0) {
+      ElMessage.success('同步任务已启动')
+      adminOperLogStats.value.running = true
+      startPolling()
+    } else {
+      ElMessage.error(res.msg || '同步启动失败')
+    }
+  } catch (err: any) {
+    ElMessage.error(err.message || '同步启动失败')
+  } finally {
+    adminSyncLoading.value = false
+  }
+}
+
+const handleViewAdminOperLog = () => {
+  navigate('adminoper')
+}
+
 const formatTime = (timeStr: string) => {
   if (!timeStr || timeStr === '0001-01-01T00:00:00Z') return '-'
   return new Date(timeStr).toLocaleString('zh-CN')
@@ -148,6 +249,11 @@ const formatNumber = (n: number) => {
   align-items: center;
 }
 
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .card-title {
   font-size: 16px;
   font-weight: 600;
@@ -163,6 +269,10 @@ const formatNumber = (n: number) => {
 .time-text {
   font-size: 12px;
   color: #909399;
+}
+
+.admin-oper-card {
+  margin-top: 16px;
 }
 
 :deep(.el-card__header) {

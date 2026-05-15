@@ -16,6 +16,7 @@ type Config struct {
 	Features  FeaturesConfig  `yaml:"features"`
 	Auth      AuthConfig      `yaml:"auth"`
 	Scheduler SchedulerConfig `yaml:"scheduler"`
+	Redis     RedisConfig     `yaml:"redis"`
 }
 
 type ServerConfig struct {
@@ -60,6 +61,14 @@ type AuthConfig struct {
 type SchedulerConfig struct {
 	Enabled  bool   `yaml:"enabled"`
 	Interval string `yaml:"interval"` // "1h", "30m", "24h"
+}
+
+type RedisConfig struct {
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	Password string `yaml:"password"`
+	DB       int    `yaml:"db"`
+	Stream   string `yaml:"stream"` // stream name
 }
 
 func (d *DatabaseConfig) DSN() string {
@@ -113,6 +122,12 @@ func Load(path string) (*Config, error) {
 	cfg.Auth.JWTSecret = getEnv("JWT_SECRET", cfg.Auth.JWTSecret)
 
 	cfg.Keys.EncryptKey = os.Getenv("KEY_ENCRYPT_KEY")
+
+	cfg.Redis.Host = getEnv("REDIS_HOST", "localhost")
+	cfg.Redis.Port = getEnvInt("REDIS_PORT", 6379)
+	cfg.Redis.Password = getEnv("REDIS_PASSWORD", "")
+	cfg.Redis.DB = getEnvInt("REDIS_DB", 0)
+	cfg.Redis.Stream = getEnv("REDIS_STREAM", "wwlocal:sync:tasks")
 
 	// 校验必需配置
 	var missing []string

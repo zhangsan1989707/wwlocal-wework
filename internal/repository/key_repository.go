@@ -10,7 +10,7 @@ import (
 )
 
 type KeyRepository struct {
-	db         *gorm.DB
+	DB         *gorm.DB
 	keysDir    string
 	encryptKey string // hex 编码的 AES 密钥，为空则不加密
 	keyCache   map[string]*model.RSAKeyVersion
@@ -18,7 +18,7 @@ type KeyRepository struct {
 
 func NewKeyRepository(db *gorm.DB, keysDir, encryptKey string) *KeyRepository {
 	return &KeyRepository{
-		db:         db,
+		DB:         db,
 		keysDir:    keysDir,
 		encryptKey: encryptKey,
 		keyCache:   make(map[string]*model.RSAKeyVersion),
@@ -26,16 +26,16 @@ func NewKeyRepository(db *gorm.DB, keysDir, encryptKey string) *KeyRepository {
 }
 
 func (r *KeyRepository) AutoMigrate() error {
-	return r.db.AutoMigrate(&model.RSAKeyVersion{})
+	return r.DB.AutoMigrate(&model.RSAKeyVersion{})
 }
 
 func (r *KeyRepository) Create(key *model.RSAKeyVersion) error {
-	return r.db.Create(key).Error
+	return r.DB.Create(key).Error
 }
 
 func (r *KeyRepository) GetByVersion(version string) (*model.RSAKeyVersion, error) {
 	var key model.RSAKeyVersion
-	if err := r.db.Where("version = ?", version).First(&key).Error; err != nil {
+	if err := r.DB.Where("version = ?", version).First(&key).Error; err != nil {
 		return nil, err
 	}
 	return &key, nil
@@ -43,7 +43,7 @@ func (r *KeyRepository) GetByVersion(version string) (*model.RSAKeyVersion, erro
 
 func (r *KeyRepository) GetActive() (*model.RSAKeyVersion, error) {
 	var key model.RSAKeyVersion
-	if err := r.db.Where("is_active = ?", true).First(&key).Error; err != nil {
+	if err := r.DB.Where("is_active = ?", true).First(&key).Error; err != nil {
 		return nil, err
 	}
 	return &key, nil
@@ -51,14 +51,14 @@ func (r *KeyRepository) GetActive() (*model.RSAKeyVersion, error) {
 
 func (r *KeyRepository) GetAll() ([]model.RSAKeyVersion, error) {
 	var keys []model.RSAKeyVersion
-	if err := r.db.Order("created_at DESC").Find(&keys).Error; err != nil {
+	if err := r.DB.Order("created_at DESC").Find(&keys).Error; err != nil {
 		return nil, err
 	}
 	return keys, nil
 }
 
 func (r *KeyRepository) SetActive(version string) error {
-	tx := r.db.Begin()
+	tx := r.DB.Begin()
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()

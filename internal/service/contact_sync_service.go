@@ -350,3 +350,22 @@ func (s *ContactSyncService) saveContactSyncHistory(trigger string, startTime ti
 		log.Printf("save contact sync history failed: %v", err)
 	}
 }
+
+// SyncContactsTask 处理来自队列的任务
+func (s *ContactSyncService) SyncContactsTask(task *model.SyncTask) (map[string]interface{}, error) {
+	// 判断是增量还是全量同步
+	syncType := "incremental"
+	if task.EndTime > 0 {
+		syncType = "full"
+	}
+
+	if syncType == "full" {
+		s.SyncContactsFull()
+	} else {
+		s.SyncContactsIncremental()
+	}
+
+	return map[string]interface{}{
+		"sync_type": syncType,
+	}, nil
+}

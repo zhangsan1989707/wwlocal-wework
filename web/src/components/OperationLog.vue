@@ -3,7 +3,7 @@
     <el-card class="filter-card">
       <template #header>
         <div class="card-header">
-          <span class="card-title">操作审计</span>
+          <span class="card-title">平台操作日志</span>
           <div class="header-actions">
             <el-button type="primary" @click="handleQuery" :loading="loading">
               <el-icon><Search /></el-icon>

@@ -50,7 +50,7 @@ func (s *WeWorkService) GetToken() (string, error) {
 	}
 
 	path := fmt.Sprintf("/cgi-bin/gettoken?corpid=%s&corpsecret=%s", s.cfg.CorpID, s.cfg.Secret)
-	resp, err := s.doRequest("GET", path, nil)
+	resp, err := s.DoRequest("GET", path, nil)
 	if err != nil {
 		return "", fmt.Errorf("get token failed: %w", err)
 	}
@@ -93,7 +93,7 @@ func (s *WeWorkService) GetLogList(featureID int, startTime, endTime int64, star
 		"limit":       limit,
 	}
 
-	resp, err := s.doRequest("POST", path, reqBody, token)
+	resp, err := s.DoRequest("POST", path, reqBody, token)
 	if err != nil {
 		return nil, fmt.Errorf("get log list failed: %w", err)
 	}
@@ -130,7 +130,7 @@ type LogItem struct {
 	EncData   string `json:"enc_data"`
 }
 
-func (s *WeWorkService) doRequest(method, path string, body interface{}, token ...string) ([]byte, error) {
+func (s *WeWorkService) DoRequest(method, path string, body interface{}, token ...string) ([]byte, error) {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {

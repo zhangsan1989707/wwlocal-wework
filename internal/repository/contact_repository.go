@@ -2,7 +2,7 @@ package repository
 
 import (
 	"encoding/json"
-	"fmt"
+	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,15 +14,15 @@ import (
 )
 
 type ContactRepository struct {
-	db *gorm.DB
+	DB *gorm.DB
 }
 
 func NewContactRepository(db *gorm.DB) *ContactRepository {
-	return &ContactRepository{db: db}
+	return &ContactRepository{DB: db}
 }
 
 func (r *ContactRepository) AutoMigrate() error {
-	return r.db.AutoMigrate(&model.Contact{}, &model.Department{})
+	return r.DB.AutoMigrate(&model.Contact{}, &model.Department{}, &model.ContactDepartment{})
 }
 
 func (r *ContactRepository) BatchUpsertContacts(contacts []model.Contact) error {
@@ -35,7 +35,7 @@ func (r *ContactRepository) BatchUpsertContacts(contacts []model.Contact) error 
 			end = len(contacts)
 		}
 		batch := contacts[i:end]
-		if err := r.db.Clauses(clause.OnConflict{
+		if err := r.DB.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "user_id"}},
 			DoUpdates: clause.Assignments(map[string]interface{}{
 				"name":        gorm.Expr("VALUES(name)"),
@@ -52,6 +52,30 @@ func (r *ContactRepository) BatchUpsertContacts(contacts []model.Contact) error 
 			}),
 		}).CreateInBatches(batch, 100).Error; err != nil {
 			return err
+		}
+		// 同时更新 contact_departments 中间表
+		for _, contact := range batch {
+			// 先删除旧的关联
+			r.DB.Where("user_id = ?", contact.UserID).Delete(&model.ContactDepartment{})
+			// 解析 department 字段为 int 数组
+			var deptIDs []int
+			if err := json.Unmarshal([]byte(contact.Department), &deptIDs); err == nil {
+				var deptLinks []model.ContactDepartment
+				for _, deptID := range deptIDs {
+					deptLinks = append(deptLinks, model.ContactDepartment{
+						UserID:     contact.UserID,
+						Department: deptID,
+					})
+				}
+				if len(deptLinks) > 0 {
+					if err := r.DB.Clauses(clause.OnConflict{
+						Columns:   []clause.Column{{Name: "user_id"}, {Name: "department"}},
+						DoNothing: true,
+					}).CreateInBatches(deptLinks, 100).Error; err != nil {
+						log.Printf("update contact_departments for %s failed: %v", contact.UserID, err)
+					}
+				}
+			}
 		}
 	}
 	return nil
@@ -79,7 +103,7 @@ func (r *ContactRepository) BatchUpdateBasicInfo(contacts []model.Contact) error
 			args = append(args, c.UserID, c.Name, c.Department, c.SyncedAt)
 		}
 		sql += " ON DUPLICATE KEY UPDATE name=VALUES(name), department=VALUES(department), synced_at=VALUES(synced_at)"
-		if err := r.db.Exec(sql, args...).Error; err != nil {
+		if err := r.DB.Exec(sql, args...).Error; err != nil {
 			return err
 		}
 	}
@@ -90,7 +114,7 @@ func (r *ContactRepository) BatchUpsertDepts(depts []model.Department) error {
 	if len(depts) == 0 {
 		return nil
 	}
-	return r.db.Clauses(clause.OnConflict{
+	return r.DB.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "id"}},
 		DoUpdates: clause.Assignments(map[string]interface{}{
 			"name":      gorm.Expr("VALUES(name)"),
@@ -104,7 +128,7 @@ func (r *ContactRepository) BatchUpsertDepts(depts []model.Department) error {
 
 func (r *ContactRepository) GetAllUserIDs() (map[string]bool, error) {
 	var ids []string
-	if err := r.db.Model(&model.Contact{}).Pluck("user_id", &ids).Error; err != nil {
+	if err := r.DB.Model(&model.Contact{}).Pluck("user_id", &ids).Error; err != nil {
 		return nil, err
 	}
 	set := make(map[string]bool, len(ids))
@@ -115,7 +139,7 @@ func (r *ContactRepository) GetAllUserIDs() (map[string]bool, error) {
 }
 
 func (r *ContactRepository) QueryContacts(name, mobile string, page, pageSize int) ([]model.Contact, int64, error) {
-	query := r.db.Model(&model.Contact{})
+	query := r.DB.Model(&model.Contact{})
 	if name != "" {
 		query = query.Where("name LIKE ?", "%"+name+"%")
 	}
@@ -138,7 +162,7 @@ func (r *ContactRepository) QueryContacts(name, mobile string, page, pageSize in
 
 func (r *ContactRepository) GetContactByMobile(mobile string) (*model.Contact, error) {
 	var c model.Contact
-	if err := r.db.Where("mobile = ?", mobile).First(&c).Error; err != nil {
+	if err := r.DB.Where("mobile = ?", mobile).First(&c).Error; err != nil {
 		return nil, err
 	}
 	return &c, nil
@@ -146,7 +170,7 @@ func (r *ContactRepository) GetContactByMobile(mobile string) (*model.Contact, e
 
 func (r *ContactRepository) GetAllDepartments() ([]model.Department, error) {
 	var depts []model.Department
-	if err := r.db.Order("id ASC").Find(&depts).Error; err != nil {
+	if err := r.DB.Order("id ASC").Find(&depts).Error; err != nil {
 		return nil, err
 	}
 	return depts, nil
@@ -156,11 +180,13 @@ func (r *ContactRepository) MarkSyncedAt(userIDs []string) error {
 	if len(userIDs) == 0 {
 		return nil
 	}
-	return r.db.Model(&model.Contact{}).Where("user_id IN ?", userIDs).Update("synced_at", time.Now()).Error
+	return r.DB.Model(&model.Contact{}).Where("user_id IN ?", userIDs).Update("synced_at", time.Now()).Error
 }
 
 func (r *ContactRepository) GetContactsByDepartmentID(deptID int, page, pageSize int) ([]model.Contact, int64, error) {
-	query := r.db.Model(&model.Contact{}).Where("JSON_CONTAINS(department, ?)", fmt.Sprintf("%d", deptID))
+	query := r.DB.Model(&model.Contact{}).
+		Joins("INNER JOIN contact_departments cd ON contacts.user_id = cd.user_id").
+		Where("cd.department = ?", deptID)
 
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -169,7 +195,7 @@ func (r *ContactRepository) GetContactsByDepartmentID(deptID int, page, pageSize
 
 	var contacts []model.Contact
 	offset := (page - 1) * pageSize
-	if err := query.Order("name ASC").Offset(offset).Limit(pageSize).Find(&contacts).Error; err != nil {
+	if err := query.Order("contacts.name ASC").Offset(offset).Limit(pageSize).Find(&contacts).Error; err != nil {
 		return nil, 0, err
 	}
 	return contacts, total, nil
@@ -184,7 +210,7 @@ func (r *ContactRepository) GetNamesByUserIDs(userIDs []string) (map[string]stri
 		Name   string
 	}
 	var rows []result
-	if err := r.db.Model(&model.Contact{}).Select("user_id, name").Where("user_id IN ?", userIDs).Find(&rows).Error; err != nil {
+	if err := r.DB.Model(&model.Contact{}).Select("user_id, name").Where("user_id IN ?", userIDs).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	m := make(map[string]string, len(rows))
@@ -196,7 +222,7 @@ func (r *ContactRepository) GetNamesByUserIDs(userIDs []string) (map[string]stri
 
 func (r *ContactRepository) GetContactByUserID(userID string) (*model.Contact, error) {
 	var c model.Contact
-	if err := r.db.Where("user_id = ?", userID).First(&c).Error; err != nil {
+	if err := r.DB.Where("user_id = ?", userID).First(&c).Error; err != nil {
 		return nil, err
 	}
 	return &c, nil
@@ -204,23 +230,23 @@ func (r *ContactRepository) GetContactByUserID(userID string) (*model.Contact, e
 
 func (r *ContactRepository) GetTotalContacts() (int64, error) {
 	var count int64
-	err := r.db.Model(&model.Contact{}).Count(&count).Error
+	err := r.DB.Model(&model.Contact{}).Count(&count).Error
 	return count, err
 }
 
 func (r *ContactRepository) GetLastSyncTime() (*time.Time, error) {
 	var result *time.Time
-	err := r.db.Model(&model.Contact{}).Select("MAX(synced_at)").Scan(&result).Error
+	err := r.DB.Model(&model.Contact{}).Select("MAX(synced_at)").Scan(&result).Error
 	return result, err
 }
 
 func (r *ContactRepository) GetCountByDeptID(deptID int) (int64, error) {
 	var count int64
-	query := r.db.Model(&model.Contact{})
 	if deptID > 0 {
-		query = query.Where("JSON_CONTAINS(department, ?)", fmt.Sprintf("%d", deptID))
+		err := r.DB.Model(&model.ContactDepartment{}).Where("department = ?", deptID).Count(&count).Error
+		return count, err
 	}
-	err := query.Count(&count).Error
+	err := r.DB.Model(&model.Contact{}).Count(&count).Error
 	return count, err
 }
 
@@ -231,10 +257,10 @@ type DeptMemberCount struct {
 
 func (r *ContactRepository) GetDeptMemberCounts() ([]DeptMemberCount, error) {
 	var results []DeptMemberCount
-	err := r.db.Raw(`
-		SELECT d.id AS dept_id, COUNT(c.user_id) AS count
+	err := r.DB.Raw(`
+		SELECT d.id AS dept_id, COUNT(cd.user_id) AS count
 		FROM departments d
-		LEFT JOIN contacts c ON JSON_CONTAINS(c.department, CAST(d.id AS CHAR))
+		LEFT JOIN contact_departments cd ON d.id = cd.department
 		GROUP BY d.id
 	`).Scan(&results).Error
 	return results, err
@@ -253,7 +279,7 @@ func (r *ContactRepository) GetMemberCountByDepartmentIDs(deptIDs []int) (map[in
 		DeptID int
 		Count  int64
 	}
-	err := r.db.Raw(`
+	err := r.DB.Raw(`
 		SELECT dept_id, COUNT(*) AS count
 		FROM contacts, JSON_TABLE(
 			department,

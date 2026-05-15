@@ -130,6 +130,9 @@
                     <span style="float: right; color: #8492a6; font-size: 12px">{{ item.id }}</span>
                   </el-option>
                 </el-select>
+                <el-checkbox v-model="syncAdminOperLog" :disabled="syncStatus.running" style="margin-top: 12px">
+                  同步企微操作日志
+                </el-checkbox>
               </div>
             </el-form-item>
           </el-col>
@@ -278,7 +281,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
-import { syncAPI, schedulerAPI, syncHistoryAPI, syncFeatureAPI } from '../api'
+import { syncAPI, schedulerAPI, syncHistoryAPI, syncFeatureAPI, adminOperLogAPI } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { VideoPlay, VideoPause, Refresh, Clock } from '@element-plus/icons-vue'
 
@@ -296,6 +299,7 @@ const schedulerStatus = ref<any>({
 })
 const startDelay = ref('1h')
 const syncAll = ref(true)
+const syncAdminOperLog = ref(false)
 const form = reactive({
   feature_ids: [] as number[],
 })
@@ -487,7 +491,7 @@ const handleSync = async () => {
     return
   }
 
-  if (!syncAll.value && form.feature_ids.length === 0) {
+  if (!syncAll.value && form.feature_ids.length === 0 && !syncAdminOperLog.value) {
     ElMessage.warning('请选择至少一个数据类型')
     return
   }
@@ -506,18 +510,26 @@ const handleSync = async () => {
     const startTime = Math.floor(dateRange.value[0].getTime() / 1000)
     const endTime = Math.floor(dateRange.value[1].getTime() / 1000)
 
-    const res: any = await syncAPI.sync({
-      sync_all: syncAll.value,
-      feature_ids: form.feature_ids,
-      start_time: startTime,
-      end_time: endTime,
-    })
+    if (syncAdminOperLog.value) {
+      await adminOperLogAPI.sync({ start_time: startTime, end_time: endTime })
+    }
 
-    if (res.code === 0) {
-      ElMessage.success('全量同步已启动')
-      startPolling()
+    if (syncAll.value || form.feature_ids.length > 0) {
+      const res: any = await syncAPI.sync({
+        sync_all: syncAll.value,
+        feature_ids: form.feature_ids,
+        start_time: startTime,
+        end_time: endTime,
+      })
+
+      if (res.code === 0) {
+        ElMessage.success('全量同步已启动')
+        startPolling()
+      } else {
+        ElMessage.error(res.msg || '同步启动失败')
+      }
     } else {
-      ElMessage.error(res.msg || '同步启动失败')
+      ElMessage.success('企微操作日志同步已启动')
     }
   } catch (err: any) {
     ElMessage.error(err.message || '同步启动失败')
@@ -528,6 +540,7 @@ const handleReset = () => {
   dateRange.value = null
   activeShortcut.value = null
   syncAll.value = true
+  syncAdminOperLog.value = false
   form.feature_ids = []
 }
 

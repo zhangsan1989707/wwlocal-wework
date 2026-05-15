@@ -87,3 +87,45 @@ func (h *LogHandler) GetFieldPaths(c echo.Context) error {
 	paths := h.querySvc.GetFieldPaths()
 	return response.Success(c, paths)
 }
+
+type CursorQueryRequest struct {
+	FeatureIDs []int                  `json:"feature_ids"`
+	StartTime  int64                  `json:"start_time"`
+	EndTime    int64                  `json:"end_time"`
+	Conditions map[string]interface{} `json:"conditions"`
+	Mobile     string                 `json:"mobile"`
+	Cursor     int64                  `json:"cursor"`
+	PageSize   int                    `json:"page_size"`
+}
+
+func (h *LogHandler) QueryByCursor(c echo.Context) error {
+	var req CursorQueryRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, 400, "invalid request body")
+	}
+
+	if len(req.FeatureIDs) == 0 {
+		return response.Error(c, 400, "feature_ids is required")
+	}
+
+	if req.StartTime <= 0 || req.EndTime <= 0 {
+		return response.Error(c, 400, "start_time and end_time are required")
+	}
+
+	queryReq := &service.QueryRequest{
+		FeatureIDs: req.FeatureIDs,
+		StartTime:  req.StartTime,
+		EndTime:    req.EndTime,
+		Conditions: req.Conditions,
+		Mobile:     req.Mobile,
+		Cursor:     req.Cursor,
+		PageSize:   req.PageSize,
+	}
+
+	result, err := h.querySvc.QueryByCursor(queryReq)
+	if err != nil {
+		return response.Error(c, 500, err.Error())
+	}
+
+	return response.Success(c, result)
+}

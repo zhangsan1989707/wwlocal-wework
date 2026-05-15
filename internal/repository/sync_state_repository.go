@@ -9,20 +9,20 @@ import (
 )
 
 type SyncStateRepository struct {
-	db *gorm.DB
+	DB *gorm.DB
 }
 
 func NewSyncStateRepository(db *gorm.DB) *SyncStateRepository {
-	return &SyncStateRepository{db: db}
+	return &SyncStateRepository{DB: db}
 }
 
 func (r *SyncStateRepository) AutoMigrate() error {
-	return r.db.AutoMigrate(&model.SyncState{})
+	return r.DB.AutoMigrate(&model.SyncState{})
 }
 
 func (r *SyncStateRepository) GetByFeatureID(featureID int) (*model.SyncState, error) {
 	var state model.SyncState
-	if err := r.db.Where("feature_id = ?", featureID).First(&state).Error; err != nil {
+	if err := r.DB.Where("feature_id = ?", featureID).First(&state).Error; err != nil {
 		return nil, err
 	}
 	return &state, nil
@@ -45,7 +45,26 @@ func (r *SyncStateRepository) UpdateState(featureID int, lastLogTime int64, coun
 		TotalSynced: int64(count),
 	}
 
-	return r.db.Clauses(clause.OnConflict{
+	return r.DB.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "feature_id"}},
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"last_log_time": gorm.Expr("GREATEST(last_log_time, ?)", lastLogTime),
+			"last_sync_at":  now,
+			"total_synced":  gorm.Expr("total_synced + ?", count),
+		}),
+	}).Create(&state).Error
+}
+
+func (r *SyncStateRepository) UpdateStateWithTx(tx *gorm.DB, featureID int, lastLogTime int64, count int) error {
+	now := time.Now()
+	state := model.SyncState{
+		FeatureID:   featureID,
+		LastLogTime: lastLogTime,
+		LastSyncAt:  now,
+		TotalSynced: int64(count),
+	}
+
+	return tx.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "feature_id"}},
 		DoUpdates: clause.Assignments(map[string]interface{}{
 			"last_log_time": gorm.Expr("GREATEST(last_log_time, ?)", lastLogTime),
@@ -57,14 +76,14 @@ func (r *SyncStateRepository) UpdateState(featureID int, lastLogTime int64, coun
 
 func (r *SyncStateRepository) GetAll() ([]model.SyncState, error) {
 	var states []model.SyncState
-	if err := r.db.Find(&states).Error; err != nil {
+	if err := r.DB.Find(&states).Error; err != nil {
 		return nil, err
 	}
 	return states, nil
 }
 
 func (r *SyncStateRepository) Ping() error {
-	sqlDB, err := r.db.DB()
+	sqlDB, err := r.DB.DB()
 	if err != nil {
 		return err
 	}

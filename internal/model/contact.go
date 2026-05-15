@@ -36,6 +36,17 @@ func (Department) TableName() string {
 	return "departments"
 }
 
+// ContactDepartment 联系人-部门关联表
+type ContactDepartment struct {
+	UserID     string    `gorm:"primaryKey;column:user_id;type:varchar(64);index:idx_user_dept" json:"user_id"`
+	Department int       `gorm:"primaryKey;column:department;index:idx_user_dept" json:"department"`
+	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+}
+
+func (ContactDepartment) TableName() string {
+	return "contact_departments"
+}
+
 type DeptTreeNode struct {
 	ID          int            `json:"id"`
 	Name        string         `json:"name"`

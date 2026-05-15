@@ -76,11 +76,6 @@ export const contactAPI = {
   status: () => api.get('/contacts/sync/status'),
 }
 
-export const operationLogAPI = {
-  list: (params: any) => api.get('/operation-logs', { params }),
-  getActions: () => api.get('/operation-logs/actions'),
-}
-
 export const dashboardAPI = {
   getOverview: () => api.get('/dashboard/overview'),
   getInactiveUsers: (params?: { range?: string; dept_id?: number; min_inactive_days?: number }) => api.get('/dashboard/inactive-users', { params }),
@@ -97,6 +92,12 @@ export const syncHistoryAPI = {
 export const syncFeatureAPI = {
   list: () => api.get('/sync-features'),
   update: (data: any) => api.put('/sync-features', data),
+}
+
+export const adminOperLogAPI = {
+  query: (params: any) => api.get('/admin-oper-logs', { params }),
+  sync: (data: any) => api.post('/admin-oper-logs/sync', data),
+  syncStatus: () => api.get('/admin-oper-logs/sync/status'),
 }
 
 export default api

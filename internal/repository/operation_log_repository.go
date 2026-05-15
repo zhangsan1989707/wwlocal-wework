@@ -7,25 +7,25 @@ import (
 )
 
 type OperationLogRepository struct {
-	db *gorm.DB
+	DB *gorm.DB
 }
 
 func NewOperationLogRepository(db *gorm.DB) *OperationLogRepository {
-	return &OperationLogRepository{db: db}
+	return &OperationLogRepository{DB: db}
 }
 
 func (r *OperationLogRepository) AutoMigrate() error {
-	return r.db.AutoMigrate(&model.OperationLog{})
+	return r.DB.AutoMigrate(&model.OperationLog{})
 }
 
 func (r *OperationLogRepository) Create(entry *model.OperationLog) error {
-	return r.db.Create(entry).Error
+	return r.DB.Create(entry).Error
 }
 
 func (r *OperationLogRepository) List(page, pageSize int, action string, statusCode int) ([]model.OperationLog, int64, error) {
 	var logs []model.OperationLog
 	var total int64
-	query := r.db.Model(&model.OperationLog{}).Order("created_at DESC")
+	query := r.DB.Model(&model.OperationLog{}).Order("created_at DESC")
 	if action != "" {
 		query = query.Where("action = ?", action)
 	}
@@ -40,6 +40,6 @@ func (r *OperationLogRepository) List(page, pageSize int, action string, statusC
 
 func (r *OperationLogRepository) GetDistinctActions() ([]string, error) {
 	var actions []string
-	err := r.db.Model(&model.OperationLog{}).Distinct("action").Order("action").Pluck("action", &actions).Error
+	err := r.DB.Model(&model.OperationLog{}).Distinct("action").Order("action").Pluck("action", &actions).Error
 	return actions, err
 }

@@ -117,16 +117,33 @@ func main() {
 	operationLogSvc := service.NewOperationLogService(operationLogRepo)
 	operationLogHandler := handler.NewOperationLogHandler(operationLogSvc)
 
+	adminOperLogRepo := repository.NewAdminOperLogRepository(db)
+	if err := adminOperLogRepo.AutoMigrate(); err != nil {
+		log.Fatalf("migrate admin oper log repository failed: %v", err)
+	}
+	adminOperLogSvc := service.NewAdminOperLogService(weworkSvc, adminOperLogRepo, &cfg.WeWork)
+	adminOperLogHandler := handler.NewAdminOperLogHandler(adminOperLogSvc)
+
 	dashboardHandler := handler.NewDashboardHandler(logRepo, contactRepo, syncHistoryRepo, syncStateRepo, keyRepo, cfg)
 	syncHistoryHandler := handler.NewSyncHistoryHandler(syncHistoryRepo)
 	syncFeatureHandler := handler.NewSyncFeatureHandler(syncFeatureRepo)
 	systemHandler := handler.NewSystemHandler(syncStateRepo, keyRepo, contactRepo, logRepo)
 
+	// 初始化任务队列服务
+	taskQueueSvc, err := service.NewTaskQueueService(cfg, syncSvc, contactSyncSvc, adminOperLogSvc)
+	if err != nil {
+		log.Printf("init task queue service failed: %v", err)
+	}
+	taskHandler := handler.NewTaskHandler(taskQueueSvc)
+
 	if cfg.Scheduler.Enabled {
 		schedulerSvc.Start(interval)
 	}
 
-	r := router.NewRouter(healthHandler, authHandler, logHandler, keyHandler, syncHandler, schedulerHandler, contactHandler, operationLogHandler, dashboardHandler, syncHistoryHandler, syncFeatureHandler, systemHandler, operationLogSvc, cfg.Auth.JWTSecret)
+	// 启动任务队列工作线程
+	taskQueueSvc.Start()
+
+	r := router.NewRouter(healthHandler, authHandler, logHandler, keyHandler, syncHandler, schedulerHandler, contactHandler, operationLogHandler, adminOperLogHandler, dashboardHandler, syncHistoryHandler, syncFeatureHandler, systemHandler, taskHandler, operationLogSvc, cfg.Auth.JWTSecret)
 
 	e := echo.New()
 	r.Setup(e)
@@ -148,17 +165,20 @@ func main() {
 	// 1. 停止定时调度
 	schedulerSvc.Stop()
 
-	// 2. 取消正在进行的同步
+	// 2. 停止任务队列
+	taskQueueSvc.Stop()
+
+	// 3. 取消正在进行的同步
 	syncSvc.Cancel()
 
-	// 3. 优雅关闭 HTTP（等待在途请求完成，最多 30 秒）
+	// 4. 优雅关闭 HTTP（等待在途请求完成，最多 30 秒）
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := e.Shutdown(ctx); err != nil {
 		log.Printf("shutdown error: %v", err)
 	}
 
-	// 4. 关闭数据库连接
+	// 5. 关闭数据库连接
 	sqlDB, _ = db.DB()
 	if sqlDB != nil {
 		sqlDB.Close()

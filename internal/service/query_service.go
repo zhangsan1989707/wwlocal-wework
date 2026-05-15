@@ -26,14 +26,21 @@ func NewQueryService(logRepo *repository.LogRepository, contactRepo *repository.
 }
 
 type QueryRequest struct {
-	FeatureIDs []int                  `json:"feature_ids"`
-	StartTime  int64                  `json:"start_time"`
-	EndTime    int64                  `json:"end_time"`
+	FeatureIDs []int            `json:"feature_ids"`
+	StartTime  int64            `json:"start_time"`
+	EndTime    int64            `json:"end_time"`
 	Conditions map[string]interface{} `json:"conditions"`
-	Mobile     string                 `json:"mobile"`
-	Page       int                    `json:"page"`
-	PageSize   int                    `json:"page_size"`
-	Realtime   bool                   `json:"realtime"`
+	Mobile     string           `json:"mobile"`
+	Page       int              `json:"page"`
+	PageSize   int              `json:"page_size"`
+	Realtime   bool             `json:"realtime"`
+	Cursor     int64            `json:"cursor"` // 游标，0表示第一页
+}
+
+type CursorQueryResult struct {
+	Total    int64            `json:"total"`
+	Cursor   int64            `json:"cursor"`
+	Data     []map[string]interface{} `json:"data"`
 }
 
 type QueryResult struct {
@@ -219,6 +226,92 @@ func (s *QueryService) GetFieldPaths() []string {
 	}
 	sort.Strings(paths)
 	return paths
+}
+
+// QueryByCursor 使用游标查询，更高效的分页方式
+func (s *QueryService) QueryByCursor(req *QueryRequest) (*CursorQueryResult, error) {
+	if req.PageSize <= 0 {
+		req.PageSize = 100
+	}
+	if req.PageSize > 1000 {
+		req.PageSize = 1000
+	}
+
+	// 限制最大时间跨度 90 天，防止内存溢出
+	const maxRangeSeconds = 90 * 24 * 3600
+	if req.EndTime-req.StartTime > int64(maxRangeSeconds) {
+		return nil, fmt.Errorf("time range cannot exceed 90 days")
+	}
+	if len(req.FeatureIDs) > 10 {
+		return nil, fmt.Errorf("cannot query more than 10 feature types at the same time")
+	}
+
+	var allData []map[string]interface{}
+	var total int64
+	var minCursor int64 = 0
+
+	// 使用游标查询每个 feature
+	for _, featureID := range req.FeatureIDs {
+		entries, count, nextCursor, err := s.logRepo.QueryByCursor(
+			featureID,
+			req.StartTime,
+			req.EndTime,
+			req.Cursor,
+			req.PageSize,
+			req.Conditions,
+			req.Mobile,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("query feature %d failed: %w", featureID, err)
+		}
+		total += count
+		
+		// 解析数据
+		for _, entry := range entries {
+			allData = append(allData, s.parseEntry(&entry))
+		}
+		
+		// 找到最小的 cursor 作为下一页的 cursor
+		if nextCursor > 0 && (minCursor == 0 || nextCursor < minCursor) {
+			minCursor = nextCursor
+		}
+	}
+
+	// 所有 feature 都没有更多数据了
+	if len(allData) == 0 {
+		return &CursorQueryResult{
+			Total:  total,
+			Cursor: 0,
+			Data:   allData,
+		}, nil
+	}
+
+	// 在合并后的数据上进行排序（仅在当前页，避免全量排序）
+	sort.Slice(allData, func(i, j int) bool {
+		ti, _ := allData[i]["log_time"].(int64)
+		tj, _ := allData[j]["log_time"].(int64)
+		return ti > tj
+	})
+
+	// 截断到正确的页面大小
+	if len(allData) > req.PageSize {
+		allData = allData[:req.PageSize]
+		// 更新 cursor 为最后一个元素的 log_time
+		if len(allData) > 0 {
+			minCursor = allData[len(allData)-1]["log_time"].(int64)
+		}
+	}
+
+	// 如果数据量少于页面大小，说明没有更多数据了
+	if len(allData) < req.PageSize {
+		minCursor = 0
+	}
+
+	return &CursorQueryResult{
+		Total:  total,
+		Cursor: minCursor,
+		Data:   allData,
+	}, nil
 }
 
 func extractPaths(data map[string]interface{}, prefix string, result map[string]struct{}) {

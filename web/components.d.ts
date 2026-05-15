@@ -11,6 +11,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AdminOperLog: typeof import('./src/components/AdminOperLog.vue')['default']
     ContactList: typeof import('./src/components/ContactList.vue')['default']
     Dashboard: typeof import('./src/components/Dashboard.vue')['default']
     DataSync: typeof import('./src/components/DataSync.vue')['default']
@@ -26,6 +27,7 @@ declare module 'vue' {
     ElDatePicker: typeof import('element-plus/es')['ElDatePicker']
     ElDescriptions: typeof import('element-plus/es')['ElDescriptions']
     ElDescriptionsItem: typeof import('element-plus/es')['ElDescriptionsItem']
+    ElDialog: typeof import('element-plus/es')['ElDialog']
     ElDrawer: typeof import('element-plus/es')['ElDrawer']
     ElEmpty: typeof import('element-plus/es')['ElEmpty']
     ElForm: typeof import('element-plus/es')['ElForm']

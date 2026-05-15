@@ -251,6 +251,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, inject } from 'vue'
 import { dashboardAPI, contactAPI } from '../api'
+import { ElMessage } from 'element-plus'
 
 const navigate = inject('navigate') as (menu: string, params?: any) => void
 
@@ -305,10 +306,14 @@ const loadOverview = async () => {
 }
 
 const loadDeptTree = async () => {
-  const res: any = await contactAPI.getDeptTree()
-  if (res.code === 0) {
-    deptTree.value = res.data?.tree || []
-    expandedKeys.value = deptTree.value.map((n: any) => n.id)
+  try {
+    const res: any = await contactAPI.getDeptTree()
+    if (res.code === 0) {
+      deptTree.value = res.data?.tree || []
+      expandedKeys.value = deptTree.value.map((n: any) => n.id)
+    }
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.msg || '加载部门树失败')
   }
 }
 
@@ -322,6 +327,8 @@ const fetchData = async () => {
       data.value = res.data
       totalDays.value = res.data.total_days || totalDays.value
     }
+  } catch (err: any) {
+    ElMessage.error(err.response?.data?.msg || '加载使用分析失败')
   } finally {
     loading.value = false
   }
