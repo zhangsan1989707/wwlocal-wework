@@ -128,9 +128,6 @@ func (r *Router) Setup(e *echo.Echo) {
 			contacts.GET("/sync/status", r.contactHandler.Status)
 			contacts.POST("/names", r.contactHandler.GetNames)
 			contacts.GET("/:userId", r.contactHandler.GetContact)
-			contacts.POST("/sync/async-export", r.contactHandler.SyncAsyncExport)
-			contacts.POST("/sync/incremental-async", r.contactHandler.SyncIncrementalAsync)
-			contacts.GET("/sync/async-status", r.contactHandler.AsyncSyncStatus)
 		}
 
 		dashboard := api.Group("/dashboard")

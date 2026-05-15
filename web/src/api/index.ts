@@ -129,9 +129,6 @@ export const contactAPI = {
   syncIncremental: () => api.post('/contacts/sync/incremental'),
   cancel: () => api.post('/contacts/sync/cancel'),
   status: () => api.get('/contacts/sync/status'),
-  syncAsyncExport: (data?: { department_id?: number; fetch_child?: number }) => api.post('/contacts/sync/async-export', data),
-  syncIncrementalAsync: () => api.post('/contacts/sync/incremental-async'),
-  asyncSyncStatus: () => api.get('/contacts/sync/async-status'),
 }
 
 export const dashboardAPI = {

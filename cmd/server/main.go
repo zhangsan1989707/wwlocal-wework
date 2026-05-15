@@ -108,11 +108,7 @@ func main() {
 
 	contactSvc := service.NewContactService(&cfg.WeWork)
 	contactSyncSvc := service.NewContactSyncService(contactSvc, contactRepo, syncHistoryRepo)
-	asyncExportSvc := service.NewAsyncExportService(&cfg.WeWork)
-	mediaSvc := service.NewMediaService(&cfg.WeWork)
-	csvExportSvc := service.NewCSVExportService()
-	asyncSyncSvc := service.NewContactAsyncSyncService(asyncExportSvc, mediaSvc, csvExportSvc, contactRepo, syncHistoryRepo, contactSvc)
-	contactHandler := handler.NewContactHandler(contactSyncSvc, contactRepo, asyncSyncSvc)
+	contactHandler := handler.NewContactHandler(contactSyncSvc, contactRepo)
 
 	operationLogRepo := repository.NewOperationLogRepository(db)
 	if err := operationLogRepo.AutoMigrate(); err != nil {

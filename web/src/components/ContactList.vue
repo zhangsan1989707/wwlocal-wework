@@ -4,29 +4,12 @@
       <template #header>
         <div class="card-header">
           <span class="card-title">通讯录同步</span>
-          <el-tag :type="(syncStatus.running || asyncSyncStatus.running) ? 'warning' : (syncStatus.error_msg || asyncSyncStatus.error_msg) ? 'danger' : 'success'" size="large">
-            {{ syncStatus.running || asyncSyncStatus.running ? '同步中...' : '空闲' }}
+          <el-tag :type="syncStatus.running ? 'warning' : syncStatus.error_msg ? 'danger' : 'success'" size="large">
+            {{ syncStatus.running ? '同步中...' : '空闲' }}
           </el-tag>
         </div>
       </template>
-
-      <div v-if="asyncSyncStatus.running" class="sync-progress">
-        <el-progress
-          :percentage="asyncProgressPercentage"
-          :stroke-width="20"
-          :show-text="true"
-          :format="() => asyncPhaseText"
-          status="success"
-        />
-        <p class="progress-text">
-          {{ asyncProgressText }}
-        </p>
-        <p v-if="asyncSyncStatus.job_id" class="job-id">
-          Job ID: {{ asyncSyncStatus.job_id }}
-        </p>
-      </div>
-
-      <div v-else-if="syncStatus.running" class="sync-progress">
+      <div v-if="syncStatus.running" class="sync-progress">
         <el-progress
           :percentage="progressPercentage"
           :stroke-width="20"
@@ -41,7 +24,6 @@
           请求停止同步
         </el-button>
       </div>
-
       <div v-else class="sync-actions">
         <el-button type="primary" @click="handleSyncFull" size="large">
           同步全部通讯录
@@ -49,21 +31,12 @@
         <el-button type="primary" plain @click="handleSyncIncremental" size="large">
           同步新增人员
         </el-button>
-        <el-divider direction="vertical" />
-        <el-button type="success" @click="handleSyncAsyncExport" size="large">
-          <el-icon><Download /></el-icon>
-          异步导出同步 (推荐)
-        </el-button>
-        <el-button type="success" plain @click="handleSyncIncrementalAsync" size="large">
-          <el-icon><Refresh /></el-icon>
-          异步增量同步
-        </el-button>
-        <span v-if="syncStatus.last_sync || asyncSyncStatus.last_sync" class="last-sync">
-          上次同步: {{ formatTime(syncStatus.last_sync || asyncSyncStatus.last_sync) }}
+        <span v-if="syncStatus.last_sync" class="last-sync">
+          上次同步: {{ formatTime(syncStatus.last_sync) }}
         </span>
       </div>
-      <div v-if="syncStatus.error_msg || asyncSyncStatus.error_msg" class="sync-error">
-        <el-alert :title="syncStatus.error_msg || asyncSyncStatus.error_msg" type="error" show-icon :closable="false" />
+      <div v-if="syncStatus.error_msg" class="sync-error">
+        <el-alert :title="syncStatus.error_msg" type="error" show-icon :closable="false" />
       </div>
     </el-card>
 
@@ -202,7 +175,7 @@
 import { ref, onMounted, onUnmounted, computed, watch, inject } from 'vue'
 import { contactAPI } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Download, Refresh } from '@element-plus/icons-vue'
+import { Search } from '@element-plus/icons-vue'
 
 const navigate = inject('navigate') as (menu: string, params?: any) => void
 
@@ -214,9 +187,7 @@ const searchName = ref('')
 const searchMobile = ref('')
 const loading = ref(false)
 const syncStatus = ref<any>({ running: false })
-const asyncSyncStatus = ref<any>({ running: false })
 let pollTimer: ReturnType<typeof setInterval> | null = null
-let asyncPollTimer: ReturnType<typeof setInterval> | null = null
 
 const deptTree = ref<any[]>([])
 const totalContacts = ref(0)
@@ -238,32 +209,6 @@ const phaseText = computed(() => {
   if (phase === 'members') return '获取成员列表...'
   if (phase === 'details') return '拉取成员详情:'
   return ''
-})
-
-const asyncProgressPercentage = computed(() => {
-  if (!asyncSyncStatus.value || asyncSyncStatus.value.total === 0) return 0
-  return Math.round((asyncSyncStatus.value.progress / asyncSyncStatus.value.total) * 100)
-})
-
-const asyncPhaseText = computed(() => {
-  const phase = asyncSyncStatus.value.phase
-  if (phase === 'init') return '初始化...'
-  if (phase === 'exporting') return '正在导出数据...'
-  if (phase === 'importing') return '正在导入数据...'
-  if (phase === 'comparing') return '比对差异...'
-  if (phase === 'done') return '同步完成'
-  if (phase === 'error') return '同步失败'
-  return phase || '处理中'
-})
-
-const asyncProgressText = computed(() => {
-  if (asyncSyncStatus.value.imported > 0 || asyncSyncStatus.value.failed > 0) {
-    return `已导入 ${asyncSyncStatus.value.imported}, 失败 ${asyncSyncStatus.value.failed} / ${asyncSyncStatus.value.total}`
-  }
-  if (asyncSyncStatus.value.progress > 0 && asyncSyncStatus.value.total > 0) {
-    return `${asyncSyncStatus.value.progress} / ${asyncSyncStatus.value.total}`
-  }
-  return '等待服务端处理...'
 })
 
 const deptNames = computed(() => {
@@ -303,14 +248,11 @@ onMounted(async () => {
   await loadDeptTree()
   await loadContacts()
   await checkSyncStatus()
-  await checkAsyncSyncStatus()
   if (syncStatus.value.running) startPolling()
-  if (asyncSyncStatus.value.running) startAsyncPolling()
 })
 
 onUnmounted(() => {
   stopPolling()
-  stopAsyncPolling()
 })
 
 const loadDeptTree = async () => {
@@ -517,75 +459,6 @@ const startPolling = () => {
 const stopPolling = () => {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
 }
-
-const checkAsyncSyncStatus = async () => {
-  try {
-    const res: any = await contactAPI.asyncSyncStatus()
-    if (res.code === 0) asyncSyncStatus.value = res.data
-  } catch (err) { console.error(err) }
-}
-
-const startAsyncPolling = () => {
-  stopAsyncPolling()
-  asyncPollTimer = setInterval(async () => {
-    await checkAsyncSyncStatus()
-    if (!asyncSyncStatus.value.running) {
-      stopAsyncPolling()
-      await loadDeptTree()
-      if (selectedDept.value) {
-        await loadDeptMembers()
-      } else {
-        await loadContacts()
-      }
-    }
-  }, 2000)
-}
-
-const stopAsyncPolling = () => {
-  if (asyncPollTimer) { clearInterval(asyncPollTimer); asyncPollTimer = null }
-}
-
-const handleSyncAsyncExport = async () => {
-  try {
-    await ElMessageBox.confirm(
-      '使用政务微信异步导出接口，适用于大规模通讯录数据同步（推荐用于9万人以上场景），确定开始吗？',
-      '确认同步',
-      { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' }
-    )
-  } catch { return }
-
-  try {
-    const res: any = await contactAPI.syncAsyncExport()
-    if (res.code === 0) {
-      ElMessage.success('异步同步已启动')
-      await checkAsyncSyncStatus()
-      startAsyncPolling()
-    }
-  } catch (err: any) {
-    ElMessage.error(err.message || '同步启动失败')
-  }
-}
-
-const handleSyncIncrementalAsync = async () => {
-  try {
-    await ElMessageBox.confirm(
-      '使用异步方式仅同步新增用户，确定开始吗？',
-      '确认同步',
-      { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' }
-    )
-  } catch { return }
-
-  try {
-    const res: any = await contactAPI.syncIncrementalAsync()
-    if (res.code === 0) {
-      ElMessage.success('异步增量同步已启动')
-      await checkAsyncSyncStatus()
-      startAsyncPolling()
-    }
-  } catch (err: any) {
-    ElMessage.error(err.message || '同步启动失败')
-  }
-}
 </script>
 
 <style scoped>
@@ -623,14 +496,6 @@ const handleSyncIncrementalAsync = async () => {
   text-align: center;
   color: #606266;
   margin-top: 10px;
-}
-
-.job-id {
-  text-align: center;
-  color: #909399;
-  margin-top: 8px;
-  font-size: 13px;
-  font-family: monospace;
 }
 
 .last-sync {

@@ -42,15 +42,6 @@
           <el-checkbox v-model="syncAdminOperLog" :disabled="syncStatus.running">
             同步企微操作日志
           </el-checkbox>
-          <el-button
-            v-if="syncAdminOperLog"
-            type="text"
-            size="small"
-            style="color: #409eff; margin-left: 8px"
-            @click="showAdminOperLogSyncDialog = true"
-          >
-            设置时间范围
-          </el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -236,52 +227,6 @@
       <el-empty v-if="!syncStatus.running && (!syncStatus.results || Object.keys(syncStatus.results).length === 0)" description="暂无同步记录" />
     </el-card>
 
-    <el-card class="sync-card">
-      <template #header>
-        <div class="card-header">
-          <span class="card-title">企微操作日志同步</span>
-        </div>
-      </template>
-      <el-form label-position="top">
-        <el-form-item label="时间范围">
-          <div class="time-range-container">
-            <el-button-group class="time-shortcuts">
-              <el-button
-                v-for="shortcut in adminOperLogShortcuts"
-                :key="shortcut.label"
-                :type="adminOperLogActiveShortcut === shortcut.label ? 'primary' : 'default'"
-                size="small"
-                @click="applyAdminOperLogShortcut(shortcut)"
-              >
-                {{ shortcut.label }}
-              </el-button>
-            </el-button-group>
-            <el-date-picker
-              v-model="adminOperLogDateRange"
-              type="datetimerange"
-              range-separator="至"
-              start-placeholder="开始时间"
-              end-placeholder="结束时间"
-              style="width: 100%; margin-top: 8px"
-              @change="adminOperLogActiveShortcut = null"
-            />
-          </div>
-        </el-form-item>
-        <el-form-item>
-          <el-button
-            type="success"
-            @click="handleAdminOperLogSync"
-            :loading="adminOperLogSyncLoading"
-            :disabled="adminOperLogSyncLoading"
-            size="large"
-          >
-            <el-icon><Download /></el-icon>
-            同步企微操作日志
-          </el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
-
     <el-card class="history-card">
       <template #header>
         <div class="card-header">
@@ -344,7 +289,7 @@
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { syncAPI, schedulerAPI, syncHistoryAPI, syncFeatureAPI, adminOperLogAPI } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { VideoPlay, VideoPause, Refresh, Clock, Download } from '@element-plus/icons-vue'
+import { VideoPlay, VideoPause, Refresh, Clock } from '@element-plus/icons-vue'
 
 const dateRange = ref<[Date, Date] | null>(null)
 const activeShortcut = ref<string | null>(null)
@@ -375,18 +320,6 @@ const historyLoading = ref(false)
 
 const timeShortcuts = [
   { label: '最近1天', hours: 24 },
-  { label: '最近7天', hours: 168 },
-  { label: '最近30天', hours: 720 },
-  { label: '最近90天', hours: 2160 },
-]
-
-const adminOperLogDateRange = ref<[Date, Date] | null>(null)
-const adminOperLogActiveShortcut = ref<string | null>(null)
-const adminOperLogSyncLoading = ref(false)
-const showAdminOperLogSyncDialog = ref(false)
-
-const adminOperLogShortcuts = [
-  { label: '今天', hours: 0, isToday: true },
   { label: '最近7天', hours: 168 },
   { label: '最近30天', hours: 720 },
   { label: '最近90天', hours: 2160 },
@@ -695,61 +628,6 @@ const formatDuration = (ms: number) => {
   const min = Math.floor(ms / 60000)
   const sec = Math.round((ms % 60000) / 1000)
   return `${min}m${sec}s`
-}
-
-const applyAdminOperLogShortcut = (shortcut: { label: string; hours: number; isToday?: boolean }) => {
-  adminOperLogActiveShortcut.value = shortcut.label
-  if (shortcut.isToday) {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const end = new Date()
-    end.setHours(23, 59, 59, 999)
-    adminOperLogDateRange.value = [today, end]
-  } else {
-    const end = new Date()
-    const start = new Date(end.getTime() - shortcut.hours * 60 * 60 * 1000)
-    adminOperLogDateRange.value = [start, end]
-  }
-}
-
-const handleAdminOperLogSync = async () => {
-  if (!adminOperLogDateRange.value) {
-    ElMessage.warning('请选择时间范围')
-    return
-  }
-
-  try {
-    await ElMessageBox.confirm(
-      '将按选定时间范围从政务微信拉取企微操作日志，确定开始吗？',
-      '确认同步',
-      { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' }
-    )
-  } catch {
-    return
-  }
-
-  adminOperLogSyncLoading.value = true
-  try {
-    const startTime = Math.floor(adminOperLogDateRange.value[0].getTime() / 1000)
-    const endTime = Math.floor(adminOperLogDateRange.value[1].getTime() / 1000)
-
-    const res: any = await adminOperLogAPI.sync({
-      start_time: startTime,
-      end_time: endTime,
-    })
-
-    if (res.code === 0) {
-      ElMessage.success('企微操作日志同步已启动')
-      adminOperLogSyncLoading.value = false
-      await loadSyncHistory()
-    } else {
-      ElMessage.error(res.msg || '同步启动失败')
-      adminOperLogSyncLoading.value = false
-    }
-  } catch (err: any) {
-    ElMessage.error(err.message || '同步启动失败')
-    adminOperLogSyncLoading.value = false
-  }
 }
 
 </script>

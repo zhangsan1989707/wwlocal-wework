@@ -15,11 +15,10 @@ import (
 type ContactHandler struct {
 	contactSyncSvc *service.ContactSyncService
 	contactRepo    *repository.ContactRepository
-	asyncSyncSvc   *service.ContactAsyncSyncService
 }
 
-func NewContactHandler(contactSyncSvc *service.ContactSyncService, contactRepo *repository.ContactRepository, asyncSyncSvc *service.ContactAsyncSyncService) *ContactHandler {
-	return &ContactHandler{contactSyncSvc: contactSyncSvc, contactRepo: contactRepo, asyncSyncSvc: asyncSyncSvc}
+func NewContactHandler(contactSyncSvc *service.ContactSyncService, contactRepo *repository.ContactRepository) *ContactHandler {
+	return &ContactHandler{contactSyncSvc: contactSyncSvc, contactRepo: contactRepo}
 }
 
 func (h *ContactHandler) List(c echo.Context) error {
@@ -214,85 +213,4 @@ func (h *ContactHandler) GetContact(c echo.Context) error {
 	}
 
 	return response.Success(c, contact)
-}
-
-type AsyncSyncRequest struct {
-	DepartmentID int `json:"department_id"`
-	FetchChild  int `json:"fetch_child"`
-}
-
-func (h *ContactHandler) SyncAsyncExport(c echo.Context) error {
-	if h.asyncSyncSvc == nil {
-		return response.Error(c, 501, "async sync service not available")
-	}
-	if h.asyncSyncSvc.GetStatus().Running {
-		return response.Error(c, 409, "async sync already in progress")
-	}
-
-	var req AsyncSyncRequest
-	if err := c.Bind(&req); err != nil {
-		return response.Error(c, 400, "invalid request body")
-	}
-	if req.DepartmentID == 0 {
-		req.DepartmentID = 1
-	}
-	if req.FetchChild == 0 {
-		req.FetchChild = 1
-	}
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("contact async sync goroutine panic: %v\n%s", r, debug.Stack())
-			}
-			h.asyncSyncSvc.ResetRunning()
-		}()
-		result, err := h.asyncSyncSvc.SyncAllAsync(req.DepartmentID, req.FetchChild)
-		if err != nil {
-			log.Printf("contact async sync failed: %v", err)
-		} else {
-			log.Printf("contact async sync completed: imported=%d, failed=%d", result.Imported, result.Failed)
-		}
-	}()
-
-	return response.Success(c, map[string]interface{}{
-		"message":        "async export sync started",
-		"department_id":  req.DepartmentID,
-		"fetch_child":    req.FetchChild,
-	})
-}
-
-func (h *ContactHandler) SyncIncrementalAsync(c echo.Context) error {
-	if h.asyncSyncSvc == nil {
-		return response.Error(c, 501, "async sync service not available")
-	}
-	if h.asyncSyncSvc.GetStatus().Running {
-		return response.Error(c, 409, "async sync already in progress")
-	}
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("contact incremental async sync goroutine panic: %v\n%s", r, debug.Stack())
-			}
-			h.asyncSyncSvc.ResetRunning()
-		}()
-		result, err := h.asyncSyncSvc.SyncIncrementalAsync()
-		if err != nil {
-			log.Printf("contact incremental async sync failed: %v", err)
-		} else {
-			log.Printf("contact incremental async sync completed: imported=%d, failed=%d", result.Imported, result.Failed)
-		}
-	}()
-
-	return response.Success(c, map[string]interface{}{
-		"message": "incremental async sync started",
-	})
-}
-
-func (h *ContactHandler) AsyncSyncStatus(c echo.Context) error {
-	if h.asyncSyncSvc == nil {
-		return response.Error(c, 501, "async sync service not available")
-	}
-	return response.Success(c, h.asyncSyncSvc.GetStatus())
 }

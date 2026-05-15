@@ -1,6 +1,6 @@
 <template>
   <div class="admin-oper-log">
-    <el-card class="filter-card">
+    <el-card class="main-card">
       <template #header>
         <div class="card-header">
           <span class="card-title">企微操作日志</span>
@@ -13,13 +13,18 @@
               <el-icon><Refresh /></el-icon>
               重置
             </el-button>
+            <el-button type="success" @click="handleSync" :loading="syncLoading">
+              <el-icon><Download /></el-icon>
+              同步
+            </el-button>
           </div>
         </div>
       </template>
-      <el-form :model="filter" inline>
+
+      <el-form :model="form" label-position="left" label-width="120px" :inline="true" style="margin-bottom: 20px">
         <el-form-item label="时间范围">
           <el-date-picker
-            v-model="filter.time_range"
+            v-model="dateRange"
             type="datetimerange"
             range-separator="至"
             start-placeholder="开始时间"
@@ -28,71 +33,38 @@
           />
         </el-form-item>
         <el-form-item label="操作类型">
-          <el-select v-model="filter.operation" clearable placeholder="全部" style="width: 200px">
-            <el-option label="全部" value="" />
-            <el-option
-              v-for="type in operTypes"
-              :key="type"
-              :label="getOperationLabel(type)"
-              :value="type"
-            />
+          <el-select v-model="form.oper_type" placeholder="请选择" clearable style="width: 200px">
+            <el-option label="添加" value="add" />
+            <el-option label="删除" value="delete" />
+            <el-option label="修改" value="update" />
           </el-select>
         </el-form-item>
         <el-form-item label="操作者">
-          <el-select v-model="filter.operator" clearable placeholder="全部" style="width: 200px" filterable>
-            <el-option label="全部" value="" />
-            <el-option
-              v-for="user in operUsers"
-              :key="user"
-              :label="user"
-              :value="user"
-            />
-          </el-select>
+          <el-input v-model="form.oper_userid" placeholder="操作者UserID" clearable style="width: 200px" />
         </el-form-item>
       </el-form>
-    </el-card>
 
-    <el-card class="result-card">
-      <template #header>
-        <div class="card-header">
-          <span class="card-title">查询结果</span>
-          <span v-if="total > 0" class="result-count">共 {{ total }} 条记录</span>
-        </div>
-      </template>
-      <el-table
-        :data="tableData"
-        border
-        stripe
-        v-loading="loading"
-        max-height="600"
-        highlight-current-row
-      >
-        <el-table-column prop="oper_time" label="时间" width="180" align="center">
+      <el-table :data="tableData" border stripe style="width: 100%" v-loading="loading">
+        <el-table-column prop="time" label="操作时间" width="180">
+          <template #default="{ row }">{{ formatTime(row.time) }}</template>
+        </el-table-column>
+        <el-table-column prop="oper_userid" label="操作者" width="150" />
+        <el-table-column prop="oper_type" label="操作类型" width="100">
           <template #default="{ row }">
-            {{ formatTime(row.oper_time) }}
+            <el-tag :type="getOperTypeTagType(row.oper_type)" size="small">
+              {{ getOperLabel(row.oper_type) }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="oper_userid" label="操作者" width="120" align="center">
+        <el-table-column prop="oper_desc" label="操作描述" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="app_id" label="应用ID" width="150" />
+        <el-table-column prop="detail" label="详情" min-width="300" show-overflow-tooltip>
           <template #default="{ row }">
-            {{ row.oper_name || row.oper_userid }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="oper_type" label="操作类型" width="150" align="center">
-          <template #default="{ row }">
-            <el-tag size="small" :type="getOperationTag(row.oper_type)">{{ getOperationLabel(row.oper_type) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="oper_type_id" label="操作对象" min-width="200" show-overflow-tooltip>
-          <template #default="{ row }">
-            {{ row.oper_type_id }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="oper_data" label="详情" min-width="300" show-overflow-tooltip>
-          <template #default="{ row }">
-            {{ row.oper_data }}
+            <pre style="margin: 0; white-space: pre-wrap; word-break: break-all">{{ row.detail }}</pre>
           </template>
         </el-table-column>
       </el-table>
+
       <el-pagination
         v-if="total > 0"
         class="pagination"
@@ -106,67 +78,130 @@
         @size-change="handleQuery"
       />
     </el-card>
+
+    <el-dialog v-model="syncDialogVisible" title="同步企微操作日志" width="500px">
+      <el-form label-position="top">
+        <el-form-item label="时间范围">
+          <div class="time-range-container">
+            <el-button-group class="time-shortcuts">
+              <el-button
+                v-for="shortcut in timeShortcuts"
+                :key="shortcut.label"
+                :type="activeShortcut === shortcut.label ? 'primary' : 'default'"
+                size="small"
+                @click="applyTimeShortcut(shortcut)"
+              >
+                {{ shortcut.label }}
+              </el-button>
+            </el-button-group>
+            <el-date-picker
+              v-model="syncDateRange"
+              type="datetimerange"
+              range-separator="至"
+              start-placeholder="开始时间"
+              end-placeholder="结束时间"
+              style="width: 100%; margin-top: 8px"
+              @change="activeShortcut = null"
+            />
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="syncDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="doSync" :loading="syncLoading">开始同步</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { adminOperLogAPI } from '../api'
-import { ElMessage } from 'element-plus'
-import { Search, Refresh } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Search, Refresh, Download } from '@element-plus/icons-vue'
 
-const filter = reactive({
-  time_range: null as [Date, Date] | null,
-  operation: '',
-  operator: '',
+const form = reactive({
+  start_time: null as Date | null,
+  end_time: null as Date | null,
+  oper_type: '',
+  oper_userid: '',
 })
 
+const dateRange = ref<[Date, Date] | null>(null)
 const loading = ref(false)
+const syncLoading = ref(false)
+const syncDialogVisible = ref(false)
+const syncDateRange = ref<[Date, Date] | null>(null)
+const activeShortcut = ref<string | null>(null)
 const tableData = ref<any[]>([])
 const total = ref(0)
-const operTypes = ref<string[]>([])
-const operUsers = ref<string[]>([])
 const pagination = reactive({
   page: 1,
   page_size: 20,
 })
+
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+const timeShortcuts = [
+  { label: '今天', hours: 0, isToday: true },
+  { label: '最近7天', hours: 168 },
+  { label: '最近30天', hours: 720 },
+  { label: '最近90天', hours: 2160 },
+]
 
 const setTodayRange = () => {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   const end = new Date()
   end.setHours(23, 59, 59, 999)
-  filter.time_range = [today, end]
+  dateRange.value = [today, end]
 }
 
 onMounted(async () => {
   setTodayRange()
-  await Promise.all([
-    loadOperTypes(),
-    loadOperUsers(),
-  ])
   await handleQuery()
 })
 
-const loadOperTypes = async () => {
-  try {
-    const res: any = await adminOperLogAPI.getTypes()
-    if (res.code === 0) {
-      operTypes.value = res.data || []
+onUnmounted(() => {
+  stopPolling()
+})
+
+const startPolling = () => {
+  stopPolling()
+  pollTimer = setInterval(async () => {
+    try {
+      const res: any = await adminOperLogAPI.syncStatus()
+      if (res.code === 0 && !res.data.running) {
+        stopPolling()
+        syncLoading.value = false
+        ElMessage.success('同步完成')
+        handleQuery()
+      }
+    } catch (err) {
+      console.error(err)
     }
-  } catch (err) {
-    console.error('Failed to load oper types:', err)
+  }, 2000)
+}
+
+const stopPolling = () => {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
   }
 }
 
-const loadOperUsers = async () => {
-  try {
-    const res: any = await adminOperLogAPI.getUsers()
-    if (res.code === 0) {
-      operUsers.value = res.data || []
-    }
-  } catch (err) {
-    console.error('Failed to load oper users:', err)
+const applyTimeShortcut = (shortcut: { label: string; hours: number; isToday?: boolean }) => {
+  activeShortcut.value = shortcut.label
+  if (shortcut.isToday) {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const end = new Date()
+    end.setHours(23, 59, 59, 999)
+    syncDateRange.value = [today, end]
+  } else {
+    const end = new Date()
+    const start = new Date(end.getTime() - shortcut.hours * 60 * 60 * 1000)
+    syncDateRange.value = [start, end]
   }
 }
 
@@ -177,12 +212,12 @@ const handleQuery = async () => {
       page: pagination.page,
       page_size: pagination.page_size,
     }
-    if (filter.time_range) {
-      params.start_time = Math.floor(filter.time_range[0].getTime() / 1000)
-      params.end_time = Math.floor(filter.time_range[1].getTime() / 1000)
+    if (dateRange.value) {
+      params.start_time = Math.floor(dateRange.value[0].getTime() / 1000)
+      params.end_time = Math.floor(dateRange.value[1].getTime() / 1000)
     }
-    if (filter.operation) params.oper_type = filter.operation
-    if (filter.operator) params.oper_userid = filter.operator
+    if (form.oper_type) params.oper_type = form.oper_type
+    if (form.oper_userid) params.oper_userid = form.oper_userid
 
     const res: any = await adminOperLogAPI.query(params)
     if (res.code === 0) {
@@ -200,10 +235,56 @@ const handleQuery = async () => {
 
 const handleReset = () => {
   setTodayRange()
-  filter.operation = ''
-  filter.operator = ''
+  form.oper_type = ''
+  form.oper_userid = ''
   pagination.page = 1
   handleQuery()
+}
+
+const handleSync = () => {
+  syncDateRange.value = null
+  activeShortcut.value = null
+  syncDialogVisible.value = true
+}
+
+const doSync = async () => {
+  if (!syncDateRange.value) {
+    ElMessage.warning('请选择时间范围')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      '将按选定时间范围从政务微信拉取企微操作日志，确定开始吗？',
+      '确认同步',
+      { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+
+  syncLoading.value = true
+  try {
+    const startTime = Math.floor(syncDateRange.value[0].getTime() / 1000)
+    const endTime = Math.floor(syncDateRange.value[1].getTime() / 1000)
+
+    const res: any = await adminOperLogAPI.sync({
+      start_time: startTime,
+      end_time: endTime,
+    })
+
+    if (res.code === 0) {
+      ElMessage.success('同步任务已启动')
+      syncDialogVisible.value = false
+      startPolling()
+    } else {
+      ElMessage.error(res.msg || '同步启动失败')
+      syncLoading.value = false
+    }
+  } catch (err: any) {
+    ElMessage.error(err.message || '同步启动失败')
+    syncLoading.value = false
+  }
 }
 
 const formatTime = (ts: number | string) => {
@@ -212,40 +293,20 @@ const formatTime = (ts: number | string) => {
   return new Date(timestamp * 1000).toLocaleString('zh-CN')
 }
 
-const getOperationLabel = (op: string) => {
+const getOperLabel = (op: string) => {
   const map: Record<string, string> = {
-    'member_dept': '成员与部门变更',
-    'permission': '权限管理变更',
-    'app': '应用与小程序',
-    'admin_tool': '管理工具变更',
-    'audit': '审计',
-    'external_service': '对外服务',
-    'contact_chat': '通讯录与聊天管理',
-    'login': '登录管理',
-    'external_contact': '外部联系人管理',
-    'security': '安全与保密',
-    'help': '帮助与反馈',
-    'data_protection': '数据防泄漏',
-    'other': '其他',
+    add: '添加',
+    delete: '删除',
+    update: '修改',
   }
   return map[op] || op
 }
 
-const getOperationTag = (op: string) => {
+const getOperTypeTagType = (op: string) => {
   const map: Record<string, string> = {
-    'member_dept': 'primary',
-    'permission': 'success',
-    'app': 'warning',
-    'admin_tool': 'danger',
-    'audit': 'info',
-    'external_service': '',
-    'contact_chat': 'primary',
-    'login': 'success',
-    'external_contact': 'warning',
-    'security': 'danger',
-    'help': 'info',
-    'data_protection': '',
-    'other': 'info',
+    add: 'success',
+    delete: 'danger',
+    update: 'warning',
   }
   return map[op] || 'info'
 }
@@ -256,9 +317,8 @@ const getOperationTag = (op: string) => {
   padding: 0;
 }
 
-.filter-card,
-.result-card {
-  margin-bottom: 16px;
+.main-card :deep(.el-card__body) {
+  padding: 20px;
 }
 
 .card-header {
@@ -278,13 +338,9 @@ const getOperationTag = (op: string) => {
   gap: 8px;
 }
 
-.result-count {
-  font-size: 14px;
-  color: #909399;
-}
-
 .pagination {
-  margin-top: 16px;
+  margin-top: 20px;
+  display: flex;
   justify-content: center;
 }
 
@@ -300,10 +356,5 @@ const getOperationTag = (op: string) => {
 
 .time-shortcuts .el-button {
   border-radius: 4px;
-}
-
-:deep(.el-card__header) {
-  padding: 12px 20px;
-  border-bottom: 1px solid #ebeef5;
 }
 </style>
