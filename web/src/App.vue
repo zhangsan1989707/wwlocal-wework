@@ -117,7 +117,6 @@ const handleMenuSelect = (index: string) => {
 
 const handleLogout = () => {
   authStore.logout()
-  router.push('/login')
 }
 
 const showPwDialog = ref(false)
