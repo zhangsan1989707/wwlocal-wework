@@ -48,19 +48,14 @@
         <el-table-column prop="time" label="操作时间" width="180">
           <template #default="{ row }">{{ formatTime(row.time) }}</template>
         </el-table-column>
-        <el-table-column prop="oper_userid" label="操作者" width="150" />
-        <el-table-column prop="oper_type" label="操作类型" width="100">
-          <template #default="{ row }">
-            <el-tag :type="getOperTypeTagType(row.oper_type)" size="small">
-              {{ getOperLabel(row.oper_type) }}
-            </el-tag>
-          </template>
-        </el-table-column>
+        <el-table-column prop="oper_userid" label="操作者UserID" width="150" />
+        <el-table-column prop="oper_name" label="操作者" width="120" />
+        <el-table-column prop="oper_type" label="操作类型" width="150" show-overflow-tooltip />
         <el-table-column prop="oper_desc" label="操作描述" min-width="200" show-overflow-tooltip />
         <el-table-column prop="app_id" label="应用ID" width="150" />
-        <el-table-column prop="detail" label="详情" min-width="300" show-overflow-tooltip>
+        <el-table-column prop="oper_data" label="详情" min-width="300" show-overflow-tooltip>
           <template #default="{ row }">
-            <pre style="margin: 0; white-space: pre-wrap; word-break: break-all">{{ row.detail }}</pre>
+            <pre style="margin: 0; white-space: pre-wrap; word-break: break-all">{{ row.oper_data }}</pre>
           </template>
         </el-table-column>
       </el-table>
@@ -291,24 +286,6 @@ const formatTime = (ts: number | string) => {
   if (!ts) return '-'
   const timestamp = typeof ts === 'string' ? parseInt(ts, 10) : ts
   return new Date(timestamp * 1000).toLocaleString('zh-CN')
-}
-
-const getOperLabel = (op: string) => {
-  const map: Record<string, string> = {
-    add: '添加',
-    delete: '删除',
-    update: '修改',
-  }
-  return map[op] || op
-}
-
-const getOperTypeTagType = (op: string) => {
-  const map: Record<string, string> = {
-    add: 'success',
-    delete: 'danger',
-    update: 'warning',
-  }
-  return map[op] || 'info'
 }
 </script>
 

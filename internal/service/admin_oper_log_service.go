@@ -55,6 +55,16 @@ func (s *AdminOperLogService) SyncLogs(startTime, endTime int64) (int, error) {
 			if exists {
 				continue
 			}
+
+			var operDesc, appID string
+			if apiLog.OperData != "" {
+				var operData model.OperData
+				if err := json.Unmarshal([]byte(apiLog.OperData), &operData); err == nil {
+					operDesc = operData.Content
+					appID = operData.AppID
+				}
+			}
+
 			logs = append(logs, model.AdminOperLog{
 				OperTime:   apiLog.OperTime,
 				OperTypeID: apiLog.OperTypeID,
@@ -62,6 +72,8 @@ func (s *AdminOperLogService) SyncLogs(startTime, endTime int64) (int, error) {
 				OperUserID: apiLog.OperUserID,
 				OperName:   apiLog.OperName,
 				OperData:   apiLog.OperData,
+				OperDesc:   operDesc,
+				AppID:      appID,
 			})
 		}
 
