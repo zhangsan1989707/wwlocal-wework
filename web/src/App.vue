@@ -9,8 +9,8 @@
         </div>
         <div class="header-right">
           <span>{{ authStore.username }}</span>
-          <el-button type="text" style="color: rgba(255,255,255,.85)" @click="showPwDialog = true">修改密码</el-button>
-          <el-button type="text" style="color: rgba(255,255,255,.85)" @click="handleLogout">退出</el-button>
+          <el-button type="link" style="color: rgba(255,255,255,.85)" @click="showPwDialog = true">修改密码</el-button>
+          <el-button type="link" style="color: rgba(255,255,255,.85)" @click="handleLogout">退出</el-button>
         </div>
       </el-header>
       <el-container class="main-container">
