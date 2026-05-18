@@ -151,10 +151,10 @@ api.interceptors.response.use(
         originalRequest.headers.Authorization = `Bearer ${newToken}`
         return api(originalRequest)
       }
-      // refresh 失败，跳转登录
+      // refresh 失败，清除 token 并刷新页面显示登录界面
       reloading = true
       removeStoredToken()
-      window.location.href = '/login'
+      window.location.reload()
       return Promise.reject(new Error('登录已过期，请重新登录'))
     }
 
@@ -177,15 +177,15 @@ api.interceptors.response.use(
 
 export const authAPI = {
   login: (data: LoginRequest) =>
-    api.post<ApiResponse<LoginResponse>>('/auth/login', data).then((res) => {
-      if (res.data.code === 0 && res.data.data) {
-        setStoredToken(res.data.data.token)
-        if (res.data.data.refresh_token) {
-          setStoredRefreshToken(res.data.data.refresh_token)
+    api.post<ApiResponse<LoginResponse>>('/auth/login', data).then((res: any) => {
+      if (res.code === 0 && res.data) {
+        setStoredToken(res.data.token)
+        if (res.data.refresh_token) {
+          setStoredRefreshToken(res.data.refresh_token)
         }
-        setStoredUsername(res.data.data.username)
+        setStoredUsername(res.data.username)
       }
-      return res.data
+      return res
     }),
   changePassword: (data: { old_password: string; new_password: string }) =>
     api.put<ApiResponse<{ message: string }>>('/auth/password', data),
