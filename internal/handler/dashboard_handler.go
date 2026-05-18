@@ -242,9 +242,18 @@ func (h *DashboardHandler) GetInactiveUsers(c echo.Context) error {
 		})
 	}
 
+	// 统计真正未使用的用户（active_days == 0）
+	neverActiveCount := 0
+	for _, u := range users {
+		if u.ActiveDays == 0 {
+			neverActiveCount++
+		}
+	}
+
 	return response.Success(c, map[string]interface{}{
 		"total_contacts":    totalContacts,
-		"inactive_count":    len(users),
+		"inactive_count":    neverActiveCount,
+		"filtered_count":    len(users),
 		"inactive_users":    users,
 		"feature_names":     featureNames,
 		"departments":       deptList,
