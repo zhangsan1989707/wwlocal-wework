@@ -11,13 +11,15 @@ import (
 )
 
 type JWTClaims struct {
-	Username string `json:"username"`
+	Username  string `json:"username"`
+	TokenType string `json:"token_type,omitempty"`
 	jwt.StandardClaims
 }
 
 func GenerateToken(username, secret string, duration time.Duration) (string, error) {
 	claims := &JWTClaims{
-		Username: username,
+		Username:  username,
+		TokenType: "access",
 		StandardClaims: jwt.StandardClaims{
 			ExpiresAt: time.Now().Add(duration).Unix(),
 			IssuedAt:  time.Now().Unix(),
@@ -25,6 +27,36 @@ func GenerateToken(username, secret string, duration time.Duration) (string, err
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(secret))
+}
+
+func GenerateRefreshToken(username, secret string, duration time.Duration) (string, error) {
+	claims := &JWTClaims{
+		Username:  username,
+		TokenType: "refresh",
+		StandardClaims: jwt.StandardClaims{
+			ExpiresAt: time.Now().Add(duration).Unix(),
+			IssuedAt:  time.Now().Unix(),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(secret))
+}
+
+func ParseToken(tokenStr, secret string) (*JWTClaims, error) {
+	token, err := jwt.ParseWithClaims(tokenStr, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(secret), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	claims, ok := token.Claims.(*JWTClaims)
+	if !ok || !token.Valid {
+		return nil, fmt.Errorf("invalid token")
+	}
+	return claims, nil
 }
 
 func JWTAuth(secret string) echo.MiddlewareFunc {

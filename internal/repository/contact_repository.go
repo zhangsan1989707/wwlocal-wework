@@ -2,7 +2,8 @@ package repository
 
 import (
 	"encoding/json"
-	"log"
+	"fmt"
+	"log/slog"
 	"sort"
 	"strconv"
 	"strings"
@@ -72,7 +73,7 @@ func (r *ContactRepository) BatchUpsertContacts(contacts []model.Contact) error 
 						Columns:   []clause.Column{{Name: "user_id"}, {Name: "department"}},
 						DoNothing: true,
 					}).CreateInBatches(deptLinks, 100).Error; err != nil {
-						log.Printf("update contact_departments for %s failed: %v", contact.UserID, err)
+						slog.Info(fmt.Sprintf("update contact_departments for %s failed: %v", contact.UserID, err))
 					}
 				}
 			}

@@ -3,7 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"sort"
 	"time"
 
@@ -25,32 +25,7 @@ func NewQueryService(logRepo *repository.LogRepository, contactRepo *repository.
 	return &QueryService{logRepo: logRepo, contactRepo: contactRepo, weworkSvc: weworkSvc, decryptSvc: decryptSvc, syncFeatureRepo: syncFeatureRepo, cfg: cfg}
 }
 
-type QueryRequest struct {
-	FeatureIDs []int            `json:"feature_ids"`
-	StartTime  int64            `json:"start_time"`
-	EndTime    int64            `json:"end_time"`
-	Conditions map[string]interface{} `json:"conditions"`
-	Mobile     string           `json:"mobile"`
-	Page       int              `json:"page"`
-	PageSize   int              `json:"page_size"`
-	Realtime   bool             `json:"realtime"`
-	Cursor     int64            `json:"cursor"` // 游标，0表示第一页
-}
-
-type CursorQueryResult struct {
-	Total    int64            `json:"total"`
-	Cursor   int64            `json:"cursor"`
-	Data     []map[string]interface{} `json:"data"`
-}
-
-type QueryResult struct {
-	Total    int64                    `json:"total"`
-	Page     int                      `json:"page"`
-	PageSize int                      `json:"page_size"`
-	Data     []map[string]interface{} `json:"data"`
-}
-
-func (s *QueryService) Query(req *QueryRequest) (*QueryResult, error) {
+func (s *QueryService) Query(req *model.QueryRequest) (*model.QueryResult, error) {
 	if req.Page <= 0 {
 		req.Page = 1
 	}
@@ -98,10 +73,10 @@ func (s *QueryService) Query(req *QueryRequest) (*QueryResult, error) {
 		}
 
 		if count == 0 && req.Realtime {
-			log.Printf("No data in database for feature %d, querying realtime from API", featureID)
+			slog.Info(fmt.Sprintf("No data in database for feature %d, querying realtime from API", featureID))
 			realtimeEntries, err := s.queryRealtime(featureID, req.StartTime, req.EndTime)
 			if err != nil {
-				log.Printf("Realtime query failed for feature %d: %v", featureID, err)
+				slog.Info(fmt.Sprintf("Realtime query failed for feature %d: %v", featureID, err))
 			} else {
 				entries = realtimeEntries
 				count = int64(len(realtimeEntries))
@@ -131,7 +106,7 @@ func (s *QueryService) Query(req *QueryRequest) (*QueryResult, error) {
 	}
 	pageData := allData[start:end]
 
-	return &QueryResult{
+	return &model.QueryResult{
 		Total:    total,
 		Page:     req.Page,
 		PageSize: req.PageSize,
@@ -155,7 +130,7 @@ func (s *QueryService) queryRealtime(featureID int, startTime, endTime int64) ([
 			EncData:   item.EncData,
 		}, "")
 		if err != nil {
-			log.Printf("decrypt failed for feature %d, log_time %d: %v", featureID, item.LogTime, err)
+			slog.Info(fmt.Sprintf("decrypt failed for feature %d, log_time %d: %v", featureID, item.LogTime, err))
 			continue
 		}
 		entries = append(entries, *entry)
@@ -194,7 +169,7 @@ func (s *QueryService) parseEntry(entry *model.LogEntry) map[string]interface{} 
 func (s *QueryService) GetFeatureIDs() []int {
 	ids, err := s.syncFeatureRepo.GetEnabledIDs()
 	if err != nil {
-		log.Printf("get feature ids failed: %v", err)
+		slog.Info(fmt.Sprintf("get feature ids failed: %v", err))
 		return s.cfg.Features.IDs
 	}
 	if len(ids) == 0 {
@@ -229,7 +204,7 @@ func (s *QueryService) GetFieldPaths() []string {
 }
 
 // QueryByCursor 使用游标查询，更高效的分页方式
-func (s *QueryService) QueryByCursor(req *QueryRequest) (*CursorQueryResult, error) {
+func (s *QueryService) QueryByCursor(req *model.QueryRequest) (*model.CursorQueryResult, error) {
 	if req.PageSize <= 0 {
 		req.PageSize = 100
 	}
@@ -279,7 +254,7 @@ func (s *QueryService) QueryByCursor(req *QueryRequest) (*CursorQueryResult, err
 
 	// 所有 feature 都没有更多数据了
 	if len(allData) == 0 {
-		return &CursorQueryResult{
+		return &model.CursorQueryResult{
 			Total:  total,
 			Cursor: 0,
 			Data:   allData,
@@ -307,7 +282,7 @@ func (s *QueryService) QueryByCursor(req *QueryRequest) (*CursorQueryResult, err
 		minCursor = 0
 	}
 
-	return &CursorQueryResult{
+	return &model.CursorQueryResult{
 		Total:  total,
 		Cursor: minCursor,
 		Data:   allData,

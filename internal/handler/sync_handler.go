@@ -1,7 +1,8 @@
 package handler
 
 import (
-	"log"
+	"fmt"
+	"log/slog"
 	"runtime/debug"
 
 	"wwlocal-wework/internal/service"
@@ -38,7 +39,7 @@ func (h *SyncHandler) Sync(c echo.Context) error {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("sync goroutine panic: %v\n%s", r, debug.Stack())
+				slog.Info(fmt.Sprintf("sync goroutine panic: %v\n%s", r, debug.Stack()))
 			}
 			h.syncSvc.ResetRunning()
 		}()

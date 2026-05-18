@@ -1,9 +1,11 @@
 package response
 
 import (
-	"log"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -42,7 +44,7 @@ func ErrorWithStatus(c echo.Context, status int, code int, msg string) error {
 
 func ServerError(c echo.Context, contextMsg string) error {
 	c.Set("op_error_msg", contextMsg)
-	log.Printf("[ERROR] %s\n%s", contextMsg, getCallerStack())
+	slog.Info(fmt.Sprintf("[ERROR] %s\n%s", contextMsg, getCallerStack()))
 	return c.JSON(http.StatusInternalServerError, Response{
 		Code: 500,
 		Msg:  "服务器内部错误，请稍后再试",
@@ -86,7 +88,7 @@ func getCallerStack() string {
 		if !contains(frame.Function, []string{"response.go", "handler.go"}) {
 			sb.WriteString(frame.File)
 			sb.WriteString(":")
-			sb.WriteString(formatFileLine(frame.Line))
+			sb.WriteString(strconv.Itoa(frame.Line))
 			sb.WriteString(" ")
 			sb.WriteString(frame.Function)
 			sb.WriteString("\n")
@@ -105,8 +107,4 @@ func contains(s string, subs []string) bool {
 		}
 	}
 	return false
-}
-
-func formatFileLine(line int) string {
-	return string(rune('0'+line%10)) + string(rune('0'+(line/10)%10))
 }

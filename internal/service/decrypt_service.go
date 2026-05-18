@@ -1,6 +1,7 @@
 package service
 
 import (
+	"container/list"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -13,16 +14,25 @@ import (
 	"wwlocal-wework/pkg/metrics"
 )
 
+type lruEntry struct {
+	key   string
+	value *crypto.RSADecryptor
+}
+
 type DecryptService struct {
 	keyRepo   *repository.KeyRepository
-	cache     map[string]*crypto.RSADecryptor
+	cache     map[string]*list.Element
+	lruList   *list.List
 	cacheMu   sync.RWMutex
+	maxCache  int
 }
 
 func NewDecryptService(keyRepo *repository.KeyRepository) *DecryptService {
 	return &DecryptService{
-		keyRepo: keyRepo,
-		cache:   make(map[string]*crypto.RSADecryptor),
+		keyRepo:  keyRepo,
+		cache:    make(map[string]*list.Element),
+		lruList:  list.New(),
+		maxCache: 10,
 	}
 }
 
@@ -32,27 +42,41 @@ func (s *DecryptService) getDecryptor(version string) (*crypto.RSADecryptor, err
 	}
 
 	s.cacheMu.RLock()
-	dec, ok := s.cache[version]
-	s.cacheMu.RUnlock()
-	if ok {
+	if elem, ok := s.cache[version]; ok {
+		s.lruList.MoveToFront(elem)
+		dec := elem.Value.(*lruEntry).value
+		s.cacheMu.RUnlock()
 		return dec, nil
 	}
+	s.cacheMu.RUnlock()
 
 	pemBytes, err := s.keyRepo.ReadKeyFile(version)
 	if err != nil {
 		return nil, fmt.Errorf("read key file failed: %w", err)
 	}
 
-	dec, err = crypto.NewRSADecryptor(string(pemBytes))
+	dec, err := crypto.NewRSADecryptor(string(pemBytes))
 	if err != nil {
 		return nil, fmt.Errorf("create RSA decryptor failed: %w", err)
 	}
 
 	s.cacheMu.Lock()
-	if len(s.cache) > 20 {
-		s.cache = make(map[string]*crypto.RSADecryptor)
+	// 如果已存在，移到前面
+	if elem, ok := s.cache[version]; ok {
+		s.lruList.MoveToFront(elem)
+		elem.Value.(*lruEntry).value = dec
+	} else {
+		// 淘汰最久未使用的
+		for s.lruList.Len() >= s.maxCache {
+			oldest := s.lruList.Back()
+			if oldest != nil {
+				s.lruList.Remove(oldest)
+				delete(s.cache, oldest.Value.(*lruEntry).key)
+			}
+		}
+		elem := s.lruList.PushFront(&lruEntry{key: version, value: dec})
+		s.cache[version] = elem
 	}
-	s.cache[version] = dec
 	s.cacheMu.Unlock()
 	return dec, nil
 }

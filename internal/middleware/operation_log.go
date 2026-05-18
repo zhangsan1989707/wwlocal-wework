@@ -1,7 +1,8 @@
 package middleware
 
 import (
-	"log"
+	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -96,7 +97,7 @@ func OperationLog(svc *service.OperationLogService) echo.MiddlewareFunc {
 
 			go func() {
 				if saveErr := svc.Save(opLog); saveErr != nil {
-					log.Printf("save operation log failed: %v", saveErr)
+					slog.Info(fmt.Sprintf("save operation log failed: %v", saveErr))
 				}
 			}()
 

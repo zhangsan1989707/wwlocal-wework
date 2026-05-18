@@ -23,13 +23,14 @@
 
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { authAPI } from '../api'
+import { useAuthStore } from '../stores/auth'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
 
-const emit = defineEmits<{
-  login: [username: string]
-}>()
+const router = useRouter()
+const authStore = useAuthStore()
 
 const form = reactive({
   username: '',
@@ -47,10 +48,9 @@ const handleLogin = async () => {
   try {
     const res: any = await authAPI.login(form)
     if (res.code === 0) {
-      localStorage.setItem('token', res.data.token)
-      localStorage.setItem('username', res.data.username)
+      authStore.login(res.data.username)
       ElMessage.success('登录成功')
-      emit('login', res.data.username)
+      router.push('/dashboard')
     } else {
       ElMessage.error(res.msg || '登录失败')
     }

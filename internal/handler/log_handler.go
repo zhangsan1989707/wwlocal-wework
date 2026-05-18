@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"wwlocal-wework/internal/model"
 	"wwlocal-wework/internal/service"
 	"wwlocal-wework/pkg/response"
 )
@@ -16,19 +17,8 @@ func NewLogHandler(querySvc *service.QueryService) *LogHandler {
 	return &LogHandler{querySvc: querySvc}
 }
 
-type QueryRequest struct {
-	FeatureIDs []int                  `json:"feature_ids"`
-	StartTime  int64                  `json:"start_time"`
-	EndTime    int64                  `json:"end_time"`
-	Conditions map[string]interface{} `json:"conditions"`
-	Mobile     string                 `json:"mobile"`
-	Page       int                    `json:"page"`
-	PageSize   int                    `json:"page_size"`
-	Realtime   bool                   `json:"realtime"`
-}
-
 func (h *LogHandler) Query(c echo.Context) error {
-	var req QueryRequest
+	var req model.QueryRequest
 	if err := c.Bind(&req); err != nil {
 		return response.Error(c, 400, "invalid request body")
 	}
@@ -41,18 +31,7 @@ func (h *LogHandler) Query(c echo.Context) error {
 		return response.Error(c, 400, "start_time and end_time are required")
 	}
 
-	queryReq := &service.QueryRequest{
-		FeatureIDs: req.FeatureIDs,
-		StartTime:  req.StartTime,
-		EndTime:    req.EndTime,
-		Conditions: req.Conditions,
-		Mobile:     req.Mobile,
-		Page:       req.Page,
-		PageSize:   req.PageSize,
-		Realtime:   req.Realtime,
-	}
-
-	result, err := h.querySvc.Query(queryReq)
+	result, err := h.querySvc.Query(&req)
 	if err != nil {
 		return response.Error(c, 500, err.Error())
 	}
@@ -88,18 +67,8 @@ func (h *LogHandler) GetFieldPaths(c echo.Context) error {
 	return response.Success(c, paths)
 }
 
-type CursorQueryRequest struct {
-	FeatureIDs []int                  `json:"feature_ids"`
-	StartTime  int64                  `json:"start_time"`
-	EndTime    int64                  `json:"end_time"`
-	Conditions map[string]interface{} `json:"conditions"`
-	Mobile     string                 `json:"mobile"`
-	Cursor     int64                  `json:"cursor"`
-	PageSize   int                    `json:"page_size"`
-}
-
 func (h *LogHandler) QueryByCursor(c echo.Context) error {
-	var req CursorQueryRequest
+	var req model.QueryRequest
 	if err := c.Bind(&req); err != nil {
 		return response.Error(c, 400, "invalid request body")
 	}
@@ -112,17 +81,7 @@ func (h *LogHandler) QueryByCursor(c echo.Context) error {
 		return response.Error(c, 400, "start_time and end_time are required")
 	}
 
-	queryReq := &service.QueryRequest{
-		FeatureIDs: req.FeatureIDs,
-		StartTime:  req.StartTime,
-		EndTime:    req.EndTime,
-		Conditions: req.Conditions,
-		Mobile:     req.Mobile,
-		Cursor:     req.Cursor,
-		PageSize:   req.PageSize,
-	}
-
-	result, err := h.querySvc.QueryByCursor(queryReq)
+	result, err := h.querySvc.QueryByCursor(&req)
 	if err != nil {
 		return response.Error(c, 500, err.Error())
 	}

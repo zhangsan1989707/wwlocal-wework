@@ -1,7 +1,8 @@
 package service
 
 import (
-	"log"
+	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -37,7 +38,7 @@ func (s *SchedulerService) Start(startDelay time.Duration) {
 	s.nextRun = time.Now().Add(startDelay)
 
 	go s.run(startDelay)
-	log.Printf("scheduler started, interval: %v, first run in: %v", s.interval, startDelay)
+	slog.Info(fmt.Sprintf("scheduler started, interval: %v, first run in: %v", s.interval, startDelay))
 }
 
 func (s *SchedulerService) Stop() {
@@ -51,7 +52,7 @@ func (s *SchedulerService) Stop() {
 	s.ticker.Stop()
 	s.running = false
 	s.syncSvc.Cancel()
-	log.Printf("scheduler stopped")
+	slog.Info(fmt.Sprintf("scheduler stopped"))
 }
 
 func (s *SchedulerService) run(startDelay time.Duration) {
@@ -76,16 +77,16 @@ func (s *SchedulerService) run(startDelay time.Duration) {
 
 func (s *SchedulerService) doSync() {
 	if s.syncSvc.IsRunning() {
-		log.Printf("scheduler: sync already running, skipping this tick")
+		slog.Info(fmt.Sprintf("scheduler: sync already running, skipping this tick"))
 		return
 	}
-	log.Printf("scheduler: starting incremental sync")
+	slog.Info(fmt.Sprintf("scheduler: starting incremental sync"))
 	s.mu.Lock()
 	s.lastRun = time.Now()
 	s.mu.Unlock()
 	go func() {
 		if !s.syncSvc.TryStartRunning() {
-			log.Printf("scheduler: sync already started by another caller, skipping")
+			slog.Info(fmt.Sprintf("scheduler: sync already started by another caller, skipping"))
 			return
 		}
 		results := s.syncSvc.SyncAllFeaturesIncremental()
@@ -95,7 +96,7 @@ func (s *SchedulerService) doSync() {
 				total += count
 			}
 		}
-		log.Printf("scheduler: incremental sync completed, total fetched: %d", total)
+		slog.Info(fmt.Sprintf("scheduler: incremental sync completed, total fetched: %d", total))
 		s.mu.Lock()
 		s.nextRun = time.Now().Add(s.interval)
 		s.mu.Unlock()

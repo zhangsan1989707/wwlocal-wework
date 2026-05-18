@@ -78,11 +78,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, inject, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { syncFeatureAPI, adminOperLogAPI } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-const navigate = inject('navigate') as (menu: string, params?: any) => void
+const router = useRouter()
 const features = ref<any[]>([])
 const loading = ref(false)
 const saving = ref(false)
@@ -187,9 +188,13 @@ const handleDisableAll = async () => {
 const viewRecentLogs = (featureId: number) => {
   const end = new Date()
   const start = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000)
-  navigate('query', {
-    feature_ids: [featureId],
-    dateRange: [start, end],
+  router.push({
+    path: '/query',
+    query: {
+      feature_ids: String(featureId),
+      date_start: String(Math.floor(start.getTime() / 1000)),
+      date_end: String(Math.floor(end.getTime() / 1000)),
+    },
   })
 }
 
@@ -220,7 +225,7 @@ const handleSyncAdminOperLog = async () => {
 }
 
 const handleViewAdminOperLog = () => {
-  navigate('adminoper')
+  router.push('/adminoper')
 }
 
 const formatTime = (timeStr: string) => {

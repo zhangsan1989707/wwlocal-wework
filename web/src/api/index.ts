@@ -40,6 +40,7 @@ const api = axios.create({
 })
 
 const TOKEN_KEY = 'auth_token'
+const REFRESH_TOKEN_KEY = 'auth_refresh_token'
 const USERNAME_KEY = 'auth_username'
 
 function getStoredToken(): string | null {
@@ -58,9 +59,26 @@ function setStoredToken(token: string): void {
   }
 }
 
+function getStoredRefreshToken(): string | null {
+  try {
+    return localStorage.getItem(REFRESH_TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+function setStoredRefreshToken(token: string): void {
+  try {
+    localStorage.setItem(REFRESH_TOKEN_KEY, token)
+  } catch {
+    console.error('Failed to store refresh token')
+  }
+}
+
 function removeStoredToken(): void {
   try {
     localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(REFRESH_TOKEN_KEY)
     localStorage.removeItem(USERNAME_KEY)
   } catch {
     console.error('Failed to remove stored token')
@@ -84,6 +102,7 @@ function setStoredUsername(username: string): void {
 }
 
 let reloading = false
+let refreshPromise: Promise<string | null> | null = null
 
 api.interceptors.request.use((config) => {
   const token = getStoredToken()
@@ -93,13 +112,46 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+async function tryRefreshToken(): Promise<string | null> {
+  const refreshToken = getStoredRefreshToken()
+  if (!refreshToken) return null
+
+  try {
+    const res = await axios.post('/api/v1/auth/refresh', {
+      refresh_token: refreshToken,
+    })
+    const data = res.data as any
+    if (data.code === 0 && data.data?.token) {
+      setStoredToken(data.data.token)
+      return data.data.token
+    }
+  } catch {
+    // refresh failed
+  }
+  return null
+}
+
 api.interceptors.response.use(
   (response) => response.data,
-  (error) => {
+  async (error) => {
     const status = error.response?.status
     const data = error.response?.data as ApiResponse<unknown> | undefined
+    const originalRequest = error.config
 
-    if (status === 401 && !reloading) {
+    if (status === 401 && !originalRequest._retry && !reloading) {
+      originalRequest._retry = true
+      // 避免并发请求重复 refresh
+      if (!refreshPromise) {
+        refreshPromise = tryRefreshToken().finally(() => {
+          refreshPromise = null
+        })
+      }
+      const newToken = await refreshPromise
+      if (newToken) {
+        originalRequest.headers.Authorization = `Bearer ${newToken}`
+        return api(originalRequest)
+      }
+      // refresh 失败，跳转登录
       reloading = true
       removeStoredToken()
       window.location.href = '/login'
@@ -128,6 +180,9 @@ export const authAPI = {
     api.post<ApiResponse<LoginResponse>>('/auth/login', data).then((res) => {
       if (res.data.code === 0 && res.data.data) {
         setStoredToken(res.data.data.token)
+        if (res.data.data.refresh_token) {
+          setStoredRefreshToken(res.data.data.refresh_token)
+        }
         setStoredUsername(res.data.data.username)
       }
       return res.data

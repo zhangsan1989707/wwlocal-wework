@@ -4,7 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
+	"sort"
 	"sync"
 	"time"
 
@@ -38,7 +39,7 @@ func NewTaskQueueService(cfg *config.Config, syncService *SyncService, contactSe
 	defer cancel()
 	_, err := rdb.Ping(ctx).Result()
 	if err != nil {
-		log.Printf("warning: redis connection failed, task queue disabled: %v", err)
+		slog.Info(fmt.Sprintf("warning: redis connection failed, task queue disabled: %v", err))
 		rdb = nil
 	}
 
@@ -61,11 +62,17 @@ func (t *TaskQueueService) IsEnabled() bool {
 
 func (t *TaskQueueService) Start() {
 	if !t.IsEnabled() {
-		log.Println("task queue disabled, starting without worker")
+		slog.Info("task queue disabled, starting without worker")
 		return
 	}
-	
-	log.Println("starting task queue workers...")
+
+	// 创建 Consumer Group（幂等）
+	ctx, cancel := context.WithTimeout(t.ctx, 5*time.Second)
+	defer cancel()
+	t.redisClient.XGroupCreateMkStream(ctx, t.cfg.Redis.Stream, "workers", "0")
+	// 忽略 BUSYGROUP 错误（已存在）
+
+	slog.Info("starting task queue workers...")
 	for i := 0; i < t.workers; i++ {
 		t.wg.Add(1)
 		go t.worker(i)
@@ -111,7 +118,7 @@ func (t *TaskQueueService) SubmitTask(task *model.SyncTask) (string, error) {
 		},
 	}).Result()
 	if err != nil {
-		log.Printf("failed to add task to stream: %v", err)
+		slog.Info(fmt.Sprintf("failed to add task to stream: %v", err))
 	}
 
 	return task.ID, nil
@@ -150,17 +157,30 @@ func (t *TaskQueueService) ListTasks(limit int) ([]*model.SyncTask, error) {
 		limit = 50
 	}
 
-	keys, err := t.redisClient.Keys(ctx, "task:*").Result()
-	if err != nil {
+	// SCAN 替代 KEYS，避免阻塞 Redis
+	var keys []string
+	iter := t.redisClient.Scan(ctx, 0, "task:*", 100).Iterator()
+	for iter.Next(ctx) {
+		keys = append(keys, iter.Val())
+	}
+	if err := iter.Err(); err != nil {
 		return nil, err
 	}
 
-	var tasks []*model.SyncTask
+	// Pipeline 批量获取，替代逐个 GET
+	pipe := t.redisClient.Pipeline()
+	cmds := make(map[string]*redis.StringCmd, len(keys))
 	for _, key := range keys {
+		cmds[key] = pipe.Get(ctx, key)
+	}
+	_, _ = pipe.Exec(ctx)
+
+	var tasks []*model.SyncTask
+	for _, cmd := range cmds {
 		if len(tasks) >= limit {
 			break
 		}
-		taskJSON, err := t.redisClient.Get(ctx, key).Result()
+		taskJSON, err := cmd.Result()
 		if err != nil {
 			continue
 		}
@@ -171,13 +191,9 @@ func (t *TaskQueueService) ListTasks(limit int) ([]*model.SyncTask, error) {
 	}
 
 	// 按创建时间倒序
-	for i := range tasks {
-		for j := i + 1; j < len(tasks); j++ {
-			if tasks[i].CreatedAt.Before(tasks[j].CreatedAt) {
-				tasks[i], tasks[j] = tasks[j], tasks[i]
-			}
-		}
-	}
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].CreatedAt.After(tasks[j].CreatedAt)
+	})
 
 	return tasks, nil
 }
@@ -253,7 +269,7 @@ func (t *TaskQueueService) saveTask(task *model.SyncTask) error {
 func (t *TaskQueueService) updateTaskStatus(taskID string, status model.TaskStatus, progress int, total int, errMsg string, result map[string]interface{}) {
 	task, err := t.GetTask(taskID)
 	if err != nil {
-		log.Printf("failed to get task %s: %v", taskID, err)
+		slog.Info(fmt.Sprintf("failed to get task %s: %v", taskID, err))
 		return
 	}
 
@@ -265,31 +281,34 @@ func (t *TaskQueueService) updateTaskStatus(taskID string, status model.TaskStat
 	task.UpdatedAt = time.Now()
 
 	if err := t.saveTask(task); err != nil {
-		log.Printf("failed to update task %s: %v", taskID, err)
+		slog.Info(fmt.Sprintf("failed to update task %s: %v", taskID, err))
 	}
 }
 
 func (t *TaskQueueService) worker(id int) {
 	defer t.wg.Done()
-	log.Printf("worker %d started", id)
+	consumerName := fmt.Sprintf("worker-%d", id)
+	slog.Info(fmt.Sprintf("worker %d started", id))
 
 	for {
 		select {
 		case <-t.ctx.Done():
-			log.Printf("worker %d stopping", id)
+			slog.Info(fmt.Sprintf("worker %d stopping", id))
 			return
 		default:
-			// 从 Stream 获取任务
+			// 使用 Consumer Group 竞争消费
 			ctx, cancel := context.WithTimeout(t.ctx, 10*time.Second)
-			streams, err := t.redisClient.XRead(ctx, &redis.XReadArgs{
-				Streams: []string{t.cfg.Redis.Stream, "0"},
-				Block:   2 * time.Second,
-				Count:   1,
+			streams, err := t.redisClient.XReadGroup(ctx, &redis.XReadGroupArgs{
+				Group:    "workers",
+				Consumer: consumerName,
+				Streams:  []string{t.cfg.Redis.Stream, ">"},
+				Block:    2 * time.Second,
+				Count:    1,
 			}).Result()
 			cancel()
 
 			if err != nil && err != redis.Nil {
-				log.Printf("worker %d error reading from stream: %v", id, err)
+				slog.Info(fmt.Sprintf("worker %d error reading from stream: %v", id, err))
 				time.Sleep(1 * time.Second)
 				continue
 			}
@@ -298,21 +317,24 @@ func (t *TaskQueueService) worker(id int) {
 				continue
 			}
 
-			// 处理任务
 			for _, stream := range streams {
 				for _, msg := range stream.Messages {
 					taskJSON := msg.Values["task"].(string)
 					var task model.SyncTask
 					if err := json.Unmarshal([]byte(taskJSON), &task); err != nil {
-						log.Printf("failed to parse task: %v", err)
+						slog.Info(fmt.Sprintf("failed to parse task: %v", err))
+						// 确认无效消息，避免反复投递
+						ctx, cancel := context.WithTimeout(t.ctx, 5*time.Second)
+						t.redisClient.XAck(ctx, t.cfg.Redis.Stream, "workers", msg.ID)
+						cancel()
 						continue
 					}
 
 					t.processTask(&task, id)
 
-					// 确认处理（删除消息）
+					// 确认消息处理完成
 					ctx, cancel := context.WithTimeout(t.ctx, 5*time.Second)
-					t.redisClient.XDel(ctx, t.cfg.Redis.Stream, msg.ID)
+					t.redisClient.XAck(ctx, t.cfg.Redis.Stream, "workers", msg.ID)
 					cancel()
 				}
 			}
@@ -321,7 +343,7 @@ func (t *TaskQueueService) worker(id int) {
 }
 
 func (t *TaskQueueService) processTask(task *model.SyncTask, workerID int) {
-	log.Printf("worker %d processing task %s", workerID, task.ID)
+	slog.Info(fmt.Sprintf("worker %d processing task %s", workerID, task.ID))
 
 	// 更新状态为 running
 	t.updateTaskStatus(task.ID, model.TaskStatusRunning, 0, 0, "", nil)
@@ -341,10 +363,10 @@ func (t *TaskQueueService) processTask(task *model.SyncTask, workerID int) {
 	}
 
 	if err != nil {
-		log.Printf("task %s failed: %v", task.ID, err)
+		slog.Info(fmt.Sprintf("task %s failed: %v", task.ID, err))
 		t.updateTaskStatus(task.ID, model.TaskStatusFailed, 0, 0, err.Error(), nil)
 	} else {
 		t.updateTaskStatus(task.ID, model.TaskStatusCompleted, 100, 100, "", result)
-		log.Printf("task %s completed", task.ID)
+		slog.Info(fmt.Sprintf("task %s completed", task.ID))
 	}
 }

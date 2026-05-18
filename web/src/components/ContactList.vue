@@ -172,12 +172,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch, inject } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { contactAPI } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 
-const navigate = inject('navigate') as (menu: string, params?: any) => void
+const router = useRouter()
 
 const contacts = ref<any[]>([])
 const total = ref(0)
@@ -373,7 +374,7 @@ const handleRowClick = async (row: any) => {
 const viewUserLogs = () => {
   if (drawerContact.value?.mobile) {
     drawerVisible.value = false
-    navigate('query', { mobile: drawerContact.value.mobile })
+    router.push({ path: '/query', query: { mobile: drawerContact.value.mobile } })
   }
 }
 

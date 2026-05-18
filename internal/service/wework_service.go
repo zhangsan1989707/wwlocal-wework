@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -25,7 +25,7 @@ type WeWorkService struct {
 
 func NewWeWorkService(cfg *config.WeWorkConfig) *WeWorkService {
 	tr := &http.Transport{
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: cfg.InsecureSkipVerify},
+		TLSClientConfig:     &tls.Config{InsecureSkipVerify: cfg.InsecureSkipVerify, MinVersion: tls.VersionTLS12},
 		MaxIdleConnsPerHost: 20,
 		MaxIdleConns:        100,
 		IdleConnTimeout:     90 * time.Second,
@@ -66,11 +66,11 @@ func (s *WeWorkService) GetToken() (string, error) {
 	}
 
 	if result.ErrCode != 0 {
-		log.Printf("get token error: errcode=%d, errmsg=%s", result.ErrCode, result.ErrMsg)
+		slog.Info(fmt.Sprintf("get token error: errcode=%d, errmsg=%s", result.ErrCode, result.ErrMsg))
 		return "", fmt.Errorf("get token error: %s (errcode: %d)", result.ErrMsg, result.ErrCode)
 	}
 
-	log.Printf("token refreshed successfully, expires_in=%d", result.ExpiresIn)
+	slog.Info(fmt.Sprintf("token refreshed successfully, expires_in=%d", result.ExpiresIn))
 	s.token = result.AccessToken
 	s.tokenExp = time.Now().Add(time.Duration(result.ExpiresIn-60) * time.Second)
 
@@ -83,7 +83,7 @@ func (s *WeWorkService) GetLogList(featureID int, startTime, endTime int64, star
 		return nil, err
 	}
 
-	log.Printf("GetLogList: feature=%d, start=%d, end=%d, index=%d, limit=%d", featureID, startTime, endTime, startIndex, limit)
+	slog.Info(fmt.Sprintf("GetLogList: feature=%d, start=%d, end=%d, index=%d, limit=%d", featureID, startTime, endTime, startIndex, limit))
 	path := "/cgi-bin/corp/get_log_list"
 	reqBody := map[string]interface{}{
 		"feature_id":  featureID,
@@ -112,10 +112,10 @@ func (s *WeWorkService) GetLogList(featureID int, startTime, endTime int64, star
 		return nil, fmt.Errorf("parse log list response failed: %w", err)
 	}
 
-	log.Printf("GetLogList: feature=%d, index=%d, got %d items", featureID, startIndex, len(result.LogList))
+	slog.Info(fmt.Sprintf("GetLogList: feature=%d, index=%d, got %d items", featureID, startIndex, len(result.LogList)))
 
 	if result.ErrCode != 0 {
-		log.Printf("get log list error: feature=%d, errcode=%d, errmsg=%s", featureID, result.ErrCode, result.ErrMsg)
+		slog.Info(fmt.Sprintf("get log list error: feature=%d, errcode=%d, errmsg=%s", featureID, result.ErrCode, result.ErrMsg))
 		return nil, fmt.Errorf("get log list error: %s (errcode: %d)", result.ErrMsg, result.ErrCode)
 	}
 
@@ -158,7 +158,7 @@ func (s *WeWorkService) DoRequest(method, path string, body interface{}, token .
 		resp, err := s.client.Do(req)
 		if err != nil {
 			lastErr = fmt.Errorf("http request failed: %w", err)
-			log.Printf("request attempt %d failed: %v", attempt+1, err)
+			slog.Info(fmt.Sprintf("request attempt %d failed: %v", attempt+1, err))
 			continue
 		}
 
@@ -171,7 +171,7 @@ func (s *WeWorkService) DoRequest(method, path string, body interface{}, token .
 
 		if resp.StatusCode >= 500 {
 			lastErr = fmt.Errorf("server error: HTTP %d", resp.StatusCode)
-			log.Printf("request attempt %d got HTTP %d", attempt+1, resp.StatusCode)
+			slog.Info(fmt.Sprintf("request attempt %d got HTTP %d", attempt+1, resp.StatusCode))
 			continue
 		}
 

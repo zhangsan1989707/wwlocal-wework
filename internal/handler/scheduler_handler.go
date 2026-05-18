@@ -1,7 +1,8 @@
 package handler
 
 import (
-	"log"
+	"fmt"
+	"log/slog"
 	"runtime/debug"
 	"time"
 
@@ -64,7 +65,7 @@ func (h *SchedulerHandler) IncrementalSync(c echo.Context) error {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("incremental sync goroutine panic: %v\n%s", r, debug.Stack())
+				slog.Info(fmt.Sprintf("incremental sync goroutine panic: %v\n%s", r, debug.Stack()))
 			}
 			h.syncSvc.ResetRunning()
 		}()

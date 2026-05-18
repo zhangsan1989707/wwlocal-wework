@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -25,32 +25,47 @@ import (
 )
 
 func main() {
+	// 配置结构化日志
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
+
 	cfg, err := config.Load("config.yaml")
 	if err != nil {
-		log.Fatalf("load config failed: %v", err)
+		slog.Error(fmt.Sprintf("load config failed: %v", err)); os.Exit(1)
 	}
 
 	db, err := gorm.Open(mysql.Open(cfg.Database.DSN()), &gorm.Config{})
 	if err != nil {
-		log.Fatalf("connect database failed: %v", err)
+		slog.Error(fmt.Sprintf("connect database failed: %v", err)); os.Exit(1)
 	}
 
 	sqlDB, err := db.DB()
 	if err != nil {
-		log.Fatalf("get sql.DB failed: %v", err)
+		slog.Error(fmt.Sprintf("get sql.DB failed: %v", err)); os.Exit(1)
 	}
-	sqlDB.SetMaxOpenConns(50)
-	sqlDB.SetMaxIdleConns(25)
-	sqlDB.SetConnMaxLifetime(5 * time.Minute)
+	maxOpen := cfg.Database.MaxOpenConns
+	if maxOpen <= 0 {
+		maxOpen = 50
+	}
+	maxIdle := cfg.Database.MaxIdleConns
+	if maxIdle <= 0 {
+		maxIdle = 25
+	}
+	connLifetime := cfg.Database.ConnMaxLifetime
+	if connLifetime <= 0 {
+		connLifetime = 5 * time.Minute
+	}
+	sqlDB.SetMaxOpenConns(maxOpen)
+	sqlDB.SetMaxIdleConns(maxIdle)
+	sqlDB.SetConnMaxLifetime(connLifetime)
 
 	settingRepo := repository.NewSettingRepository(db)
 	if err := settingRepo.AutoMigrate(); err != nil {
-		log.Fatalf("migrate setting repository failed: %v", err)
+		slog.Error(fmt.Sprintf("migrate setting repository failed: %v", err)); os.Exit(1)
 	}
 
 	keyRepo := repository.NewKeyRepository(db, cfg.Keys.StoragePath, cfg.Keys.EncryptKey)
 	if err := keyRepo.AutoMigrate(); err != nil {
-		log.Fatalf("migrate key repository failed: %v", err)
+		slog.Error(fmt.Sprintf("migrate key repository failed: %v", err)); os.Exit(1)
 	}
 	checkKeyPermissions(cfg.Keys.StoragePath)
 
@@ -58,17 +73,17 @@ func main() {
 
 	syncStateRepo := repository.NewSyncStateRepository(db)
 	if err := syncStateRepo.AutoMigrate(); err != nil {
-		log.Fatalf("migrate sync state repository failed: %v", err)
+		slog.Error(fmt.Sprintf("migrate sync state repository failed: %v", err)); os.Exit(1)
 	}
 
 	contactRepo := repository.NewContactRepository(db)
 	if err := contactRepo.AutoMigrate(); err != nil {
-		log.Fatalf("migrate contact repository failed: %v", err)
+		slog.Error(fmt.Sprintf("migrate contact repository failed: %v", err)); os.Exit(1)
 	}
 
 	syncFeatureRepo := repository.NewSyncFeatureRepository(db)
 	if err := syncFeatureRepo.AutoMigrate(); err != nil {
-		log.Fatalf("migrate sync feature repository failed: %v", err)
+		slog.Error(fmt.Sprintf("migrate sync feature repository failed: %v", err)); os.Exit(1)
 	}
 	// 从 config.yaml 初始化 feature 列表到数据库
 	var initFeatures []model.SyncFeature
@@ -80,12 +95,12 @@ func main() {
 		})
 	}
 	if err := syncFeatureRepo.BatchUpsert(initFeatures); err != nil {
-		log.Fatalf("init sync features failed: %v", err)
+		slog.Error(fmt.Sprintf("init sync features failed: %v", err)); os.Exit(1)
 	}
 
 	syncHistoryRepo := repository.NewSyncHistoryRepository(db)
 	if err := syncHistoryRepo.AutoMigrate(); err != nil {
-		log.Fatalf("migrate sync history repository failed: %v", err)
+		slog.Error(fmt.Sprintf("migrate sync history repository failed: %v", err)); os.Exit(1)
 	}
 
 	weworkSvc := service.NewWeWorkService(&cfg.WeWork)
@@ -118,19 +133,20 @@ func main() {
 
 	operationLogRepo := repository.NewOperationLogRepository(db)
 	if err := operationLogRepo.AutoMigrate(); err != nil {
-		log.Fatalf("migrate operation log repository failed: %v", err)
+		slog.Error(fmt.Sprintf("migrate operation log repository failed: %v", err)); os.Exit(1)
 	}
 	operationLogSvc := service.NewOperationLogService(operationLogRepo)
 	operationLogHandler := handler.NewOperationLogHandler(operationLogSvc)
 
 	adminOperLogRepo := repository.NewAdminOperLogRepository(db)
 	if err := adminOperLogRepo.AutoMigrate(); err != nil {
-		log.Fatalf("migrate admin oper log repository failed: %v", err)
+		slog.Error(fmt.Sprintf("migrate admin oper log repository failed: %v", err)); os.Exit(1)
 	}
 	adminOperLogSvc := service.NewAdminOperLogService(weworkSvc, adminOperLogRepo, &cfg.WeWork)
 	adminOperLogHandler := handler.NewAdminOperLogHandler(adminOperLogSvc)
 
-	dashboardHandler := handler.NewDashboardHandler(logRepo, contactRepo, syncHistoryRepo, syncStateRepo, keyRepo, cfg)
+	dashboardSvc := service.NewDashboardService(logRepo, contactRepo, syncHistoryRepo, syncStateRepo, keyRepo, cfg)
+	dashboardHandler := handler.NewDashboardHandler(dashboardSvc)
 	syncHistoryHandler := handler.NewSyncHistoryHandler(syncHistoryRepo)
 	syncFeatureHandler := handler.NewSyncFeatureHandler(syncFeatureRepo)
 	systemHandler := handler.NewSystemHandler(syncStateRepo, keyRepo, contactRepo, logRepo)
@@ -138,7 +154,7 @@ func main() {
 	// 初始化任务队列服务
 	taskQueueSvc, err := service.NewTaskQueueService(cfg, syncSvc, contactSyncSvc, adminOperLogSvc)
 	if err != nil {
-		log.Printf("init task queue service failed: %v", err)
+		slog.Info(fmt.Sprintf("init task queue service failed: %v", err))
 	}
 	taskHandler := handler.NewTaskHandler(taskQueueSvc)
 
@@ -151,24 +167,37 @@ func main() {
 	// 启动任务队列工作线程
 	taskQueueSvc.Start()
 
-	r := router.NewRouter(healthHandler, authHandler, logHandler, keyHandler, syncHandler, schedulerHandler, contactHandler, operationLogHandler, adminOperLogHandler, dashboardHandler, syncHistoryHandler, syncFeatureHandler, systemHandler, taskHandler, operationLogSvc, cfg.Auth.JWTSecret, rateLimiter)
+	allowedOrigins := cfg.Server.AllowedOrigins
+	if len(allowedOrigins) == 0 {
+		allowedOrigins = []string{"http://localhost:5173", "http://127.0.0.1:5173"}
+	}
+	metricsIPs := []string{"127.0.0.1", "::1"}
+
+	r := router.NewRouter(healthHandler, authHandler, logHandler, keyHandler, syncHandler, schedulerHandler, contactHandler, operationLogHandler, adminOperLogHandler, dashboardHandler, syncHistoryHandler, syncFeatureHandler, systemHandler, taskHandler, operationLogSvc, cfg.Auth.JWTSecret, rateLimiter, allowedOrigins, metricsIPs)
 
 	e := echo.New()
 	r.Setup(e)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-	log.Printf("server starting on %s", addr)
+	slog.Info(fmt.Sprintf("server starting on %s", addr))
 
 	go func() {
 		if err := e.Start(addr); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("start server failed: %v", err)
+			slog.Error(fmt.Sprintf("start server failed: %v", err)); os.Exit(1)
 		}
 	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-quit
-	log.Printf("received signal %v, shutting down...", sig)
+	slog.Info(fmt.Sprintf("received signal %v, shutting down...", sig))
+
+	// 二次信号处理：收到第二个信号时强制退出
+	go func() {
+		sig2 := <-quit
+		slog.Info(fmt.Sprintf("received second signal %v, forcing shutdown", sig2))
+		os.Exit(1)
+	}()
 
 	// 1. 停止定时调度
 	schedulerSvc.Stop()
@@ -183,25 +212,24 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := e.Shutdown(ctx); err != nil {
-		log.Printf("shutdown error: %v", err)
+		slog.Info(fmt.Sprintf("shutdown error: %v", err))
 	}
 
 	// 5. 停止后台 goroutine
 	authHandler.Stop()
 
 	// 6. 关闭数据库连接
-	sqlDB, _ = db.DB()
 	if sqlDB != nil {
 		sqlDB.Close()
 	}
 
-	log.Println("server stopped")
+	slog.Info("server stopped")
 }
 
 func checkKeyPermissions(keysDir string) {
 	entries, err := os.ReadDir(keysDir)
 	if err != nil {
-		log.Printf("keys directory not readable: %v", err)
+		slog.Info(fmt.Sprintf("keys directory not readable: %v", err))
 		return
 	}
 	for _, entry := range entries {
@@ -219,7 +247,7 @@ func checkKeyPermissions(keysDir string) {
 		}
 		perm := info.Mode().Perm()
 		if perm&0077 != 0 {
-			log.Printf("WARNING: key file %s has overly permissive permissions (%o), fixing to 600", path, perm)
+			slog.Info(fmt.Sprintf("WARNING: key file %s has overly permissive permissions (%o), fixing to 600", path, perm))
 			os.Chmod(path, 0600)
 		}
 	}

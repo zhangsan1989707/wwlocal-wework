@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -21,16 +22,20 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+	Host           string   `yaml:"host"`
+	Port           int      `yaml:"port"`
+	AllowedOrigins []string `yaml:"allowed_origins"`
 }
 
 type DatabaseConfig struct {
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	User     string `yaml:"user"`
-	Password string `yaml:"password"`
-	DBName   string `yaml:"dbname"`
+	Host            string        `yaml:"host"`
+	Port            int           `yaml:"port"`
+	User            string        `yaml:"user"`
+	Password        string        `yaml:"password"`
+	DBName          string        `yaml:"dbname"`
+	MaxOpenConns    int           `yaml:"max_open_conns"`
+	MaxIdleConns    int           `yaml:"max_idle_conns"`
+	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime"`
 }
 
 type WeWorkConfig struct {
@@ -172,6 +177,22 @@ func Load(path string) (*Config, error) {
 	}
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("missing required config (set via env vars): %v", missing)
+	}
+
+	// 校验 JWT Secret 不为常见占位符值
+	badSecrets := []string{
+		"change-this-to-a-random-string",
+		"changeme", "change-me",
+		"secret", "password", "jwt-secret",
+		"your-secret-here", "your_jwt_secret",
+	}
+	for _, bad := range badSecrets {
+		if cfg.Auth.JWTSecret == bad {
+			return nil, fmt.Errorf("JWT_SECRET is set to placeholder value %q, please use a strong random string (at least 32 chars)", bad)
+		}
+	}
+	if len(cfg.Auth.JWTSecret) < 32 {
+		return nil, fmt.Errorf("JWT_SECRET is too short (%d chars), must be at least 32 characters for security", len(cfg.Auth.JWTSecret))
 	}
 
 	return &cfg, nil

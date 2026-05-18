@@ -1,6 +1,5 @@
 <template>
-  <Login v-if="!isLoggedIn" @login="handleLogin" />
-  <div v-else class="app-container">
+  <div class="app-container">
     <el-container>
       <el-header>
         <div class="header-left">
@@ -8,7 +7,7 @@
           <span class="env-tag">本地部署</span>
         </div>
         <div class="header-right">
-          <span>{{ username }}</span>
+          <span>{{ authStore.username }}</span>
           <el-button type="text" style="color: rgba(255,255,255,.85)" @click="showPwDialog = true">修改密码</el-button>
           <el-button type="text" style="color: rgba(255,255,255,.85)" @click="handleLogout">退出</el-button>
         </div>
@@ -63,14 +62,7 @@
           </el-menu>
         </el-aside>
         <el-main class="main-content">
-          <Dashboard v-if="activeMenu === 'dashboard'" />
-          <LogQuery v-else-if="activeMenu === 'query'" />
-          <DataSync v-else-if="activeMenu === 'sync'" />
-          <FeatureConfig v-else-if="activeMenu === 'features'" />
-          <KeyManagement v-else-if="activeMenu === 'keys'" />
-          <ContactList v-else-if="activeMenu === 'contacts'" />
-          <AdminOperLog v-else-if="activeMenu === 'adminoper'" />
-          <SystemStatus v-else-if="activeMenu === 'system'" />
+          <router-view />
         </el-main>
       </el-container>
     </el-container>
@@ -81,7 +73,7 @@
           <el-input v-model="pwForm.old_password" type="password" show-password />
         </el-form-item>
         <el-form-item label="新密码">
-          <el-input v-model="pwForm.new_password" type="password" show-password placeholder="至少 6 位" />
+          <el-input v-model="pwForm.new_password" type="password" show-password placeholder="至少 8 位，含大小写字母和数字" />
         </el-form-item>
         <el-form-item label="确认密码">
           <el-input v-model="pwForm.confirm" type="password" show-password />
@@ -96,52 +88,33 @@
 </template>
 
 <script setup lang="ts">
-import { ref, provide } from 'vue'
+import { ref, computed } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import Login from './components/Login.vue'
-import Dashboard from './components/Dashboard.vue'
-import LogQuery from './components/LogQuery.vue'
-import DataSync from './components/DataSync.vue'
-import KeyManagement from './components/KeyManagement.vue'
-import ContactList from './components/ContactList.vue'
-import AdminOperLog from './components/AdminOperLog.vue'
-import FeatureConfig from './components/FeatureConfig.vue'
-import SystemStatus from './components/SystemStatus.vue'
 import { authAPI } from './api/index'
+import { useAuthStore } from './stores/auth'
 import {
   DataLine, Document, Refresh, User, Setting, Key, Monitor,
   DArrowLeft, DArrowRight,
 } from '@element-plus/icons-vue'
 
-const activeMenu = ref('dashboard')
-const isLoggedIn = ref(!!localStorage.getItem('token'))
-const username = ref(localStorage.getItem('username') || '')
+const router = useRouter()
+const route = useRoute()
+const authStore = useAuthStore()
 const isCollapsed = ref(false)
-const navigateParams = ref<any>(null)
 
-const navigate = (menu: string, params?: any) => {
-  navigateParams.value = params || null
-  activeMenu.value = menu
-}
-
-provide('navigate', navigate)
-provide('navigateParams', navigateParams)
+const activeMenu = computed(() => {
+  const path = route.path.slice(1) || 'dashboard'
+  return path
+})
 
 const handleMenuSelect = (index: string) => {
-  navigateParams.value = null
-  activeMenu.value = index
-}
-
-const handleLogin = (user: string) => {
-  isLoggedIn.value = true
-  username.value = user
+  router.push('/' + index)
 }
 
 const handleLogout = () => {
-  localStorage.removeItem('token')
-  localStorage.removeItem('username')
-  isLoggedIn.value = false
-  username.value = ''
+  authStore.logout()
+  router.push('/login')
 }
 
 const showPwDialog = ref(false)
@@ -149,8 +122,13 @@ const pwLoading = ref(false)
 const pwForm = ref({ old_password: '', new_password: '', confirm: '' })
 
 const handleChangePassword = async () => {
-  if (pwForm.value.new_password.length < 6) {
-    ElMessage.warning('新密码长度不能少于 6 位')
+  if (pwForm.value.new_password.length < 8) {
+    ElMessage.warning('新密码长度不能少于 8 位')
+    return
+  }
+  const pw = pwForm.value.new_password
+  if (!/[A-Z]/.test(pw) || !/[a-z]/.test(pw) || !/[0-9]/.test(pw)) {
+    ElMessage.warning('新密码必须包含大小写字母和数字')
     return
   }
   if (pwForm.value.new_password !== pwForm.value.confirm) {
@@ -274,12 +252,10 @@ html, body, #app {
   overflow-y: auto;
 }
 
-/* 折叠态：隐藏文字 */
 .el-menu--collapse .el-menu-item span {
   display: none;
 }
 
-/* 折叠态 tooltip */
 .el-menu--collapse .el-menu-item {
   position: relative;
 }

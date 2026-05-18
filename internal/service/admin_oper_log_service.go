@@ -3,7 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"wwlocal-wework/config"
@@ -49,7 +49,7 @@ func (s *AdminOperLogService) SyncLogs(startTime, endTime int64) (int, error) {
 		for _, apiLog := range apiLogs {
 			exists, err := s.adminLogRepo.ExistsByOperTimeAndUserID(apiLog.OperTime, apiLog.OperUserID)
 			if err != nil {
-				log.Printf("check exists failed for oper_time=%d, oper_userid=%s: %v", apiLog.OperTime, apiLog.OperUserID, err)
+				slog.Info(fmt.Sprintf("check exists failed for oper_time=%d, oper_userid=%s: %v", apiLog.OperTime, apiLog.OperUserID, err))
 				continue
 			}
 			if exists {
@@ -79,11 +79,11 @@ func (s *AdminOperLogService) SyncLogs(startTime, endTime int64) (int, error) {
 
 		if len(logs) > 0 {
 			if err := s.adminLogRepo.BatchSave(logs); err != nil {
-				log.Printf("batch save admin oper logs failed: %v", err)
+				slog.Info(fmt.Sprintf("batch save admin oper logs failed: %v", err))
 				return totalSynced, fmt.Errorf("batch save failed: %w", err)
 			}
 			totalSynced += len(logs)
-			log.Printf("synced %d admin oper logs (total: %d)", len(logs), totalSynced)
+			slog.Info(fmt.Sprintf("synced %d admin oper logs (total: %d)", len(logs), totalSynced))
 		}
 
 		if nextStart == 0 {
@@ -137,13 +137,13 @@ func (s *AdminOperLogService) SyncIncremental() (int, error) {
 		}
 		now := time.Now().In(loc)
 		latestTime = now.AddDate(0, 0, -7).Unix()
-		log.Printf("first sync admin oper logs, pulling last 7 days")
+		slog.Info(fmt.Sprintf("first sync admin oper logs, pulling last 7 days"))
 	} else {
 		latestTime = latestTime + 1
 	}
 
 	endTime := time.Now().Unix()
-	log.Printf("SyncIncremental: startTime=%d, endTime=%d", latestTime, endTime)
+	slog.Info(fmt.Sprintf("SyncIncremental: startTime=%d, endTime=%d", latestTime, endTime))
 
 	return s.SyncLogs(latestTime, endTime)
 }

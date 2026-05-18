@@ -3,15 +3,29 @@ services:
     image: mysql:8.0
     container_name: wework-mysql
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-changeme}
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:?请在 .env 文件中设置 DB_PASSWORD}
       MYSQL_DATABASE: wework_logs
     ports:
       - "127.0.0.1:3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./mysql/my.cnf:/etc/mysql/conf.d/custom.cnf:ro
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: wework-redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -22,14 +36,18 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "127.0.0.1:3010:8080"
     environment:
       DB_HOST: mysql
       DB_PORT: 3306
-      DB_USER: root
-      DB_PASSWORD: ${DB_PASSWORD:-changeme}
+      DB_USER: ${DB_USER:-wework_app}
+      DB_PASSWORD: ${DB_PASSWORD:?请在 .env 文件中设置 DB_PASSWORD}
       DB_NAME: wework_logs
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
       WEWORK_BASE_URL: ${WEWORK_BASE_URL:-}
       WEWORK_CORPID: ${WEWORK_CORPID:-}
       WEWORK_SECRET: ${WEWORK_SECRET:-}
@@ -52,3 +70,4 @@ services:
 
 volumes:
   mysql_data:
+  redis_data:

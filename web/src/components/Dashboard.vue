@@ -249,11 +249,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { dashboardAPI, contactAPI } from '../api'
 import { ElMessage } from 'element-plus'
 
-const navigate = inject('navigate') as (menu: string, params?: any) => void
+const router = useRouter()
 
 const isMounted = { value: true }
 onUnmounted(() => { isMounted.value = false })
@@ -350,13 +351,13 @@ const onFilterChange = () => {
 
 const handleProblemClick = (problem: any) => {
   if (problem.action) {
-    navigate(problem.action)
+    router.push('/' + problem.action)
   }
 }
 
 const handleUserClick = (row: any) => {
   if (row.mobile) {
-    navigate('query', { mobile: row.mobile })
+    router.push({ path: '/query', query: { mobile: row.mobile } })
   }
 }
 

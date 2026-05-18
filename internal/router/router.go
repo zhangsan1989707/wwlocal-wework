@@ -27,9 +27,11 @@ type Router struct {
 	operationLogSvc    *service.OperationLogService
 	jwtSecret          string
 	rateLimiter        *appmw.RateLimiter
+	allowedOrigins     []string
+	metricsAllowedIPs  []string
 }
 
-func NewRouter(healthHandler *handler.HealthHandler, authHandler *handler.AuthHandler, logHandler *handler.LogHandler, keyHandler *handler.KeyHandler, syncHandler *handler.SyncHandler, schedulerHandler *handler.SchedulerHandler, contactHandler *handler.ContactHandler, operationLogHandler *handler.OperationLogHandler, adminOperLogHandler *handler.AdminOperLogHandler, dashboardHandler *handler.DashboardHandler, syncHistoryHandler *handler.SyncHistoryHandler, syncFeatureHandler *handler.SyncFeatureHandler, systemHandler *handler.SystemHandler, taskHandler *handler.TaskHandler, operationLogSvc *service.OperationLogService, jwtSecret string, rateLimiter *appmw.RateLimiter) *Router {
+func NewRouter(healthHandler *handler.HealthHandler, authHandler *handler.AuthHandler, logHandler *handler.LogHandler, keyHandler *handler.KeyHandler, syncHandler *handler.SyncHandler, schedulerHandler *handler.SchedulerHandler, contactHandler *handler.ContactHandler, operationLogHandler *handler.OperationLogHandler, adminOperLogHandler *handler.AdminOperLogHandler, dashboardHandler *handler.DashboardHandler, syncHistoryHandler *handler.SyncHistoryHandler, syncFeatureHandler *handler.SyncFeatureHandler, systemHandler *handler.SystemHandler, taskHandler *handler.TaskHandler, operationLogSvc *service.OperationLogService, jwtSecret string, rateLimiter *appmw.RateLimiter, allowedOrigins []string, metricsAllowedIPs []string) *Router {
 	return &Router{
 		healthHandler:        healthHandler,
 		authHandler:          authHandler,
@@ -48,13 +50,20 @@ func NewRouter(healthHandler *handler.HealthHandler, authHandler *handler.AuthHa
 		operationLogSvc:    operationLogSvc,
 		jwtSecret:          jwtSecret,
 		rateLimiter:        rateLimiter,
+		allowedOrigins:     allowedOrigins,
+		metricsAllowedIPs:  metricsAllowedIPs,
 	}
 }
 
 func (r *Router) Setup(e *echo.Echo) {
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
-	e.Use(middleware.CORS())
+	e.Use(middleware.BodyLimit("10M"))
+	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins: r.allowedOrigins,
+		AllowMethods: []string{echo.GET, echo.POST, echo.PUT, echo.DELETE, echo.OPTIONS},
+		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+	}))
 	e.Use(appmw.PrometheusMiddleware())
 	e.Use(appmw.OperationLog(r.operationLogSvc))
 	if r.rateLimiter != nil {
@@ -62,8 +71,9 @@ func (r *Router) Setup(e *echo.Echo) {
 	}
 
 	e.GET("/health", r.healthHandler.Check)
-	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
+	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()), appmw.MetricsAuth(r.metricsAllowedIPs))
 	e.POST("/api/v1/auth/login", r.authHandler.Login)
+	e.POST("/api/v1/auth/refresh", r.authHandler.RefreshToken)
 
 	api := e.Group("/api/v1", appmw.JWTAuth(r.jwtSecret))
 	{

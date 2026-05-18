@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -132,7 +132,7 @@ func (s *ContactService) GetSimpleUserList(departmentID int, fetchChild int) ([]
 		}
 
 		allUsers = append(allUsers, result.UserList...)
-		log.Printf("GetSimpleUserList: dept=%d, fetched=%d, total=%d", departmentID, len(result.UserList), len(allUsers))
+		slog.Info(fmt.Sprintf("GetSimpleUserList: dept=%d, fetched=%d, total=%d", departmentID, len(result.UserList), len(allUsers)))
 
 		if result.NextCursor == "" {
 			break
@@ -207,7 +207,7 @@ func (s *ContactService) FetchAllDetails(userIDs []string, concurrency int, canc
 
 				detail, rawJSON, err := s.GetUserDetail(uid)
 				if err != nil {
-					log.Printf("fetch detail failed for %s: %v", uid, err)
+					slog.Info(fmt.Sprintf("fetch detail failed for %s: %v", uid, err))
 					resultsCh <- result{err: uid}
 					continue
 				}
@@ -250,7 +250,7 @@ func (s *ContactService) FetchAllDetails(userIDs []string, concurrency int, canc
 		}
 		done++
 		if done%100 == 0 || done == total {
-			log.Printf("FetchAllDetails progress: %d/%d (ok=%d, fail=%d)", done, total, len(contacts), len(failed))
+			slog.Info(fmt.Sprintf("FetchAllDetails progress: %d/%d (ok=%d, fail=%d)", done, total, len(contacts), len(failed)))
 		}
 	}
 	return contacts, failed
@@ -283,7 +283,7 @@ func (s *ContactService) doRequest(method, path string, body interface{}, token 
 		resp, err := s.client.Do(req)
 		if err != nil {
 			lastErr = fmt.Errorf("http request failed: %w", err)
-			log.Printf("contact request attempt %d failed: %v", attempt+1, err)
+			slog.Info(fmt.Sprintf("contact request attempt %d failed: %v", attempt+1, err))
 			continue
 		}
 
@@ -296,7 +296,7 @@ func (s *ContactService) doRequest(method, path string, body interface{}, token 
 
 		if resp.StatusCode >= 500 {
 			lastErr = fmt.Errorf("server error: HTTP %d", resp.StatusCode)
-			log.Printf("contact request attempt %d got HTTP %d", attempt+1, resp.StatusCode)
+			slog.Info(fmt.Sprintf("contact request attempt %d got HTTP %d", attempt+1, resp.StatusCode))
 			continue
 		}
 

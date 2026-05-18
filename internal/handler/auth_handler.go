@@ -1,9 +1,12 @@
 package handler
 
 import (
-	"log"
+	"fmt"
+	"log/slog"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/labstack/echo/v4"
 	"golang.org/x/crypto/bcrypt"
@@ -29,14 +32,14 @@ func NewAuthHandler(cfg *config.AuthConfig, settingRepo *repository.SettingRepos
 	if settingRepo != nil {
 		if stored, err := settingRepo.Get(passwordHashKey); err == nil && stored != "" {
 			hash = []byte(stored)
-			log.Println("loaded password hash from database")
+			slog.Info("loaded password hash from database")
 		}
 	}
 
 	// 数据库没有则使用环境变量
 	if hash == nil {
 		hash, _ = bcrypt.GenerateFromPassword([]byte(cfg.Password), bcrypt.DefaultCost)
-		log.Println("using password hash from environment config")
+		slog.Info("using password hash from environment config")
 	}
 
 	return &AuthHandler{cfg: cfg, passwordHash: hash, settingRepo: settingRepo, limiter: newLoginLimiter()}
@@ -68,20 +71,85 @@ func (h *AuthHandler) Login(c echo.Context) error {
 	}
 
 	c.Set("username", req.Username)
-	token, err := middleware.GenerateToken(req.Username, h.cfg.JWTSecret, 24*time.Hour)
+	token, err := middleware.GenerateToken(req.Username, h.cfg.JWTSecret, 2*time.Hour)
+	if err != nil {
+		return response.Error(c, 500, "generate token failed")
+	}
+
+	refreshToken, err := middleware.GenerateRefreshToken(req.Username, h.cfg.JWTSecret, 7*24*time.Hour)
+	if err != nil {
+		return response.Error(c, 500, "generate refresh token failed")
+	}
+
+	return response.Success(c, map[string]interface{}{
+		"token":         token,
+		"refresh_token": refreshToken,
+		"username":      req.Username,
+	})
+}
+
+func (h *AuthHandler) RefreshToken(c echo.Context) error {
+	// 从请求体获取 refresh_token（也可从 Authorization header 获取）
+	var req struct {
+		Token string `json:"refresh_token"`
+	}
+	if err := c.Bind(&req); err != nil || req.Token == "" {
+		return response.Error(c, 400, "refresh_token 不能为空")
+	}
+
+	// 验证 refresh token
+	claims, err := middleware.ParseToken(req.Token, h.cfg.JWTSecret)
+	if err != nil {
+		return response.Error(c, 401, "refresh_token 无效或已过期")
+	}
+
+	// 检查 token 类型
+	if claims.TokenType != "refresh" {
+		return response.Error(c, 401, "无效的 token 类型")
+	}
+
+	// 生成新的 access token
+	token, err := middleware.GenerateToken(claims.Username, h.cfg.JWTSecret, 2*time.Hour)
 	if err != nil {
 		return response.Error(c, 500, "generate token failed")
 	}
 
 	return response.Success(c, map[string]interface{}{
-		"token":    token,
-		"username": req.Username,
+		"token": token,
 	})
 }
 
 type ChangePasswordRequest struct {
 	OldPassword string `json:"old_password"`
 	NewPassword string `json:"new_password"`
+}
+
+func validatePassword(pw string) error {
+	var hasUpper, hasLower, hasDigit bool
+	for _, ch := range pw {
+		switch {
+		case unicode.IsUpper(ch):
+			hasUpper = true
+		case unicode.IsLower(ch):
+			hasLower = true
+		case unicode.IsDigit(ch):
+			hasDigit = true
+		}
+	}
+	var errs []string
+	if !hasUpper {
+		errs = append(errs, "大写字母")
+	}
+	if !hasLower {
+		errs = append(errs, "小写字母")
+	}
+	if !hasDigit {
+		errs = append(errs, "数字")
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("新密码必须包含: %s", strings.Join(errs, "、"))
+	}
+	return nil
 }
 
 func (h *AuthHandler) ChangePassword(c echo.Context) error {
@@ -94,8 +162,12 @@ func (h *AuthHandler) ChangePassword(c echo.Context) error {
 		return response.Error(c, 400, "旧密码和新密码不能为空")
 	}
 
-	if len(req.NewPassword) < 6 {
-		return response.Error(c, 400, "新密码长度不能少于 6 位")
+	if len(req.NewPassword) < 8 {
+		return response.Error(c, 400, "新密码长度不能少于 8 位")
+	}
+
+	if err := validatePassword(req.NewPassword); err != nil {
+		return response.Error(c, 400, err.Error())
 	}
 
 	if req.OldPassword == req.NewPassword {
@@ -122,7 +194,7 @@ func (h *AuthHandler) ChangePassword(c echo.Context) error {
 
 	// 更新内存
 	h.passwordHash = newHash
-	log.Println("password changed successfully")
+	slog.Info("password changed successfully")
 
 	return response.Success(c, map[string]string{"message": "密码修改成功"})
 }

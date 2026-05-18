@@ -3,7 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strconv"
 	"sync"
 	"time"
@@ -63,13 +63,13 @@ func (s *SyncService) SyncFeature(featureID int, startTime, endTime int64) (int,
 
 	// 按天拆分，政务微信 API 要求 start_time 和 end_time 在同一天
 	days := s.splitByDay(startTime, endTime)
-	log.Printf("SyncFeature: feature=%d, %d days to process", featureID, len(days))
+	slog.Info(fmt.Sprintf("SyncFeature: feature=%d, %d days to process", featureID, len(days)))
 	for di, day := range days {
 		if s.isCancelled() {
 			return totalFetched, totalFailed, maxLogTime, nil
 		}
 		if di%5 == 0 {
-			log.Printf("SyncFeature: feature=%d, day %d/%d (ts=%d)", featureID, di+1, len(days), day.start)
+			slog.Info(fmt.Sprintf("SyncFeature: feature=%d, day %d/%d (ts=%d)", featureID, di+1, len(days), day.start))
 		}
 		fetched, failed, dayMax, err := s.syncFeatureDay(featureID, day.start, day.end, limit)
 		totalFetched += fetched
@@ -155,13 +155,13 @@ func (s *SyncService) syncFeatureDay(featureID int, startTime, endTime int64, li
 
 		// 当前页全部解密失败，密钥不匹配，跳过该 feature
 		if pageFailed == len(logItems) {
-			log.Printf("feature %d: all %d items failed to decrypt (likely missing key), skipping", featureID, len(logItems))
+			slog.Info(fmt.Sprintf("feature %d: all %d items failed to decrypt (likely missing key), skipping", featureID, len(logItems)))
 			break
 		}
 
 		if len(entries) > 0 {
 			if err := s.logRepo.BatchSave(featureID, entries); err != nil {
-				log.Printf("batch save failed for feature %d: %v", featureID, err)
+				slog.Info(fmt.Sprintf("batch save failed for feature %d: %v", featureID, err))
 				totalFailed += len(entries)
 			} else {
 				totalFetched += len(entries)
@@ -238,21 +238,21 @@ func (s *SyncService) syncFeatureDayWithTx(tx *gorm.DB, featureID int, startTime
 
 		// 当前页全部解密失败，密钥不匹配，跳过该 feature
 		if pageFailed == len(logItems) {
-			log.Printf("feature %d: all %d items failed to decrypt (likely missing key), skipping", featureID, len(logItems))
+			slog.Info(fmt.Sprintf("feature %d: all %d items failed to decrypt (likely missing key), skipping", featureID, len(logItems)))
 			break
 		}
 
 		if len(entries) > 0 {
 			savedMobiles, savedCount, err := s.logRepo.BatchSaveWithTx(tx, featureID, entries)
 			if err != nil {
-				log.Printf("batch save failed for feature %d: %v", featureID, err)
+				slog.Info(fmt.Sprintf("batch save failed for feature %d: %v", featureID, err))
 				totalFailed += len(entries)
 				return totalFetched, totalFailed, maxLogTime, err
 			} else {
 				totalFetched += savedCount
 				if len(savedMobiles) > 0 {
 					if err := s.logRepo.BatchUpsertDailyStatsWithTx(tx, featureID, savedMobiles, startTime); err != nil {
-						log.Printf("upsert daily stats failed for feature %d: %v", featureID, err)
+						slog.Info(fmt.Sprintf("upsert daily stats failed for feature %d: %v", featureID, err))
 						return totalFetched, totalFailed, maxLogTime, err
 					}
 				}
@@ -283,10 +283,10 @@ func (s *SyncService) SyncFeatureIncremental(featureID int) (int, int, error) {
 		}
 		now := time.Now().In(loc)
 		startTime = now.AddDate(0, 0, -30).Unix()
-		log.Printf("first sync for feature %d, pulling last 30 days", featureID)
+		slog.Info(fmt.Sprintf("first sync for feature %d, pulling last 30 days", featureID))
 	}
 
-	log.Printf("SyncFeatureIncremental: feature=%d, lastLogTime=%d, startTime=%d, endTime=%d", featureID, lastLogTime, startTime, endTime)
+	slog.Info(fmt.Sprintf("SyncFeatureIncremental: feature=%d, lastLogTime=%d, startTime=%d, endTime=%d", featureID, lastLogTime, startTime, endTime))
 
 	if startTime > endTime {
 		return 0, 0, nil
@@ -294,7 +294,7 @@ func (s *SyncService) SyncFeatureIncremental(featureID int) (int, int, error) {
 
 	// 按天拆分，政务微信 API 要求 start_time 和 end_time 在同一天
 	days := s.splitByDay(startTime, endTime)
-	log.Printf("SyncFeature: feature=%d, %d days to process", featureID, len(days))
+	slog.Info(fmt.Sprintf("SyncFeature: feature=%d, %d days to process", featureID, len(days)))
 
 	totalFetched := 0
 	totalFailed := 0
@@ -312,13 +312,13 @@ func (s *SyncService) SyncFeatureIncremental(featureID int) (int, int, error) {
 			return totalFetched, totalFailed, nil
 		}
 		if di%5 == 0 {
-			log.Printf("SyncFeature: feature=%d, day %d/%d (ts=%d)", featureID, di+1, len(days), day.start)
+			slog.Info(fmt.Sprintf("SyncFeature: feature=%d, day %d/%d (ts=%d)", featureID, di+1, len(days), day.start))
 		}
 
 		// 启动事务
 		tx := s.syncStateRepo.DB.Begin()
 		if tx.Error != nil {
-			log.Printf("SyncFeatureIncremental: failed to begin transaction for feature %d: %v", featureID, tx.Error)
+			slog.Info(fmt.Sprintf("SyncFeatureIncremental: failed to begin transaction for feature %d: %v", featureID, tx.Error))
 			continue
 		}
 
@@ -326,7 +326,7 @@ func (s *SyncService) SyncFeatureIncremental(featureID int) (int, int, error) {
 		fetched, failed, dayMax, err := s.syncFeatureDayWithTx(tx, featureID, day.start, day.end, limit)
 		if err != nil {
 			tx.Rollback()
-			log.Printf("SyncFeatureIncremental: failed to sync day for feature %d: %v", featureID, err)
+			slog.Info(fmt.Sprintf("SyncFeatureIncremental: failed to sync day for feature %d: %v", featureID, err))
 			totalFailed += failed
 			continue
 		}
@@ -336,14 +336,14 @@ func (s *SyncService) SyncFeatureIncremental(featureID int) (int, int, error) {
 			maxLogTime = dayMax
 			if updateErr := s.syncStateRepo.UpdateStateWithTx(tx, featureID, maxLogTime, fetched); updateErr != nil {
 				tx.Rollback()
-				log.Printf("SyncFeatureIncremental: UpdateState failed for feature %d: %v", featureID, updateErr)
+				slog.Info(fmt.Sprintf("SyncFeatureIncremental: UpdateState failed for feature %d: %v", featureID, updateErr))
 				continue
 			}
 		}
 
 		// 提交事务
 		if commitErr := tx.Commit().Error; commitErr != nil {
-			log.Printf("SyncFeatureIncremental: commit failed for feature %d: %v", featureID, commitErr)
+			slog.Info(fmt.Sprintf("SyncFeatureIncremental: commit failed for feature %d: %v", featureID, commitErr))
 			continue
 		}
 
@@ -358,7 +358,7 @@ func (s *SyncService) SyncFeatureIncremental(featureID int) (int, int, error) {
 func (s *SyncService) SyncAllFeaturesIncremental() map[int]int {
 	ids, err := s.syncFeatureRepo.GetEnabledIDs()
 	if err != nil {
-		log.Printf("get enabled features failed: %v", err)
+		slog.Info(fmt.Sprintf("get enabled features failed: %v", err))
 		return nil
 	}
 	return s.syncFeaturesIncremental(ids)
@@ -375,7 +375,7 @@ func (s *SyncService) syncFeaturesIncremental(featureIDs []int) map[int]int {
 	s.mu.Unlock()
 
 	startTime := time.Now()
-	log.Printf("incremental sync started, %d features to sync", len(featureIDs))
+	slog.Info(fmt.Sprintf("incremental sync started, %d features to sync", len(featureIDs)))
 
 	defer func() {
 		s.mu.Lock()
@@ -383,58 +383,78 @@ func (s *SyncService) syncFeaturesIncremental(featureIDs []int) map[int]int {
 		s.status.LastSync = time.Now()
 		errCount := len(s.status.Errors)
 		s.mu.Unlock()
-		log.Printf("incremental sync finished, errors=%d", errCount)
+		slog.Info(fmt.Sprintf("incremental sync finished, errors=%d", errCount))
 		s.saveSyncHistory("log", "scheduler", startTime)
 	}()
 
 	results := make(map[int]int)
-	for i, featureID := range featureIDs {
+	var resultsMu sync.Mutex
+	var progress int
+
+	sem := make(chan struct{}, 3) // 并发度 3
+	var wg sync.WaitGroup
+
+	for _, featureID := range featureIDs {
+		// 检查取消
 		select {
 		case <-s.cancelCh:
-			log.Printf("incremental sync cancelled at feature %d", featureID)
+			slog.Info(fmt.Sprintf("incremental sync cancelled"))
+			wg.Wait()
 			return results
 		default:
 		}
 
-		log.Printf("syncing feature %d (%d/%d)...", featureID, i+1, len(featureIDs))
-		s.mu.Lock()
-		s.status.CurrentFeature = featureID
-		s.mu.Unlock()
-		
-		featureStart := time.Now()
-		count, failed, err := s.SyncFeatureIncremental(featureID)
-		featureIDStr := strconv.Itoa(featureID)
-		
-		if err != nil {
-			log.Printf("incremental sync feature %d failed: %v", featureID, err)
-			results[featureID] = -1
-			metrics.RecordSyncOperation(featureIDStr, "failure", time.Since(featureStart), 0)
+		sem <- struct{}{} // 获取信号量
+		wg.Add(1)
+		go func(fid int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			slog.Info(fmt.Sprintf("syncing feature %d...", fid))
 			s.mu.Lock()
-			s.status.Errors[featureID] = err.Error()
-			log.Printf("stored error for feature %d: %s", featureID, s.status.Errors[featureID])
+			s.status.CurrentFeature = fid
 			s.mu.Unlock()
-		} else {
-			results[featureID] = count
-			metrics.RecordSyncOperation(featureIDStr, "success", time.Since(featureStart), count)
-			log.Printf("feature %d synced: %d records", featureID, count)
-		}
 
-		s.mu.Lock()
-		s.status.Progress = i + 1
-		s.status.Results = results
-		s.status.Failed += failed
-		s.mu.Unlock()
+			featureStart := time.Now()
+			count, failed, err := s.SyncFeatureIncremental(fid)
+			fidStr := strconv.Itoa(fid)
 
-		time.Sleep(100 * time.Millisecond)
+			if err != nil {
+				slog.Info(fmt.Sprintf("incremental sync feature %d failed: %v", fid, err))
+				metrics.RecordSyncOperation(fidStr, "failure", time.Since(featureStart), 0)
+				s.mu.Lock()
+				s.status.Errors[fid] = err.Error()
+				s.mu.Unlock()
+			} else {
+				metrics.RecordSyncOperation(fidStr, "success", time.Since(featureStart), count)
+				slog.Info(fmt.Sprintf("feature %d synced: %d records", fid, count))
+			}
+
+			resultsMu.Lock()
+			if err != nil {
+				results[fid] = -1
+			} else {
+				results[fid] = count
+			}
+			resultsMu.Unlock()
+
+			s.mu.Lock()
+			progress++
+			s.status.Progress = progress
+			s.status.Results = results
+			s.status.Failed += failed
+			s.mu.Unlock()
+		}(featureID)
 	}
 
+	wg.Wait()
 	return results
 }
 
 func (s *SyncService) SyncAllFeatures(startTime, endTime int64) map[int]int {
 	ids, err := s.syncFeatureRepo.GetEnabledIDs()
 	if err != nil {
-		log.Printf("get enabled features failed: %v", err)
+		slog.Info(fmt.Sprintf("get enabled features failed: %v", err))
 		return nil
 	}
 	return s.syncFeatures(ids, startTime, endTime)
@@ -459,44 +479,64 @@ func (s *SyncService) syncFeatures(featureIDs []int, startTime, endTime int64) m
 	}()
 
 	results := make(map[int]int)
-	for i, featureID := range featureIDs {
+	var resultsMu sync.Mutex
+	var progress int
+
+	sem := make(chan struct{}, 3) // 并发度 3
+	var wg sync.WaitGroup
+
+	for _, featureID := range featureIDs {
 		select {
 		case <-s.cancelCh:
-			log.Printf("sync cancelled at feature %d", featureID)
+			slog.Info(fmt.Sprintf("sync cancelled"))
+			wg.Wait()
 			return results
 		default:
 		}
 
-		featureStart := time.Now()
-		count, failed, maxLogTime, err := s.SyncFeature(featureID, startTime, endTime)
-		featureIDStr := strconv.Itoa(featureID)
-		
-		if err != nil {
-			log.Printf("sync feature %d failed: %v", featureID, err)
-			results[featureID] = -1
-			metrics.RecordSyncOperation(featureIDStr, "failure", time.Since(featureStart), 0)
-			s.mu.Lock()
-			s.status.Errors[featureID] = err.Error()
-			s.mu.Unlock()
-		} else {
-			results[featureID] = count
-			metrics.RecordSyncOperation(featureIDStr, "success", time.Since(featureStart), count)
-			if maxLogTime > 0 {
-				if updateErr := s.syncStateRepo.UpdateState(featureID, maxLogTime, count); updateErr != nil {
-					log.Printf("sync feature %d: UpdateState failed: %v", featureID, updateErr)
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(fid int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			featureStart := time.Now()
+			count, failed, maxLogTime, err := s.SyncFeature(fid, startTime, endTime)
+			fidStr := strconv.Itoa(fid)
+
+			if err != nil {
+				slog.Info(fmt.Sprintf("sync feature %d failed: %v", fid, err))
+				metrics.RecordSyncOperation(fidStr, "failure", time.Since(featureStart), 0)
+				s.mu.Lock()
+				s.status.Errors[fid] = err.Error()
+				s.mu.Unlock()
+			} else {
+				metrics.RecordSyncOperation(fidStr, "success", time.Since(featureStart), count)
+				if maxLogTime > 0 {
+					if updateErr := s.syncStateRepo.UpdateState(fid, maxLogTime, count); updateErr != nil {
+						slog.Info(fmt.Sprintf("sync feature %d: UpdateState failed: %v", fid, updateErr))
+					}
 				}
 			}
-		}
 
-		s.mu.Lock()
-		s.status.Progress = i + 1
-		s.status.Results = results
-		s.status.Failed += failed
-		s.mu.Unlock()
+			resultsMu.Lock()
+			if err != nil {
+				results[fid] = -1
+			} else {
+				results[fid] = count
+			}
+			resultsMu.Unlock()
 
-		time.Sleep(100 * time.Millisecond)
+			s.mu.Lock()
+			progress++
+			s.status.Progress = progress
+			s.status.Results = results
+			s.status.Failed += failed
+			s.mu.Unlock()
+		}(featureID)
 	}
 
+	wg.Wait()
 	return results
 }
 
@@ -625,7 +665,7 @@ func (s *SyncService) saveSyncHistory(syncType, trigger string, startTime time.T
 		Details:    string(detailsJSON),
 	}
 	if err := s.syncHistoryRepo.Create(history); err != nil {
-		log.Printf("save sync history failed: %v", err)
+		slog.Info(fmt.Sprintf("save sync history failed: %v", err))
 	}
 }
 
@@ -633,21 +673,21 @@ func (s *SyncService) saveSyncHistory(syncType, trigger string, startTime time.T
 func (s *SyncService) VerifySyncState() {
 	states, err := s.syncStateRepo.GetAll()
 	if err != nil {
-		log.Printf("verify sync state: failed to get states: %v", err)
+		slog.Info(fmt.Sprintf("verify sync state: failed to get states: %v", err))
 		return
 	}
 
 	for _, state := range states {
 		actualMax := s.logRepo.GetActualMaxLogTime(state.FeatureID)
 		if actualMax > state.LastLogTime {
-			log.Printf("verify sync state: feature %d last_log_time corrected from %d to %d",
-				state.FeatureID, state.LastLogTime, actualMax)
+			slog.Info(fmt.Sprintf("verify sync state: feature %d last_log_time corrected from %d to %d",
+				state.FeatureID, state.LastLogTime, actualMax))
 			if updateErr := s.syncStateRepo.UpdateState(state.FeatureID, actualMax, 0); updateErr != nil {
-				log.Printf("verify sync state: UpdateState failed for feature %d: %v", state.FeatureID, updateErr)
+				slog.Info(fmt.Sprintf("verify sync state: UpdateState failed for feature %d: %v", state.FeatureID, updateErr))
 			}
 		} else if actualMax < state.LastLogTime && actualMax > 0 {
-			log.Printf("verify sync state: feature %d last_log_time %d ahead of actual max %d (state is fine, data may have been purged)",
-				state.FeatureID, state.LastLogTime, actualMax)
+			slog.Info(fmt.Sprintf("verify sync state: feature %d last_log_time %d ahead of actual max %d (state is fine, data may have been purged)",
+				state.FeatureID, state.LastLogTime, actualMax))
 		}
 	}
 }

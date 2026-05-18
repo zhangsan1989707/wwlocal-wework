@@ -204,7 +204,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch, inject } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { logAPI, syncFeatureAPI, contactAPI } from '../api'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh, DataAnalysis, Plus, Delete, Close, QuestionFilled, Download } from '@element-plus/icons-vue'
@@ -249,7 +250,7 @@ const timeShortcuts = [
   { label: '最近30天', hours: 720 },
 ]
 
-const navigateParams = inject('navigateParams') as any
+const route = useRoute()
 
 onMounted(async () => {
   try {
@@ -262,38 +263,36 @@ onMounted(async () => {
   }
   loadFieldPaths()
 
-  // 处理跨页面导航参数
-  if (navigateParams?.value) {
-    const params = navigateParams.value
-    if (params.mobile) {
-      form.mobile = params.mobile
-    }
-    if (params.feature_ids) {
-      form.feature_ids = params.feature_ids
-    }
-    if (params.dateRange) {
-      dateRange.value = params.dateRange
-      activeShortcut.value = '最近7天'
-    }
-    // 自动执行查询
-    if (params.mobile || (params.feature_ids?.length > 0)) {
-      if (form.feature_ids.length > 0 && dateRange.value) {
-        handleQuery()
-      } else if (!dateRange.value) {
-        // 没有指定时间范围，用默认时间范围
-        try {
-          const timeRes: any = await logAPI.getTimeRange()
-          if (timeRes.code === 0) {
-            dateRange.value = [
-              new Date(timeRes.data.start_time * 1000),
-              new Date(timeRes.data.end_time * 1000),
-            ]
-          }
-        } catch { /* ignore */ }
-        if (form.feature_ids.length > 0) {
-          handleQuery()
+  // 处理路由查询参数
+  const query = route.query
+  if (query.mobile) {
+    form.mobile = String(query.mobile)
+  }
+  if (query.feature_ids) {
+    form.feature_ids = String(query.feature_ids).split(',').map(Number).filter(Boolean)
+  }
+  if (query.date_start && query.date_end) {
+    dateRange.value = [
+      new Date(Number(query.date_start) * 1000),
+      new Date(Number(query.date_end) * 1000),
+    ]
+    activeShortcut.value = '最近7天'
+  }
+  // 自动执行查询
+  if (query.mobile || form.feature_ids.length > 0) {
+    if (!dateRange.value) {
+      try {
+        const timeRes: any = await logAPI.getTimeRange()
+        if (timeRes.code === 0) {
+          dateRange.value = [
+            new Date(timeRes.data.start_time * 1000),
+            new Date(timeRes.data.end_time * 1000),
+          ]
         }
-      }
+      } catch { /* ignore */ }
+    }
+    if (form.feature_ids.length > 0) {
+      handleQuery()
     }
   } else {
     // 默认行为：加载时间范围
