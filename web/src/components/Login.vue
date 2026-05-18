@@ -46,16 +46,18 @@ const handleLogin = async () => {
 
   loading.value = true
   try {
-    const res: any = await authAPI.login(form)
-    if (res.code === 0) {
-      authStore.login(res.data.username)
+    const res: any = await authAPI.login({ username: form.username, password: form.password })
+    // api 拦截器已存 token，res 可能是 {code,data} 或直接 {token,username}
+    const username = res?.data?.username || res?.username
+    if (username) {
+      authStore.login(username)
       ElMessage.success('登录成功')
       router.push('/dashboard')
     } else {
-      ElMessage.error(res.msg || '登录失败')
+      ElMessage.error(res?.msg || res?.data?.msg || '登录失败')
     }
   } catch (err: any) {
-    ElMessage.error(err.response?.data?.msg || '登录失败')
+    ElMessage.error(err?.message || '登录失败')
   } finally {
     loading.value = false
   }
