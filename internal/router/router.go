@@ -3,6 +3,7 @@ package router
 import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"wwlocal-wework/internal/handler"
 	appmw "wwlocal-wework/internal/middleware"
 	"wwlocal-wework/internal/service"
@@ -52,9 +53,11 @@ func (r *Router) Setup(e *echo.Echo) {
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORS())
+	e.Use(appmw.PrometheusMiddleware())
 	e.Use(appmw.OperationLog(r.operationLogSvc))
 
 	e.GET("/health", r.healthHandler.Check)
+	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
 	e.POST("/api/v1/auth/login", r.authHandler.Login)
 
 	api := e.Group("/api/v1", appmw.JWTAuth(r.jwtSecret))

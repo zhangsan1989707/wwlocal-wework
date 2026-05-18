@@ -1,160 +1,340 @@
 import axios from 'axios'
+import type {
+  ApiResponse,
+  LoginRequest,
+  LoginResponse,
+  HealthCheckResponse,
+  LogQueryParams,
+  LogQueryResponse,
+  SyncParams,
+  SyncStatus,
+  PaginatedResponse,
+  ContactListParams,
+  ContactMemberParams,
+  Contact,
+  Department,
+  DeptMember,
+  ContactSyncStatus,
+  KeyVersion,
+  SchedulerStatus,
+  SyncHistoryParams,
+  SyncHistory,
+  SyncFeature,
+  AdminOperLogParams,
+  AdminOperLog,
+  AdminOperLogSync,
+  AdminOperLogStats,
+  DashboardOverview,
+  InactiveUser,
+  SystemStatus,
+  TaskInfo,
+  TaskSubmitParams,
+  OperationLog,
+  FieldPath,
+  TimeRange,
+} from '../types/api'
 
 const api = axios.create({
   baseURL: '/api/v1',
   timeout: 30000,
 })
 
+const TOKEN_KEY = 'auth_token'
+const USERNAME_KEY = 'auth_username'
+
+function getStoredToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+function setStoredToken(token: string): void {
+  try {
+    localStorage.setItem(TOKEN_KEY, token)
+  } catch {
+    console.error('Failed to store token')
+  }
+}
+
+function removeStoredToken(): void {
+  try {
+    localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(USERNAME_KEY)
+  } catch {
+    console.error('Failed to remove stored token')
+  }
+}
+
+function getStoredUsername(): string | null {
+  try {
+    return localStorage.getItem(USERNAME_KEY)
+  } catch {
+    return null
+  }
+}
+
+function setStoredUsername(username: string): void {
+  try {
+    localStorage.setItem(USERNAME_KEY, username)
+  } catch {
+    console.error('Failed to store username')
+  }
+}
+
+let reloading = false
+
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token')
+  const token = getStoredToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
   return config
 })
 
-let reloading = false
 api.interceptors.response.use(
   (response) => response.data,
   (error) => {
-    if (error.response?.status === 401 && !reloading) {
-      localStorage.removeItem('token')
-      localStorage.removeItem('username')
+    const status = error.response?.status
+    const data = error.response?.data as ApiResponse<unknown> | undefined
+
+    if (status === 401 && !reloading) {
       reloading = true
-      window.location.reload()
+      removeStoredToken()
+      window.location.href = '/login'
+      return Promise.reject(new Error('登录已过期，请重新登录'))
     }
-    return Promise.reject(error)
+
+    if (status === 403) {
+      return Promise.reject(new Error('没有权限执行此操作'))
+    }
+
+    if (status === 429) {
+      return Promise.reject(new Error('请求过于频繁，请稍后再试'))
+    }
+
+    if (status && status >= 500) {
+      return Promise.reject(new Error('服务器错误，请稍后再试'))
+    }
+
+    const message = data?.msg || error.message || '请求失败'
+    return Promise.reject(new Error(message))
   }
 )
 
-export interface LogQueryParams {
-  feature_ids?: number[]
-  start_time?: number
-  end_time?: number
-  mobile?: string
-  conditions?: { key: string; operator: string; value: string }[]
-  page?: number
-  page_size?: number
-  realtime?: boolean
-}
-
-export interface SyncParams {
-  sync_all: boolean
-  feature_ids?: number[]
-  start_time?: number
-  end_time?: number
-}
-
-export interface PaginatedParams {
-  page?: number
-  page_size?: number
-}
-
-export interface ContactListParams extends PaginatedParams {
-  department_id?: number
-  keyword?: string
-  name?: string
-  mobile?: string
-}
-
-export interface ContactMemberParams extends PaginatedParams {
-  keyword?: string
-}
-
-export interface SyncHistoryParams extends PaginatedParams {
-  sync_type?: string
-}
-
-export interface SyncFeatureItem {
-  feature_id: number
-  enabled: boolean
-}
-
-export interface AdminOperLogParams extends PaginatedParams {
-  start_time?: number
-  end_time?: number
-  oper_type?: string
-  oper_userid?: string
-}
-
-export interface AdminOperLogSync {
-  start_time?: number
-  end_time?: number
-}
-
 export const authAPI = {
-  login: (data: { username: string; password: string }) => api.post('/auth/login', data),
+  login: (data: LoginRequest) =>
+    api.post<ApiResponse<LoginResponse>>('/auth/login', data).then((res) => {
+      if (res.data.code === 0 && res.data.data) {
+        setStoredToken(res.data.data.token)
+        setStoredUsername(res.data.data.username)
+      }
+      return res.data
+    }),
+  getToken: () => getStoredToken(),
+  getUsername: () => getStoredUsername(),
+  logout: () => removeStoredToken(),
+  isAuthenticated: () => !!getStoredToken(),
 }
 
 export const healthAPI = {
-  check: () => api.get('/health'),
+  check: () => api.get<ApiResponse<HealthCheckResponse>>('/health'),
 }
 
 export const logAPI = {
-  query: (data: LogQueryParams) => api.post('/logs/query', data),
-  getFeatures: () => api.get('/logs/features'),
-  getTimeRange: () => api.get('/logs/time-range'),
-  getFieldPaths: () => api.get('/logs/field-paths'),
+  query: (data: LogQueryParams) =>
+    api.post<ApiResponse<LogQueryResponse>>('/logs/query', data),
+  queryByCursor: (data: LogQueryParams & { cursor?: string }) =>
+    api.post<ApiResponse<LogQueryResponse>>('/logs/query/cursor', data),
+  getFeatures: () =>
+    api.get<ApiResponse<SyncFeature[]>>('/logs/features'),
+  getTimeRange: () =>
+    api.get<ApiResponse<TimeRange>>('/logs/time-range'),
+  getFieldPaths: () =>
+    api.get<ApiResponse<FieldPath[]>>('/logs/field-paths'),
 }
 
 export const syncAPI = {
-  sync: (data: SyncParams) => api.post('/logs/sync', data),
-  cancel: () => api.post('/logs/sync/cancel'),
-  status: () => api.get('/logs/sync/status'),
+  sync: (data: SyncParams) =>
+    api.post<ApiResponse<{ message: string }>>('/logs/sync', data),
+  cancel: () =>
+    api.post<ApiResponse<{ message: string }>>('/logs/sync/cancel'),
+  status: () =>
+    api.get<ApiResponse<SyncStatus>>('/logs/sync/status'),
 }
 
 export const keyAPI = {
-  list: () => api.get('/keys'),
-  add: (data: { version: string; pem_content?: string }) => api.post('/keys', data),
-  activate: (data: { version: string }) => api.put('/keys/activate', data),
-  test: (version: string) => api.get('/keys/test', { params: { version } }),
+  list: () =>
+    api.get<ApiResponse<KeyVersion[]>>('/keys'),
+  add: (data: { version: string; pem_content?: string }) =>
+    api.post<ApiResponse<KeyVersion>>('/keys', data),
+  activate: (data: { version: string }) =>
+    api.put<ApiResponse<KeyVersion>>('/keys/activate', data),
+  test: (version: string) =>
+    api.get<ApiResponse<{ success: boolean; message: string }>>('/keys/test', {
+      params: { version },
+    }),
 }
 
 export const schedulerAPI = {
-  start: (data?: { start_delay?: string }) => api.post('/scheduler/start', data),
-  stop: () => api.post('/scheduler/stop'),
-  status: () => api.get('/scheduler/status'),
-  incrementalSync: (data: SyncParams) => api.post('/scheduler/sync', data),
-  setInterval: (data: { interval: string }) => api.put('/scheduler/interval', data),
+  start: (data?: { start_delay?: string }) =>
+    api.post<ApiResponse<{ message: string }>>('/scheduler/start', data),
+  stop: () =>
+    api.post<ApiResponse<{ message: string }>>('/scheduler/stop'),
+  status: () =>
+    api.get<ApiResponse<SchedulerStatus>>('/scheduler/status'),
+  incrementalSync: (data: SyncParams) =>
+    api.post<ApiResponse<{ message: string }>>('/scheduler/sync', data),
+  setInterval: (data: { interval: string }) =>
+    api.put<ApiResponse<{ message: string }>>('/scheduler/interval', data),
 }
 
 export const contactAPI = {
-  list: (params: ContactListParams) => api.get('/contacts', { params }),
-  getDepartments: () => api.get('/contacts/departments'),
-  getDeptTree: () => api.get('/contacts/tree'),
-  getDeptMembers: (deptId: number, params: ContactMemberParams) => api.get(`/contacts/departments/${deptId}/members`, { params }),
-  getContact: (userId: string) => api.get(`/contacts/${userId}`),
-  getNames: (user_ids: string[]) => api.post('/contacts/names', { user_ids }),
-  sync: () => api.post('/contacts/sync'),
-  syncIncremental: () => api.post('/contacts/sync/incremental'),
-  cancel: () => api.post('/contacts/sync/cancel'),
-  status: () => api.get('/contacts/sync/status'),
+  list: (params: ContactListParams) =>
+    api.get<ApiResponse<PaginatedResponse<Contact>>>('/contacts', { params }),
+  getDepartments: () =>
+    api.get<ApiResponse<Department[]>>('/contacts/departments'),
+  getDeptTree: () =>
+    api.get<ApiResponse<Department[]>>('/contacts/tree'),
+  getDeptMembers: (deptId: number, params: ContactMemberParams) =>
+    api.get<ApiResponse<PaginatedResponse<DeptMember>>>(
+      `/contacts/departments/${deptId}/members`,
+      { params }
+    ),
+  getContact: (userId: string) =>
+    api.get<ApiResponse<Contact>>(`/contacts/${userId}`),
+  getNames: (user_ids: string[]) =>
+    api.post<ApiResponse<Record<string, string>>>('/contacts/names', {
+      user_ids,
+    }),
+  sync: () =>
+    api.post<ApiResponse<{ message: string }>>('/contacts/sync'),
+  syncIncremental: () =>
+    api.post<ApiResponse<{ message: string }>>('/contacts/sync/incremental'),
+  cancel: () =>
+    api.post<ApiResponse<{ message: string }>>('/contacts/sync/cancel'),
+  status: () =>
+    api.get<ApiResponse<ContactSyncStatus>>('/contacts/sync/status'),
 }
 
 export const dashboardAPI = {
-  getOverview: () => api.get('/dashboard/overview'),
-  getInactiveUsers: (params?: { range?: string; dept_id?: number; min_inactive_days?: number }) => api.get('/dashboard/inactive-users', { params }),
+  getOverview: () =>
+    api.get<ApiResponse<DashboardOverview>>('/dashboard/overview'),
+  getInactiveUsers: (params?: {
+    range?: string
+    dept_id?: number
+    min_inactive_days?: number
+  }) =>
+    api.get<ApiResponse<PaginatedResponse<InactiveUser>>>(
+      '/dashboard/inactive-users',
+      { params }
+    ),
 }
 
 export const systemAPI = {
-  getStatus: () => api.get('/system/status'),
+  getStatus: () =>
+    api.get<ApiResponse<SystemStatus>>('/system/status'),
 }
 
 export const syncHistoryAPI = {
-  list: (params: SyncHistoryParams) => api.get('/sync-history', { params }),
+  list: (params: SyncHistoryParams) =>
+    api.get<ApiResponse<PaginatedResponse<SyncHistory>>>('/sync-history', {
+      params,
+    }),
 }
 
 export const syncFeatureAPI = {
-  list: () => api.get('/sync-features'),
-  update: (data: { features: SyncFeatureItem[] }) => api.put('/sync-features', data),
+  list: () =>
+    api.get<ApiResponse<SyncFeature[]>>('/sync-features'),
+  update: (data: { features: Array<{ feature_id: number; enabled: boolean }> }) =>
+    api.put<ApiResponse<{ message: string }>>('/sync-features', data),
 }
 
 export const adminOperLogAPI = {
-  query: (params: AdminOperLogParams) => api.get('/admin-oper-logs', { params }),
-  sync: (data: AdminOperLogSync) => api.post('/admin-oper-logs/sync', data),
-  syncStatus: () => api.get('/admin-oper-logs/sync/status'),
-  getTypes: () => api.get('/admin-oper-logs/types'),
-  getUsers: () => api.get('/admin-oper-logs/users'),
+  query: (params: AdminOperLogParams) =>
+    api.get<ApiResponse<PagedResponse<AdminOperLog>>>(
+      '/admin-oper-logs',
+      { params }
+    ),
+  sync: (data: AdminOperLogSync) =>
+    api.post<ApiResponse<{ synced: number; message: string }>>(
+      '/admin-oper-logs/sync',
+      data
+    ),
+  syncStatus: () =>
+    api.get<ApiResponse<{ running: boolean }>>(
+      '/admin-oper-logs/sync/status'
+    ),
+  getStats: (params?: { start_time?: number; end_time?: number }) =>
+    api.get<ApiResponse<AdminOperLogStats>>('/admin-oper-logs/stats', {
+      params,
+    }),
+  getTypes: () =>
+    api.get<ApiResponse<string[]>>('/admin-oper-logs/types'),
+  getUsers: () =>
+    api.get<ApiResponse<string[]>>('/admin-oper-logs/users'),
+}
+
+export const operationLogAPI = {
+  list: (params?: { page?: number; page_size?: number; action?: string; status_code?: number }) =>
+    api.get<ApiResponse<PaginatedResponse<OperationLog>>>('/operation-logs', { params }),
+  getActions: () =>
+    api.get<ApiResponse<string[]>>('/operation-logs/actions'),
+}
+
+export const taskAPI = {
+  submit: (data: TaskSubmitParams) =>
+    api.post<ApiResponse<TaskInfo>>('/tasks', data),
+  list: () =>
+    api.get<ApiResponse<TaskInfo[]>>('/tasks'),
+  get: (id: string) =>
+    api.get<ApiResponse<TaskInfo>>(`/tasks/${id}`),
+  cancel: (id: string) =>
+    api.post<ApiResponse<{ message: string }>>(`/tasks/${id}/cancel`),
+  retry: (id: string) =>
+    api.post<ApiResponse<TaskInfo>>(`/tasks/${id}/retry`),
+}
+
+type PagedResponse<T> = {
+  data: T[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export type {
+  ApiResponse,
+  LoginRequest,
+  LoginResponse,
+  HealthCheckResponse,
+  LogQueryParams,
+  LogQueryResponse,
+  SyncParams,
+  SyncStatus,
+  PaginatedResponse,
+  ContactListParams,
+  Contact,
+  Department,
+  DeptMember,
+  ContactSyncStatus,
+  KeyVersion,
+  SchedulerStatus,
+  SyncHistoryParams,
+  SyncHistory,
+  SyncFeature,
+  AdminOperLogParams,
+  AdminOperLog,
+  AdminOperLogSync,
+  AdminOperLogStats,
+  DashboardOverview,
+  InactiveUser,
+  SystemStatus,
+  TaskInfo,
+  TaskSubmitParams,
+  OperationLog,
+  FieldPath,
+  TimeRange,
 }
 
 export default api
