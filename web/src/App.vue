@@ -1,5 +1,6 @@
 <template>
-  <div class="app-container">
+  <Login v-if="!authStore.isLoggedIn" />
+  <div v-else class="app-container">
     <el-container>
       <el-header>
         <div class="header-left">
@@ -93,6 +94,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { authAPI } from './api/index'
 import { useAuthStore } from './stores/auth'
+import Login from './components/Login.vue'
 import {
   DataLine, Document, Refresh, User, Setting, Key, Monitor,
   DArrowLeft, DArrowRight,
