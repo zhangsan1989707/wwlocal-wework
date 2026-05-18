@@ -332,6 +332,9 @@ const fetchData = async () => {
     if (res.code === 0) {
       data.value = res.data
       totalDays.value = res.data.total_days || totalDays.value
+      if (minDays.value > totalDays.value) {
+        minDays.value = totalDays.value
+      }
     }
   } catch (err: any) {
     if (isMounted.value) ElMessage.error(err.response?.data?.msg || '加载使用分析失败')
