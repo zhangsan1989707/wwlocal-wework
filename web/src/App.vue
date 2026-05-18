@@ -9,8 +9,9 @@
         </div>
         <div class="header-right">
           <span>{{ authStore.username }}</span>
-          <el-button type="link" style="color: rgba(255,255,255,.85)" @click="showPwDialog = true">修改密码</el-button>
-          <el-button type="link" style="color: rgba(255,255,255,.85)" @click="handleLogout">退出</el-button>
+          <span class="header-action" @click="showPwDialog = true">修改密码</span>
+          <span class="header-divider">|</span>
+          <span class="header-action" @click="handleLogout">退出</span>
         </div>
       </el-header>
       <el-container class="main-container">
@@ -214,6 +215,21 @@ html, body, #app {
   gap: 12px;
   font-size: 13px;
   color: rgba(255,255,255,.85);
+}
+
+.header-action {
+  cursor: pointer;
+  color: rgba(255,255,255,.85);
+  transition: color 0.2s;
+}
+
+.header-action:hover {
+  color: #fff;
+}
+
+.header-divider {
+  color: rgba(255,255,255,.3);
+  font-size: 12px;
 }
 
 .main-container {

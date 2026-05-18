@@ -13,10 +13,6 @@
               <el-icon><Refresh /></el-icon>
               重置
             </el-button>
-            <el-button type="success" @click="handleSync" :loading="syncLoading">
-              <el-icon><Download /></el-icon>
-              同步
-            </el-button>
           </div>
         </div>
       </template>
@@ -73,47 +69,14 @@
         @size-change="handleQuery"
       />
     </el-card>
-
-    <el-dialog v-model="syncDialogVisible" title="同步企微操作日志" width="500px">
-      <el-form label-position="top">
-        <el-form-item label="时间范围">
-          <div class="time-range-container">
-            <el-button-group class="time-shortcuts">
-              <el-button
-                v-for="shortcut in timeShortcuts"
-                :key="shortcut.label"
-                :type="activeShortcut === shortcut.label ? 'primary' : 'default'"
-                size="small"
-                @click="applyTimeShortcut(shortcut)"
-              >
-                {{ shortcut.label }}
-              </el-button>
-            </el-button-group>
-            <el-date-picker
-              v-model="syncDateRange"
-              type="datetimerange"
-              range-separator="至"
-              start-placeholder="开始时间"
-              end-placeholder="结束时间"
-              style="width: 100%; margin-top: 8px"
-              @change="activeShortcut = null"
-            />
-          </div>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="syncDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="doSync" :loading="syncLoading">开始同步</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { adminOperLogAPI } from '../api'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Refresh, Download } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { Search, Refresh } from '@element-plus/icons-vue'
 
 const form = reactive({
   start_time: null as Date | null,
@@ -124,25 +87,12 @@ const form = reactive({
 
 const dateRange = ref<[Date, Date] | null>(null)
 const loading = ref(false)
-const syncLoading = ref(false)
-const syncDialogVisible = ref(false)
-const syncDateRange = ref<[Date, Date] | null>(null)
-const activeShortcut = ref<string | null>(null)
 const tableData = ref<any[]>([])
 const total = ref(0)
 const pagination = reactive({
   page: 1,
   page_size: 20,
 })
-
-let pollTimer: ReturnType<typeof setInterval> | null = null
-
-const timeShortcuts = [
-  { label: '今天', hours: 0, isToday: true },
-  { label: '最近7天', hours: 168 },
-  { label: '最近30天', hours: 720 },
-  { label: '最近90天', hours: 2160 },
-]
 
 const setTodayRange = () => {
   const today = new Date()
@@ -156,49 +106,6 @@ onMounted(async () => {
   setTodayRange()
   await handleQuery()
 })
-
-onUnmounted(() => {
-  stopPolling()
-})
-
-const startPolling = () => {
-  stopPolling()
-  pollTimer = setInterval(async () => {
-    try {
-      const res: any = await adminOperLogAPI.syncStatus()
-      if (res.code === 0 && !res.data.running) {
-        stopPolling()
-        syncLoading.value = false
-        ElMessage.success('同步完成')
-        handleQuery()
-      }
-    } catch (err) {
-      console.error(err)
-    }
-  }, 2000)
-}
-
-const stopPolling = () => {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
-}
-
-const applyTimeShortcut = (shortcut: { label: string; hours: number; isToday?: boolean }) => {
-  activeShortcut.value = shortcut.label
-  if (shortcut.isToday) {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const end = new Date()
-    end.setHours(23, 59, 59, 999)
-    syncDateRange.value = [today, end]
-  } else {
-    const end = new Date()
-    const start = new Date(end.getTime() - shortcut.hours * 60 * 60 * 1000)
-    syncDateRange.value = [start, end]
-  }
-}
 
 const handleQuery = async () => {
   loading.value = true
@@ -234,52 +141,6 @@ const handleReset = () => {
   form.oper_userid = ''
   pagination.page = 1
   handleQuery()
-}
-
-const handleSync = () => {
-  syncDateRange.value = null
-  activeShortcut.value = null
-  syncDialogVisible.value = true
-}
-
-const doSync = async () => {
-  if (!syncDateRange.value) {
-    ElMessage.warning('请选择时间范围')
-    return
-  }
-
-  try {
-    await ElMessageBox.confirm(
-      '将按选定时间范围从政务微信拉取企微操作日志，确定开始吗？',
-      '确认同步',
-      { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' }
-    )
-  } catch {
-    return
-  }
-
-  syncLoading.value = true
-  try {
-    const startTime = Math.floor(syncDateRange.value[0].getTime() / 1000)
-    const endTime = Math.floor(syncDateRange.value[1].getTime() / 1000)
-
-    const res: any = await adminOperLogAPI.sync({
-      start_time: startTime,
-      end_time: endTime,
-    })
-
-    if (res.code === 0) {
-      ElMessage.success('同步任务已启动')
-      syncDialogVisible.value = false
-      startPolling()
-    } else {
-      ElMessage.error(res.msg || '同步启动失败')
-      syncLoading.value = false
-    }
-  } catch (err: any) {
-    ElMessage.error(err.message || '同步启动失败')
-    syncLoading.value = false
-  }
 }
 
 const formatTime = (ts: number | string) => {
@@ -319,19 +180,5 @@ const formatTime = (ts: number | string) => {
   margin-top: 20px;
   display: flex;
   justify-content: center;
-}
-
-.time-range-container {
-  width: 100%;
-}
-
-.time-shortcuts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.time-shortcuts .el-button {
-  border-radius: 4px;
 }
 </style>
