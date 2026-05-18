@@ -346,21 +346,7 @@ func BuildDeptTree(depts []model.Department, memberCounts map[int]int) []model.D
 		return result
 	}
 
-	// 聚合子部门人数到父部门
-	var aggregate func(*model.DeptTreeNode) int
-	aggregate = func(node *model.DeptTreeNode) int {
-		total := node.MemberCount
-		for i := range node.Children {
-			total += aggregate(&node.Children[i])
-		}
-		node.MemberCount = total
-		return total
-	}
-
 	result := toValue(roots)
-	for i := range result {
-		aggregate(&result[i])
-	}
 	return result
 }
 

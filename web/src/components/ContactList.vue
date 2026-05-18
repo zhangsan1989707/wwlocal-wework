@@ -517,11 +517,22 @@ const stopPolling = () => {
 }
 
 .tree-panel {
-  width: 260px;
+  width: 280px;
+  min-width: 280px;
   border-right: 1px solid #ebeef5;
   padding: 12px;
   overflow-y: auto;
+  overflow-x: hidden;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tree-panel :deep(.el-tree) {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: calc(100vh - 380px);
 }
 
 .tree-header {
@@ -540,10 +551,17 @@ const stopPolling = () => {
   justify-content: space-between;
   flex: 1;
   padding-right: 4px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .tree-node-label {
   font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
 .table-panel {
@@ -582,5 +600,6 @@ const stopPolling = () => {
 
 :deep(.el-tree-node__content) {
   height: 32px;
+  overflow: hidden;
 }
 </style>
