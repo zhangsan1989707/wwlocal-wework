@@ -132,6 +132,8 @@ export const authAPI = {
       }
       return res.data
     }),
+  changePassword: (data: { old_password: string; new_password: string }) =>
+    api.put<ApiResponse<{ message: string }>>('/auth/password', data),
   getToken: () => getStoredToken(),
   getUsername: () => getStoredUsername(),
   logout: () => removeStoredToken(),

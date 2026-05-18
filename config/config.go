@@ -17,6 +17,7 @@ type Config struct {
 	Auth      AuthConfig      `yaml:"auth"`
 	Scheduler SchedulerConfig `yaml:"scheduler"`
 	Redis     RedisConfig     `yaml:"redis"`
+	RateLimit RateLimitConfig `yaml:"rate_limit"`
 }
 
 type ServerConfig struct {
@@ -71,6 +72,12 @@ type RedisConfig struct {
 	Stream   string `yaml:"stream"` // stream name
 }
 
+type RateLimitConfig struct {
+	Enabled       bool `yaml:"enabled"`
+	RequestsPerMin int `yaml:"requests_per_minute"`
+	Burst         int  `yaml:"burst"`
+}
+
 func (d *DatabaseConfig) DSN() string {
 	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=10s&readTimeout=30s&writeTimeout=30s&maxAllowedPacket=0",
 		d.User, d.Password, d.Host, d.Port, d.DBName)
@@ -88,6 +95,13 @@ func getEnvInt(key string, fallback int) int {
 		if intVal, err := strconv.Atoi(value); err == nil {
 			return intVal
 		}
+	}
+	return fallback
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	if value, ok := os.LookupEnv(key); ok {
+		return value == "true" || value == "1" || value == "yes"
 	}
 	return fallback
 }
@@ -128,6 +142,10 @@ func Load(path string) (*Config, error) {
 	cfg.Redis.Password = getEnv("REDIS_PASSWORD", "")
 	cfg.Redis.DB = getEnvInt("REDIS_DB", 0)
 	cfg.Redis.Stream = getEnv("REDIS_STREAM", "wwlocal:sync:tasks")
+
+	cfg.RateLimit.Enabled = getEnvBool("RATE_LIMIT_ENABLED", true)
+	cfg.RateLimit.RequestsPerMin = getEnvInt("RATE_LIMIT_REQUESTS_PER_MINUTE", 100)
+	cfg.RateLimit.Burst = getEnvInt("RATE_LIMIT_BURST", 20)
 
 	// 校验必需配置
 	var missing []string

@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"wwlocal-wework/internal/crypto"
 	"wwlocal-wework/internal/model"
 	"wwlocal-wework/internal/repository"
+	"wwlocal-wework/pkg/metrics"
 )
 
 type DecryptService struct {
@@ -64,23 +66,29 @@ func (s *DecryptService) getActiveDecryptor() (*crypto.RSADecryptor, error) {
 }
 
 func (s *DecryptService) decryptInternal(dec *crypto.RSADecryptor, item *model.WeWorkLogItem) (*model.LogEntry, error) {
+	startTime := time.Now()
+	
 	encKeyBytes, err := dec.Decrypt(item.EncKey)
 	if err != nil {
+		metrics.RecordDecryption(false, time.Since(startTime))
 		return nil, fmt.Errorf("RSA decrypt enc_key failed: %w", err)
 	}
 
 	aesDec, err := crypto.NewAESDecryptor(encKeyBytes)
 	if err != nil {
+		metrics.RecordDecryption(false, time.Since(startTime))
 		return nil, fmt.Errorf("create AES decryptor failed: %w", err)
 	}
 
 	ciphertext, err := base64.StdEncoding.DecodeString(item.EncData)
 	if err != nil {
+		metrics.RecordDecryption(false, time.Since(startTime))
 		return nil, fmt.Errorf("decode enc_data failed: %w", err)
 	}
 
 	plaintext, err := aesDec.Decrypt(ciphertext)
 	if err != nil {
+		metrics.RecordDecryption(false, time.Since(startTime))
 		return nil, fmt.Errorf("AES decrypt failed: %w", err)
 	}
 
@@ -91,10 +99,13 @@ func (s *DecryptService) decryptInternal(dec *crypto.RSADecryptor, item *model.W
 
 	var parsedJSON map[string]interface{}
 	if err := json.Unmarshal(plaintext, &parsedJSON); err != nil {
+		metrics.RecordDecryption(false, time.Since(startTime))
 		return nil, fmt.Errorf("parse decrypted JSON failed: %w", err)
 	}
 
 	parsedJSONStr, _ := json.Marshal(parsedJSON)
+	
+	metrics.RecordDecryption(true, time.Since(startTime))
 
 	return &model.LogEntry{
 		FeatureID:  item.FeatureID,

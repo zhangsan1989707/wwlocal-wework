@@ -9,6 +9,7 @@
         </div>
         <div class="header-right">
           <span>{{ username }}</span>
+          <el-button type="text" style="color: rgba(255,255,255,.85)" @click="showPwDialog = true">修改密码</el-button>
           <el-button type="text" style="color: rgba(255,255,255,.85)" @click="handleLogout">退出</el-button>
         </div>
       </el-header>
@@ -73,11 +74,30 @@
         </el-main>
       </el-container>
     </el-container>
+
+    <el-dialog v-model="showPwDialog" title="修改密码" width="400px" :close-on-click-modal="false">
+      <el-form :model="pwForm" label-width="80px">
+        <el-form-item label="旧密码">
+          <el-input v-model="pwForm.old_password" type="password" show-password />
+        </el-form-item>
+        <el-form-item label="新密码">
+          <el-input v-model="pwForm.new_password" type="password" show-password placeholder="至少 6 位" />
+        </el-form-item>
+        <el-form-item label="确认密码">
+          <el-input v-model="pwForm.confirm" type="password" show-password />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showPwDialog = false">取消</el-button>
+        <el-button type="primary" :loading="pwLoading" @click="handleChangePassword">确认修改</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, provide } from 'vue'
+import { ElMessage } from 'element-plus'
 import Login from './components/Login.vue'
 import Dashboard from './components/Dashboard.vue'
 import LogQuery from './components/LogQuery.vue'
@@ -87,6 +107,7 @@ import ContactList from './components/ContactList.vue'
 import AdminOperLog from './components/AdminOperLog.vue'
 import FeatureConfig from './components/FeatureConfig.vue'
 import SystemStatus from './components/SystemStatus.vue'
+import { authAPI } from './api/index'
 import {
   DataLine, Document, Refresh, User, Setting, Key, Monitor,
   DArrowLeft, DArrowRight,
@@ -121,6 +142,39 @@ const handleLogout = () => {
   localStorage.removeItem('username')
   isLoggedIn.value = false
   username.value = ''
+}
+
+const showPwDialog = ref(false)
+const pwLoading = ref(false)
+const pwForm = ref({ old_password: '', new_password: '', confirm: '' })
+
+const handleChangePassword = async () => {
+  if (pwForm.value.new_password.length < 6) {
+    ElMessage.warning('新密码长度不能少于 6 位')
+    return
+  }
+  if (pwForm.value.new_password !== pwForm.value.confirm) {
+    ElMessage.warning('两次输入的新密码不一致')
+    return
+  }
+  pwLoading.value = true
+  try {
+    const res: any = await authAPI.changePassword({
+      old_password: pwForm.value.old_password,
+      new_password: pwForm.value.new_password,
+    })
+    if (res.code === 0) {
+      ElMessage.success('密码修改成功')
+      showPwDialog.value = false
+      pwForm.value = { old_password: '', new_password: '', confirm: '' }
+    } else {
+      ElMessage.error(res.msg || '修改失败')
+    }
+  } catch (err: any) {
+    ElMessage.error(err.message || '修改失败')
+  } finally {
+    pwLoading.value = false
+  }
 }
 </script>
 

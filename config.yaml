@@ -30,6 +30,11 @@ scheduler:
   enabled: false
   interval: "1h"
 
+rate_limit:
+  enabled: true
+  requests_per_minute: 100
+  burst: 20
+
 features:
   ids:
     - 90000031

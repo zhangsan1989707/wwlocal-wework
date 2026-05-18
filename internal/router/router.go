@@ -19,16 +19,17 @@ type Router struct {
 	contactHandler       *handler.ContactHandler
 	operationLogHandler  *handler.OperationLogHandler
 	adminOperLogHandler *handler.AdminOperLogHandler
-	dashboardHandler     *handler.DashboardHandler
-	syncHistoryHandler   *handler.SyncHistoryHandler
-	syncFeatureHandler   *handler.SyncFeatureHandler
-	systemHandler        *handler.SystemHandler
-	taskHandler          *handler.TaskHandler
-	operationLogSvc      *service.OperationLogService
-	jwtSecret            string
+	dashboardHandler    *handler.DashboardHandler
+	syncHistoryHandler  *handler.SyncHistoryHandler
+	syncFeatureHandler  *handler.SyncFeatureHandler
+	systemHandler      *handler.SystemHandler
+	taskHandler        *handler.TaskHandler
+	operationLogSvc    *service.OperationLogService
+	jwtSecret          string
+	rateLimiter        *appmw.RateLimiter
 }
 
-func NewRouter(healthHandler *handler.HealthHandler, authHandler *handler.AuthHandler, logHandler *handler.LogHandler, keyHandler *handler.KeyHandler, syncHandler *handler.SyncHandler, schedulerHandler *handler.SchedulerHandler, contactHandler *handler.ContactHandler, operationLogHandler *handler.OperationLogHandler, adminOperLogHandler *handler.AdminOperLogHandler, dashboardHandler *handler.DashboardHandler, syncHistoryHandler *handler.SyncHistoryHandler, syncFeatureHandler *handler.SyncFeatureHandler, systemHandler *handler.SystemHandler, taskHandler *handler.TaskHandler, operationLogSvc *service.OperationLogService, jwtSecret string) *Router {
+func NewRouter(healthHandler *handler.HealthHandler, authHandler *handler.AuthHandler, logHandler *handler.LogHandler, keyHandler *handler.KeyHandler, syncHandler *handler.SyncHandler, schedulerHandler *handler.SchedulerHandler, contactHandler *handler.ContactHandler, operationLogHandler *handler.OperationLogHandler, adminOperLogHandler *handler.AdminOperLogHandler, dashboardHandler *handler.DashboardHandler, syncHistoryHandler *handler.SyncHistoryHandler, syncFeatureHandler *handler.SyncFeatureHandler, systemHandler *handler.SystemHandler, taskHandler *handler.TaskHandler, operationLogSvc *service.OperationLogService, jwtSecret string, rateLimiter *appmw.RateLimiter) *Router {
 	return &Router{
 		healthHandler:        healthHandler,
 		authHandler:          authHandler,
@@ -46,6 +47,7 @@ func NewRouter(healthHandler *handler.HealthHandler, authHandler *handler.AuthHa
 		taskHandler:        taskHandler,
 		operationLogSvc:    operationLogSvc,
 		jwtSecret:          jwtSecret,
+		rateLimiter:        rateLimiter,
 	}
 }
 
@@ -55,6 +57,9 @@ func (r *Router) Setup(e *echo.Echo) {
 	e.Use(middleware.CORS())
 	e.Use(appmw.PrometheusMiddleware())
 	e.Use(appmw.OperationLog(r.operationLogSvc))
+	if r.rateLimiter != nil {
+		e.Use(r.rateLimiter.Middleware())
+	}
 
 	e.GET("/health", r.healthHandler.Check)
 	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
@@ -62,6 +67,7 @@ func (r *Router) Setup(e *echo.Echo) {
 
 	api := e.Group("/api/v1", appmw.JWTAuth(r.jwtSecret))
 	{
+			api.PUT("/auth/password", r.authHandler.ChangePassword)
 		operationLogs := api.Group("/operation-logs")
 		{
 			operationLogs.GET("", r.operationLogHandler.List)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"sync"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"wwlocal-wework/config"
 	"wwlocal-wework/internal/model"
 	"wwlocal-wework/internal/repository"
+	"wwlocal-wework/pkg/metrics"
 )
 
 type SyncService struct {
@@ -398,16 +400,22 @@ func (s *SyncService) syncFeaturesIncremental(featureIDs []int) map[int]int {
 		s.mu.Lock()
 		s.status.CurrentFeature = featureID
 		s.mu.Unlock()
+		
+		featureStart := time.Now()
 		count, failed, err := s.SyncFeatureIncremental(featureID)
+		featureIDStr := strconv.Itoa(featureID)
+		
 		if err != nil {
 			log.Printf("incremental sync feature %d failed: %v", featureID, err)
 			results[featureID] = -1
+			metrics.RecordSyncOperation(featureIDStr, "failure", time.Since(featureStart), 0)
 			s.mu.Lock()
 			s.status.Errors[featureID] = err.Error()
 			log.Printf("stored error for feature %d: %s", featureID, s.status.Errors[featureID])
 			s.mu.Unlock()
 		} else {
 			results[featureID] = count
+			metrics.RecordSyncOperation(featureIDStr, "success", time.Since(featureStart), count)
 			log.Printf("feature %d synced: %d records", featureID, count)
 		}
 
@@ -459,15 +467,20 @@ func (s *SyncService) syncFeatures(featureIDs []int, startTime, endTime int64) m
 		default:
 		}
 
+		featureStart := time.Now()
 		count, failed, maxLogTime, err := s.SyncFeature(featureID, startTime, endTime)
+		featureIDStr := strconv.Itoa(featureID)
+		
 		if err != nil {
 			log.Printf("sync feature %d failed: %v", featureID, err)
 			results[featureID] = -1
+			metrics.RecordSyncOperation(featureIDStr, "failure", time.Since(featureStart), 0)
 			s.mu.Lock()
 			s.status.Errors[featureID] = err.Error()
 			s.mu.Unlock()
 		} else {
 			results[featureID] = count
+			metrics.RecordSyncOperation(featureIDStr, "success", time.Since(featureStart), count)
 			if maxLogTime > 0 {
 				if updateErr := s.syncStateRepo.UpdateState(featureID, maxLogTime, count); updateErr != nil {
 					log.Printf("sync feature %d: UpdateState failed: %v", featureID, updateErr)

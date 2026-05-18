@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log"
 	"sync"
 	"time"
 
@@ -8,18 +9,37 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"wwlocal-wework/config"
 	"wwlocal-wework/internal/middleware"
+	"wwlocal-wework/internal/repository"
 	"wwlocal-wework/pkg/response"
 )
+
+const passwordHashKey = "auth_password_hash"
 
 type AuthHandler struct {
 	cfg          *config.AuthConfig
 	passwordHash []byte
+	settingRepo  *repository.SettingRepository
 	limiter      *loginLimiter
 }
 
-func NewAuthHandler(cfg *config.AuthConfig) *AuthHandler {
-	hash, _ := bcrypt.GenerateFromPassword([]byte(cfg.Password), bcrypt.DefaultCost)
-	return &AuthHandler{cfg: cfg, passwordHash: hash, limiter: newLoginLimiter()}
+func NewAuthHandler(cfg *config.AuthConfig, settingRepo *repository.SettingRepository) *AuthHandler {
+	var hash []byte
+
+	// 优先从数据库加载已修改的密码哈希
+	if settingRepo != nil {
+		if stored, err := settingRepo.Get(passwordHashKey); err == nil && stored != "" {
+			hash = []byte(stored)
+			log.Println("loaded password hash from database")
+		}
+	}
+
+	// 数据库没有则使用环境变量
+	if hash == nil {
+		hash, _ = bcrypt.GenerateFromPassword([]byte(cfg.Password), bcrypt.DefaultCost)
+		log.Println("using password hash from environment config")
+	}
+
+	return &AuthHandler{cfg: cfg, passwordHash: hash, settingRepo: settingRepo, limiter: newLoginLimiter()}
 }
 
 func (h *AuthHandler) Stop() {
@@ -59,17 +79,65 @@ func (h *AuthHandler) Login(c echo.Context) error {
 	})
 }
 
+type ChangePasswordRequest struct {
+	OldPassword string `json:"old_password"`
+	NewPassword string `json:"new_password"`
+}
+
+func (h *AuthHandler) ChangePassword(c echo.Context) error {
+	var req ChangePasswordRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, 400, "invalid request body")
+	}
+
+	if req.OldPassword == "" || req.NewPassword == "" {
+		return response.Error(c, 400, "旧密码和新密码不能为空")
+	}
+
+	if len(req.NewPassword) < 6 {
+		return response.Error(c, 400, "新密码长度不能少于 6 位")
+	}
+
+	if req.OldPassword == req.NewPassword {
+		return response.Error(c, 400, "新密码不能与旧密码相同")
+	}
+
+	// 校验旧密码
+	if bcrypt.CompareHashAndPassword(h.passwordHash, []byte(req.OldPassword)) != nil {
+		return response.Error(c, 401, "旧密码不正确")
+	}
+
+	// 生成新密码哈希
+	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return response.Error(c, 500, "密码加密失败")
+	}
+
+	// 持久化到数据库
+	if h.settingRepo != nil {
+		if err := h.settingRepo.Set(passwordHashKey, string(newHash)); err != nil {
+			return response.Error(c, 500, "保存密码失败")
+		}
+	}
+
+	// 更新内存
+	h.passwordHash = newHash
+	log.Println("password changed successfully")
+
+	return response.Success(c, map[string]string{"message": "密码修改成功"})
+}
+
 // loginLimiter 简单的基于 IP 的登录限流：1 分钟内最多 5 次失败
 type loginLimiter struct {
-	mu       sync.Mutex
-	attempts map[string]*attemptEntry
-	stopCh   chan struct{}
+	mu        sync.Mutex
+	attempts  map[string]*attemptEntry
+	stopCh    chan struct{}
 }
 
 type attemptEntry struct {
-	count    int
-	firstAt  time.Time
-	blocked  bool
+	count     int
+	firstAt   time.Time
+	blocked   bool
 	blockedAt time.Time
 }
 

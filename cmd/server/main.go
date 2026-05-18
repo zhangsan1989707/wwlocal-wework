@@ -17,6 +17,7 @@ import (
 
 	"wwlocal-wework/config"
 	"wwlocal-wework/internal/handler"
+	appmw "wwlocal-wework/internal/middleware"
 	"wwlocal-wework/internal/model"
 	"wwlocal-wework/internal/repository"
 	"wwlocal-wework/internal/router"
@@ -41,6 +42,11 @@ func main() {
 	sqlDB.SetMaxOpenConns(50)
 	sqlDB.SetMaxIdleConns(25)
 	sqlDB.SetConnMaxLifetime(5 * time.Minute)
+
+	settingRepo := repository.NewSettingRepository(db)
+	if err := settingRepo.AutoMigrate(); err != nil {
+		log.Fatalf("migrate setting repository failed: %v", err)
+	}
 
 	keyRepo := repository.NewKeyRepository(db, cfg.Keys.StoragePath, cfg.Keys.EncryptKey)
 	if err := keyRepo.AutoMigrate(); err != nil {
@@ -92,7 +98,7 @@ func main() {
 	syncSvc.VerifySyncState()
 
 	healthHandler := handler.NewHealthHandler(db, cfg)
-	authHandler := handler.NewAuthHandler(&cfg.Auth)
+	authHandler := handler.NewAuthHandler(&cfg.Auth, settingRepo)
 	logHandler := handler.NewLogHandler(querySvc)
 	keyHandler := handler.NewKeyHandler(keySvc)
 	syncHandler := handler.NewSyncHandler(syncSvc)
@@ -136,6 +142,8 @@ func main() {
 	}
 	taskHandler := handler.NewTaskHandler(taskQueueSvc)
 
+	rateLimiter := appmw.NewRateLimiter(cfg.RateLimit.RequestsPerMin, cfg.RateLimit.Burst)
+
 	if cfg.Scheduler.Enabled {
 		schedulerSvc.Start(interval)
 	}
@@ -143,7 +151,7 @@ func main() {
 	// 启动任务队列工作线程
 	taskQueueSvc.Start()
 
-	r := router.NewRouter(healthHandler, authHandler, logHandler, keyHandler, syncHandler, schedulerHandler, contactHandler, operationLogHandler, adminOperLogHandler, dashboardHandler, syncHistoryHandler, syncFeatureHandler, systemHandler, taskHandler, operationLogSvc, cfg.Auth.JWTSecret)
+	r := router.NewRouter(healthHandler, authHandler, logHandler, keyHandler, syncHandler, schedulerHandler, contactHandler, operationLogHandler, adminOperLogHandler, dashboardHandler, syncHistoryHandler, syncFeatureHandler, systemHandler, taskHandler, operationLogSvc, cfg.Auth.JWTSecret, rateLimiter)
 
 	e := echo.New()
 	r.Setup(e)
