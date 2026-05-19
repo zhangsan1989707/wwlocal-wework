@@ -11,15 +11,14 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o server ./cmd/server
 
 FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates tzdata
+RUN apk --no-cache add ca-certificates tzdata su-exec
 
 WORKDIR /app
 COPY --from=builder /app/server .
 COPY --from=builder /app/config.yaml .
-RUN mkdir -p keys && chown nobody:nobody keys
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh && mkdir -p keys
 
 EXPOSE 8080
 
-USER nobody
-
-CMD ["./server"]
+ENTRYPOINT ["./entrypoint.sh"]
