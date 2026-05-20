@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/json"
 	"strconv"
 	"time"
 
@@ -79,15 +78,14 @@ func (s *DashboardService) GetOverview() (map[string]interface{}, error) {
 
 	featureIDs := s.cfg.Features.IDs
 	now := time.Now()
-	totalDays := int(now.Sub(now.AddDate(0, -3, 0)).Hours()/24) + 1
 	startTime := now.AddDate(0, -3, 0).Unix()
-	users, _ := s.logRepo.GetUsersWithDayStats(featureIDs, startTime, 0, totalDays, totalDays)
+	inactiveCount, _ := s.logRepo.GetInactiveUserCount(featureIDs, startTime)
 	var inactiveRate float64
 	if contactCount > 0 {
-		inactiveRate = float64(len(users)) / float64(contactCount) * 100
+		inactiveRate = float64(inactiveCount) / float64(contactCount) * 100
 	}
 	kpis["inactive_rate"] = inactiveRate
-	kpis["inactive_count"] = len(users)
+	kpis["inactive_count"] = inactiveCount
 	kpis["total_contacts"] = contactCount
 
 	historyItems, _, _ := s.syncHistoryRepo.List("", 1, 5)
@@ -151,7 +149,7 @@ func (s *DashboardService) GetOverview() (map[string]interface{}, error) {
 	}, nil
 }
 
-func (s *DashboardService) GetInactiveUsers(rangeParam string, deptID int, minInactiveDays int) (map[string]interface{}, error) {
+func (s *DashboardService) GetInactiveUsers(rangeParam string, deptID int, minInactiveDays int, page, pageSize int) (map[string]interface{}, error) {
 	featureIDs := s.cfg.Features.IDs
 
 	now := time.Now()
@@ -175,8 +173,15 @@ func (s *DashboardService) GetInactiveUsers(rangeParam string, deptID int, minIn
 	if minInactiveDays <= 0 {
 		minInactiveDays = totalDays
 	}
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	offset := (page - 1) * pageSize
 
-	users, err := s.logRepo.GetUsersWithDayStats(featureIDs, startTime, deptID, totalDays, minInactiveDays)
+	users, total, err := s.logRepo.GetUsersWithDayStats(featureIDs, startTime, deptID, totalDays, minInactiveDays, pageSize, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -195,63 +200,79 @@ func (s *DashboardService) GetInactiveUsers(rangeParam string, deptID int, minIn
 	}
 
 	depts, _ := s.contactRepo.GetAllDepartments()
-
 	deptCounts, _ := s.contactRepo.GetDeptMemberCounts()
 	deptCountMap := make(map[int]int64, len(deptCounts))
 	for _, dc := range deptCounts {
 		deptCountMap[dc.DeptID] = dc.Count
 	}
 
-	inactiveByDept := make(map[int]int)
-	for _, u := range users {
-		var userDepts []int
-		json.Unmarshal([]byte(u.Department), &userDepts)
-		for _, ud := range userDepts {
-			inactiveByDept[ud]++
-		}
-	}
+	// 部门统计走 SQL 侧聚合
+	inactiveByDept, _ := s.logRepo.GetDeptInactiveStats(featureIDs, startTime, totalDays, minInactiveDays)
 
 	deptStats := make([]map[string]interface{}, 0, len(depts))
 	for _, d := range depts {
-		total := deptCountMap[d.ID]
-		if total == 0 {
+		totalCnt := deptCountMap[d.ID]
+		if totalCnt == 0 {
 			continue
 		}
 		inactive := inactiveByDept[d.ID]
 		deptStats = append(deptStats, map[string]interface{}{
 			"id":       d.ID,
 			"name":     d.Name,
-			"total":    total,
-			"active":   total - int64(inactive),
+			"total":    totalCnt,
+			"active":   totalCnt - int64(inactive),
 			"inactive": inactive,
 		})
 	}
 
-	deptList := make([]map[string]interface{}, 0, len(depts))
-	for _, d := range depts {
-		deptList = append(deptList, map[string]interface{}{
-			"id":   d.ID,
-			"name": d.Name,
-		})
-	}
-
-	neverActiveCount := 0
-	for _, u := range users {
-		if u.ActiveDays == 0 {
-			neverActiveCount++
-		}
-	}
-
 	return map[string]interface{}{
 		"total_contacts":    totalContacts,
-		"inactive_count":    neverActiveCount,
-		"filtered_count":    len(users),
+		"inactive_count":    total,
 		"inactive_users":    users,
 		"feature_names":     featureNames,
-		"departments":       deptList,
 		"dept_stats":        deptStats,
 		"range":             rangeParam,
 		"total_days":        totalDays,
 		"min_inactive_days": minInactiveDays,
+		"page":              page,
+		"page_size":         pageSize,
 	}, nil
+}
+
+func (s *DashboardService) ExportInactiveUsersCSV(rangeParam string, deptID int, minInactiveDays int) ([][]string, error) {
+	featureIDs := s.cfg.Features.IDs
+
+	now := time.Now()
+	var startTime int64
+	var totalDays int
+
+	switch rangeParam {
+	case "week":
+		startTime = now.AddDate(0, 0, -7).Unix()
+		totalDays = 7
+	case "month":
+		loc := now.Location()
+		monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc)
+		startTime = monthStart.Unix()
+		totalDays = int(now.Sub(monthStart).Hours()/24) + 1
+	default:
+		totalDays = int(now.Sub(now.AddDate(0, -3, 0)).Hours()/24) + 1
+		startTime = now.AddDate(0, -3, 0).Unix()
+	}
+	if minInactiveDays <= 0 {
+		minInactiveDays = totalDays
+	}
+
+	// 导出不分页，取全量
+	users, _, err := s.logRepo.GetUsersWithDayStats(featureIDs, startTime, deptID, totalDays, minInactiveDays, 100000, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	rows := make([][]string, 0, len(users)+1)
+	rows = append(rows, []string{"姓名", "手机号", "职位", "所属部门", "活跃天数", "未使用天数", "UserID"})
+	for _, u := range users {
+		rows = append(rows, []string{u.Name, u.Mobile, u.Position, u.Department, strconv.Itoa(u.ActiveDays), strconv.Itoa(u.InactiveDays), u.UserID})
+	}
+	return rows, nil
 }

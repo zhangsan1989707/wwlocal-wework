@@ -9,164 +9,153 @@ import (
 	"wwlocal-wework/internal/service"
 )
 
-type Router struct {
-	healthHandler        *handler.HealthHandler
-	authHandler          *handler.AuthHandler
-	logHandler           *handler.LogHandler
-	keyHandler           *handler.KeyHandler
-	syncHandler          *handler.SyncHandler
-	schedulerHandler     *handler.SchedulerHandler
-	contactHandler       *handler.ContactHandler
-	operationLogHandler  *handler.OperationLogHandler
-	adminOperLogHandler *handler.AdminOperLogHandler
-	dashboardHandler    *handler.DashboardHandler
-	syncHistoryHandler  *handler.SyncHistoryHandler
-	syncFeatureHandler  *handler.SyncFeatureHandler
-	systemHandler      *handler.SystemHandler
-	taskHandler        *handler.TaskHandler
-	operationLogSvc    *service.OperationLogService
-	jwtSecret          string
-	rateLimiter        *appmw.RateLimiter
-	allowedOrigins     []string
-	metricsAllowedIPs  []string
+// RouterDeps 路由依赖集合，避免 NewRouter 参数过多
+type RouterDeps struct {
+	Health        *handler.HealthHandler
+	Auth          *handler.AuthHandler
+	Log           *handler.LogHandler
+	Key           *handler.KeyHandler
+	Sync          *handler.SyncHandler
+	Scheduler     *handler.SchedulerHandler
+	Contact       *handler.ContactHandler
+	OperationLog  *handler.OperationLogHandler
+	AdminOperLog  *handler.AdminOperLogHandler
+	Dashboard     *handler.DashboardHandler
+	SyncHistory   *handler.SyncHistoryHandler
+	SyncFeature   *handler.SyncFeatureHandler
+	System        *handler.SystemHandler
+	Task          *handler.TaskHandler
+	OperationSvc  *service.OperationLogService
+	JWTSecret     string
+	RateLimiter   *appmw.RateLimiter
+	Origins       []string
+	MetricsIPs    []string
 }
 
-func NewRouter(healthHandler *handler.HealthHandler, authHandler *handler.AuthHandler, logHandler *handler.LogHandler, keyHandler *handler.KeyHandler, syncHandler *handler.SyncHandler, schedulerHandler *handler.SchedulerHandler, contactHandler *handler.ContactHandler, operationLogHandler *handler.OperationLogHandler, adminOperLogHandler *handler.AdminOperLogHandler, dashboardHandler *handler.DashboardHandler, syncHistoryHandler *handler.SyncHistoryHandler, syncFeatureHandler *handler.SyncFeatureHandler, systemHandler *handler.SystemHandler, taskHandler *handler.TaskHandler, operationLogSvc *service.OperationLogService, jwtSecret string, rateLimiter *appmw.RateLimiter, allowedOrigins []string, metricsAllowedIPs []string) *Router {
-	return &Router{
-		healthHandler:        healthHandler,
-		authHandler:          authHandler,
-		logHandler:           logHandler,
-		keyHandler:           keyHandler,
-		syncHandler:          syncHandler,
-		schedulerHandler:     schedulerHandler,
-		contactHandler:      contactHandler,
-		operationLogHandler: operationLogHandler,
-		adminOperLogHandler: adminOperLogHandler,
-		dashboardHandler:    dashboardHandler,
-		syncHistoryHandler:  syncHistoryHandler,
-		syncFeatureHandler:  syncFeatureHandler,
-		systemHandler:      systemHandler,
-		taskHandler:        taskHandler,
-		operationLogSvc:    operationLogSvc,
-		jwtSecret:          jwtSecret,
-		rateLimiter:        rateLimiter,
-		allowedOrigins:     allowedOrigins,
-		metricsAllowedIPs:  metricsAllowedIPs,
-	}
+type Router struct {
+	deps RouterDeps
+}
+
+func NewRouter(d RouterDeps) *Router {
+	return &Router{deps: d}
 }
 
 func (r *Router) Setup(e *echo.Echo) {
+	d := r.deps
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 	e.Use(middleware.BodyLimit("10M"))
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins: r.allowedOrigins,
+		AllowOrigins: d.Origins,
 		AllowMethods: []string{echo.GET, echo.POST, echo.PUT, echo.DELETE, echo.OPTIONS},
 		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
 	}))
 	e.Use(appmw.PrometheusMiddleware())
-	e.Use(appmw.OperationLog(r.operationLogSvc))
-	if r.rateLimiter != nil {
-		e.Use(r.rateLimiter.Middleware())
+	e.Use(appmw.OperationLog(d.OperationSvc))
+	if d.RateLimiter != nil {
+		e.Use(d.RateLimiter.Middleware())
 	}
 
-	e.GET("/health", r.healthHandler.Check)
-	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()), appmw.MetricsAuth(r.metricsAllowedIPs))
-	e.POST("/api/v1/auth/login", r.authHandler.Login)
-	e.POST("/api/v1/auth/refresh", r.authHandler.RefreshToken)
+	e.GET("/health", d.Health.Check)
+	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()), appmw.MetricsAuth(d.MetricsIPs))
+	e.POST("/api/v1/auth/login", d.Auth.Login)
+	e.POST("/api/v1/auth/refresh", d.Auth.RefreshToken)
 
-	api := e.Group("/api/v1", appmw.JWTAuth(r.jwtSecret))
+	api := e.Group("/api/v1", appmw.JWTAuth(d.JWTSecret))
 	{
-			api.PUT("/auth/password", r.authHandler.ChangePassword)
+		api.PUT("/auth/password", d.Auth.ChangePassword)
+
 		operationLogs := api.Group("/operation-logs")
 		{
-			operationLogs.GET("", r.operationLogHandler.List)
-			operationLogs.GET("/actions", r.operationLogHandler.GetActions)
+			operationLogs.GET("", d.OperationLog.List)
+			operationLogs.GET("/actions", d.OperationLog.GetActions)
 		}
 
 		adminOperLogs := api.Group("/admin-oper-logs")
 		{
-			adminOperLogs.GET("", r.adminOperLogHandler.List)
-			adminOperLogs.POST("/sync", r.adminOperLogHandler.Sync)
-			adminOperLogs.GET("/sync/status", r.adminOperLogHandler.Status)
-			adminOperLogs.GET("/stats", r.adminOperLogHandler.GetStats)
-			adminOperLogs.GET("/types", r.adminOperLogHandler.GetOperTypes)
-			adminOperLogs.GET("/users", r.adminOperLogHandler.GetOperUsers)
-			adminOperLogs.DELETE("/cleanup", r.adminOperLogHandler.Cleanup)
+			adminOperLogs.GET("", d.AdminOperLog.List)
+			adminOperLogs.POST("/sync", d.AdminOperLog.Sync)
+			adminOperLogs.GET("/sync/status", d.AdminOperLog.Status)
+			adminOperLogs.GET("/stats", d.AdminOperLog.GetStats)
+			adminOperLogs.GET("/types", d.AdminOperLog.GetOperTypes)
+			adminOperLogs.GET("/users", d.AdminOperLog.GetOperUsers)
+			adminOperLogs.DELETE("/cleanup", d.AdminOperLog.Cleanup)
 		}
 
 		logs := api.Group("/logs")
 		{
-			logs.POST("/query", r.logHandler.Query)
-			logs.POST("/query/cursor", r.logHandler.QueryByCursor)
-			logs.GET("/features", r.logHandler.GetFeatures)
-			logs.GET("/time-range", r.logHandler.GetTimeRange)
-			logs.GET("/field-paths", r.logHandler.GetFieldPaths)
-			logs.POST("/sync", r.syncHandler.Sync)
-			logs.POST("/sync/cancel", r.syncHandler.Cancel)
-			logs.GET("/sync/status", r.syncHandler.Status)
+			logs.POST("/query", d.Log.Query)
+			logs.POST("/query/cursor", d.Log.QueryByCursor)
+			logs.POST("/export", d.Log.ExportCSV)
+			logs.GET("/features", d.Log.GetFeatures)
+			logs.GET("/time-range", d.Log.GetTimeRange)
+			logs.GET("/field-paths", d.Log.GetFieldPaths)
+			logs.POST("/sync", d.Sync.Sync)
+			logs.POST("/sync/cancel", d.Sync.Cancel)
+			logs.GET("/sync/status", d.Sync.Status)
 		}
 
 		keys := api.Group("/keys")
 		{
-			keys.GET("", r.keyHandler.List)
-			keys.POST("", r.keyHandler.Add)
-			keys.PUT("/activate", r.keyHandler.Activate)
-			keys.GET("/test", r.keyHandler.Test)
+			keys.GET("", d.Key.List)
+			keys.POST("", d.Key.Add)
+			keys.PUT("/activate", d.Key.Activate)
+			keys.GET("/test", d.Key.Test)
 		}
 
 		scheduler := api.Group("/scheduler")
 		{
-			scheduler.POST("/start", r.schedulerHandler.Start)
-			scheduler.POST("/stop", r.schedulerHandler.Stop)
-			scheduler.GET("/status", r.schedulerHandler.Status)
-			scheduler.POST("/sync", r.schedulerHandler.IncrementalSync)
-			scheduler.PUT("/interval", r.schedulerHandler.SetInterval)
+			scheduler.POST("/start", d.Scheduler.Start)
+			scheduler.POST("/stop", d.Scheduler.Stop)
+			scheduler.GET("/status", d.Scheduler.Status)
+			scheduler.POST("/sync", d.Scheduler.IncrementalSync)
+			scheduler.PUT("/interval", d.Scheduler.SetInterval)
 		}
 
 		syncHistory := api.Group("/sync-history")
 		{
-			syncHistory.GET("", r.syncHistoryHandler.List)
+			syncHistory.GET("", d.SyncHistory.List)
 		}
 
 		syncFeatures := api.Group("/sync-features")
 		{
-			syncFeatures.GET("", r.syncFeatureHandler.List)
-			syncFeatures.PUT("", r.syncFeatureHandler.Update)
+			syncFeatures.GET("", d.SyncFeature.List)
+			syncFeatures.PUT("", d.SyncFeature.Update)
 		}
 
 		contacts := api.Group("/contacts")
 		{
-			contacts.GET("/tree", r.contactHandler.GetDeptTree)
-			contacts.GET("/departments/:id/members", r.contactHandler.GetDeptMembers)
-			contacts.GET("", r.contactHandler.List)
-			contacts.GET("/departments", r.contactHandler.GetDepartments)
-			contacts.POST("/sync", r.contactHandler.Sync)
-			contacts.POST("/sync/incremental", r.contactHandler.SyncIncremental)
-			contacts.POST("/sync/cancel", r.contactHandler.Cancel)
-			contacts.GET("/sync/status", r.contactHandler.Status)
-			contacts.POST("/names", r.contactHandler.GetNames)
-			contacts.GET("/:userId", r.contactHandler.GetContact)
+			contacts.GET("/tree", d.Contact.GetDeptTree)
+			contacts.GET("/departments/:id/members", d.Contact.GetDeptMembers)
+			contacts.GET("", d.Contact.List)
+			contacts.GET("/departments", d.Contact.GetDepartments)
+			contacts.POST("/sync", d.Contact.Sync)
+			contacts.POST("/sync/incremental", d.Contact.SyncIncremental)
+			contacts.POST("/sync/cancel", d.Contact.Cancel)
+			contacts.GET("/sync/status", d.Contact.Status)
+			contacts.POST("/names", d.Contact.GetNames)
+			contacts.GET("/:userId", d.Contact.GetContact)
 		}
 
 		dashboard := api.Group("/dashboard")
 		{
-			dashboard.GET("/overview", r.dashboardHandler.GetOverview)
-			dashboard.GET("/inactive-users", r.dashboardHandler.GetInactiveUsers)
+			dashboard.GET("/overview", d.Dashboard.GetOverview)
+			dashboard.GET("/inactive-users", d.Dashboard.GetInactiveUsers)
+			dashboard.GET("/inactive-users/export", d.Dashboard.ExportInactiveUsers)
 		}
 
 		system := api.Group("/system")
 		{
-			system.GET("/status", r.systemHandler.GetStatus)
+			system.GET("/status", d.System.GetStatus)
 		}
 
 		tasks := api.Group("/tasks")
 		{
-			tasks.POST("", r.taskHandler.SubmitTask)
-			tasks.GET("", r.taskHandler.ListTasks)
-			tasks.GET("/:id", r.taskHandler.GetTask)
-			tasks.POST("/:id/cancel", r.taskHandler.CancelTask)
-			tasks.POST("/:id/retry", r.taskHandler.RetryTask)
+			tasks.POST("", d.Task.SubmitTask)
+			tasks.GET("", d.Task.ListTasks)
+			tasks.GET("/:id", d.Task.GetTask)
+			tasks.POST("/:id/cancel", d.Task.CancelTask)
+			tasks.POST("/:id/retry", d.Task.RetryTask)
 		}
 	}
 }

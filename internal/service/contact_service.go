@@ -1,15 +1,12 @@
 package service
 
 import (
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -28,17 +25,11 @@ type ContactService struct {
 }
 
 func NewContactService(cfg *config.WeWorkConfig) *ContactService {
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.InsecureSkipVerify},
-	}
 	return &ContactService{
 		baseURL:       cfg.BaseURL,
 		corpid:        cfg.CorpID,
 		contactSecret: cfg.ContactSecret,
-		client: &http.Client{
-			Transport: tr,
-			Timeout:   30 * time.Second,
-		},
+		client:        NewWeWorkHTTPClient(cfg),
 	}
 }
 
@@ -207,7 +198,7 @@ func (s *ContactService) FetchAllDetails(userIDs []string, concurrency int, canc
 
 				detail, rawJSON, err := s.GetUserDetail(uid)
 				if err != nil {
-					slog.Info(fmt.Sprintf("fetch detail failed for %s: %v", uid, err))
+					slog.Warn(fmt.Sprintf("fetch detail failed for %s: %v", uid, err))
 					resultsCh <- result{err: uid}
 					continue
 				}
@@ -257,50 +248,5 @@ func (s *ContactService) FetchAllDetails(userIDs []string, concurrency int, canc
 }
 
 func (s *ContactService) doRequest(method, path string, body interface{}, token ...string) ([]byte, error) {
-	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
-		if attempt > 0 {
-			time.Sleep(time.Duration(1<<(attempt-1)) * time.Second)
-		}
-
-		var reqBody io.Reader
-		if body != nil {
-			bodyBytes, _ := json.Marshal(body)
-			reqBody = strings.NewReader(string(bodyBytes))
-		}
-
-		req, err := http.NewRequest(method, s.baseURL+path, reqBody)
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if len(token) > 0 {
-			q := req.URL.Query()
-			q.Set("access_token", token[0])
-			req.URL.RawQuery = q.Encode()
-		}
-
-		resp, err := s.client.Do(req)
-		if err != nil {
-			lastErr = fmt.Errorf("http request failed: %w", err)
-			slog.Info(fmt.Sprintf("contact request attempt %d failed: %v", attempt+1, err))
-			continue
-		}
-
-		data, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			lastErr = fmt.Errorf("read response failed: %w", err)
-			continue
-		}
-
-		if resp.StatusCode >= 500 {
-			lastErr = fmt.Errorf("server error: HTTP %d", resp.StatusCode)
-			slog.Info(fmt.Sprintf("contact request attempt %d got HTTP %d", attempt+1, resp.StatusCode))
-			continue
-		}
-
-		return data, nil
-	}
-	return nil, lastErr
+	return doHTTPRequest(s.client, s.baseURL, method, path, body, token...)
 }

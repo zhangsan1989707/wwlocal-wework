@@ -2,6 +2,7 @@ services:
   mysql:
     image: mysql:8.0
     container_name: wework-mysql
+    restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:?请在 .env 文件中设置 DB_PASSWORD}
       MYSQL_DATABASE: wework_logs
@@ -16,10 +17,15 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1g
 
   redis:
     image: redis:7-alpine
     container_name: wework-redis
+    restart: unless-stopped
     ports:
       - "127.0.0.1:6380:6379"
     volumes:
@@ -29,10 +35,15 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256m
 
   backend:
     build: .
     container_name: wework-backend
+    restart: unless-stopped
     depends_on:
       mysql:
         condition: service_healthy
@@ -57,16 +68,27 @@ services:
       AUTH_PASSWORD: ${AUTH_PASSWORD:?请在 .env 文件中设置 AUTH_PASSWORD}
       JWT_SECRET: ${JWT_SECRET:?请在 .env 文件中设置 JWT_SECRET}
       KEY_ENCRYPT_KEY: ${KEY_ENCRYPT_KEY:-}
+      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
+      SCHEDULER_INTERVAL: ${SCHEDULER_INTERVAL:-1h}
     volumes:
       - ./keys:/app/keys
+    deploy:
+      resources:
+        limits:
+          memory: 512m
 
   frontend:
     build: ./web
     container_name: wework-frontend
+    restart: unless-stopped
     depends_on:
       - backend
     ports:
       - "5173:80"
+    deploy:
+      resources:
+        limits:
+          memory: 128m
 
 volumes:
   mysql_data:

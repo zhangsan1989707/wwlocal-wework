@@ -81,17 +81,17 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { syncFeatureAPI, adminOperLogAPI } from '../api'
+import type { ApiResponse, SyncFeature, AdminOperLogStats } from '../types/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const router = useRouter()
-const features = ref<any[]>([])
+const features = ref<SyncFeature[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const adminSyncLoading = ref(false)
-const adminOperLogStats = ref<any>({
+const adminOperLogStats = ref<AdminOperLogStats>({
   running: false,
   total: 0,
-  last_time: '',
 })
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -107,7 +107,7 @@ onUnmounted(() => {
 const loadFeatures = async () => {
   loading.value = true
   try {
-    const res: any = await syncFeatureAPI.list()
+    const res = await syncFeatureAPI.list() as unknown as ApiResponse<SyncFeature[]>
     if (res.code === 0) {
       features.value = res.data || []
     }
@@ -120,9 +120,9 @@ const loadFeatures = async () => {
 
 const loadAdminOperLogStats = async () => {
   try {
-    const res: any = await adminOperLogAPI.syncStatus()
-    if (res.code === 0) {
-      adminOperLogStats.value = res.data || { running: false, total: 0, last_time: '' }
+    const res = await adminOperLogAPI.syncStatus() as unknown as ApiResponse<{ running: boolean }>
+    if (res.code === 0 && res.data) {
+      adminOperLogStats.value.running = res.data.running
       if (adminOperLogStats.value.running) {
         startPolling()
       }
@@ -156,15 +156,14 @@ const handleSave = async () => {
       feature_id: f.feature_id,
       enabled: f.enabled,
     }))
-    const res: any = await syncFeatureAPI.update({ features: data })
+    const res = await syncFeatureAPI.update({ features: data }) as unknown as ApiResponse<{ message: string }>
     if (res.code === 0) {
       ElMessage.success('保存成功')
-      features.value = res.data || []
     } else {
       ElMessage.error(res.msg || '保存失败')
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '保存失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '保存失败')
   } finally {
     saving.value = false
   }
@@ -209,7 +208,7 @@ const handleSyncAdminOperLog = async () => {
 
   adminSyncLoading.value = true
   try {
-    const res: any = await adminOperLogAPI.sync({})
+    const res = await adminOperLogAPI.sync({}) as unknown as ApiResponse<{ synced: number; message: string }>
     if (res.code === 0) {
       ElMessage.success('同步任务已启动')
       adminOperLogStats.value.running = true
@@ -217,8 +216,8 @@ const handleSyncAdminOperLog = async () => {
     } else {
       ElMessage.error(res.msg || '同步启动失败')
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '同步启动失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '同步启动失败')
   } finally {
     adminSyncLoading.value = false
   }

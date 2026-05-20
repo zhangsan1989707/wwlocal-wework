@@ -9,14 +9,23 @@ import (
 )
 
 func (r *LogRepository) CreateUserDailyStatsTable() error {
-	return r.DB.Exec(`
+	if err := r.DB.Exec(`
 		CREATE TABLE IF NOT EXISTS user_daily_stats (
 			mobile VARCHAR(32) NOT NULL,
 			feature_id INT NOT NULL,
 			stat_date DATE NOT NULL,
 			PRIMARY KEY (mobile, feature_id, stat_date)
 		) ENGINE=InnoDB
-	`).Error
+	`).Error; err != nil {
+		return err
+	}
+	// 覆盖索引：加速按 feature_id + stat_date 过滤并分组 mobile 的查询
+	var count int64
+	r.DB.Raw("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'user_daily_stats' AND index_name = 'idx_feature_date_mobile'").Scan(&count)
+	if count == 0 {
+		return r.DB.Exec("CREATE INDEX idx_feature_date_mobile ON user_daily_stats (feature_id, stat_date, mobile)").Error
+	}
+	return nil
 }
 
 func (r *LogRepository) BatchUpsertDailyStats(featureID int, mobiles map[string]bool, logTime int64) {

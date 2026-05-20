@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -153,6 +154,44 @@ func (r *AdminOperLogRepository) ExistsByOperTimeAndUserID(operTime int64, operU
 	var count int64
 	err := r.DB.Model(&model.AdminOperLog{}).Where("oper_time = ? AND oper_userid = ?", operTime, operUserID).Count(&count).Error
 	return count > 0, err
+}
+
+// BatchExistByOperTimeAndUserIDs 批量检查 (oper_time, oper_userid) 对是否已存在。
+// 返回已存在的 (time,userid) 组合的集合。
+func (r *AdminOperLogRepository) BatchExistByOperTimeAndUserIDs(pairs []model.AdminOperLogAPI) (map[[2]string]bool, error) {
+	existing := make(map[[2]string]bool)
+	if len(pairs) == 0 {
+		return existing, nil
+	}
+
+	// 收集所有 oper_time
+	timeSet := make(map[int64]bool)
+	for _, p := range pairs {
+		timeSet[p.OperTime] = true
+	}
+	var times []int64
+	for t := range timeSet {
+		times = append(times, t)
+	}
+
+	// 用 IN 查询批量获取这些时间点的所有记录
+	type pair struct {
+		OperTime   int64
+		OperUserID string
+	}
+	var results []pair
+	err := r.DB.Model(&model.AdminOperLog{}).
+		Select("oper_time, oper_userid").
+		Where("oper_time IN ?", times).
+		Scan(&results).Error
+	if err != nil {
+		return nil, err
+	}
+
+	for _, r := range results {
+		existing[[2]string{fmt.Sprint(r.OperTime), r.OperUserID}] = true
+	}
+	return existing, nil
 }
 
 type AdminOperLogDailyStat struct {

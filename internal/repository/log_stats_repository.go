@@ -163,20 +163,8 @@ func (r *LogRepository) DropOldTables(featureID int, beforeMonth time.Time) ([]s
 	return droppedTables, nil
 }
 
-func (r *LogRepository) GetInactiveUsers(featureIDs []int, startTime int64, deptID int) ([]InactiveUser, error) {
-	deptFilter := ""
-	if deptID > 0 {
-		deptFilter = "AND EXISTS (SELECT 1 FROM contact_departments cd WHERE cd.user_id = c.user_id AND cd.department = ?)"
-	}
-
-	timeFilter := ""
-	var timeArgs []interface{}
-	if startTime > 0 {
-		startDate := time.Unix(startTime, 0).Format("2006-01-02")
-		timeFilter = "AND uds.stat_date >= ?"
-		timeArgs = append(timeArgs, startDate)
-	}
-
+// GetInactiveUserCount 返回未使用人数（active_days==0），用于 Overview KPI
+func (r *LogRepository) GetInactiveUserCount(featureIDs []int, startTime int64) (int, error) {
 	fidPlaceholders := make([]string, len(featureIDs))
 	fidArgs := make([]interface{}, len(featureIDs))
 	for i, fid := range featureIDs {
@@ -184,34 +172,32 @@ func (r *LogRepository) GetInactiveUsers(featureIDs []int, startTime int64, dept
 		fidArgs[i] = fid
 	}
 
+	startDate := time.Unix(startTime, 0).Format("2006-01-02")
+
 	sql := fmt.Sprintf(`
-		SELECT c.name, c.mobile, c.position, c.department, c.user_id,
-		       0 AS active_days, 0 AS inactive_days
+		SELECT COUNT(*)
 		FROM contacts c
 		LEFT JOIN (
 			SELECT mobile
 			FROM user_daily_stats
-			WHERE feature_id IN (%s) %s
+			WHERE feature_id IN (%s) AND stat_date >= ?
 			GROUP BY mobile
-		) uds ON uds.mobile = c.mobile
-		WHERE uds.mobile IS NULL AND c.status = 1 %s
-	`, strings.Join(fidPlaceholders, ","), timeFilter, deptFilter)
+		) stats ON stats.mobile = c.mobile
+		WHERE stats.mobile IS NULL AND c.status = 1
+	`, strings.Join(fidPlaceholders, ","))
 
-	var args []interface{}
+	args := make([]interface{}, 0, len(fidArgs)+1)
 	args = append(args, fidArgs...)
-	args = append(args, timeArgs...)
-	if deptID > 0 {
-		args = append(args, deptID)
-	}
+	args = append(args, startDate)
 
-	var users []InactiveUser
-	if err := r.DB.Raw(sql, args...).Scan(&users).Error; err != nil {
-		return nil, err
+	var count int64
+	if err := r.DB.Raw(sql, args...).Scan(&count).Error; err != nil {
+		return 0, err
 	}
-	return users, nil
+	return int(count), nil
 }
 
-func (r *LogRepository) GetUsersWithDayStats(featureIDs []int, startTime int64, deptID int, totalDays int, minInactiveDays int) ([]InactiveUser, error) {
+func (r *LogRepository) GetUsersWithDayStats(featureIDs []int, startTime int64, deptID int, totalDays int, minInactiveDays int, limit, offset int) ([]InactiveUser, int64, error) {
 	deptFilter := ""
 	if deptID > 0 {
 		deptFilter = "AND EXISTS (SELECT 1 FROM contact_departments cd WHERE cd.user_id = c.user_id AND cd.department = ?)"
@@ -232,10 +218,7 @@ func (r *LogRepository) GetUsersWithDayStats(featureIDs []int, startTime int64, 
 		timeArgs = append(timeArgs, startDate)
 	}
 
-	sql := fmt.Sprintf(`
-		SELECT c.name, c.mobile, c.position, c.department, c.user_id,
-		       COALESCE(stats.active_days, 0) AS active_days,
-		       %d - COALESCE(stats.active_days, 0) AS inactive_days
+	baseQuery := fmt.Sprintf(`
 		FROM contacts c
 		LEFT JOIN (
 			SELECT mobile, COUNT(DISTINCT stat_date) AS active_days
@@ -243,9 +226,10 @@ func (r *LogRepository) GetUsersWithDayStats(featureIDs []int, startTime int64, 
 			WHERE feature_id IN (%s) %s
 			GROUP BY mobile
 		) stats ON stats.mobile = c.mobile
-		WHERE 1=1 %s
-	`, totalDays, strings.Join(fidPlaceholders, ","), timeFilter, deptFilter)
+		WHERE c.status = 1 %s
+	`, strings.Join(fidPlaceholders, ","), timeFilter, deptFilter)
 
+	// 先查 total
 	var args []interface{}
 	args = append(args, fidArgs...)
 	args = append(args, timeArgs...)
@@ -253,14 +237,73 @@ func (r *LogRepository) GetUsersWithDayStats(featureIDs []int, startTime int64, 
 		args = append(args, deptID)
 	}
 
-	if minInactiveDays > 0 {
-		sql += fmt.Sprintf(" HAVING inactive_days >= %d", minInactiveDays)
+	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM (SELECT %d - COALESCE(stats.active_days, 0) AS inactive_days %s HAVING inactive_days >= ?) t", totalDays, baseQuery)
+	countArgs := append([]interface{}{}, args...)
+	countArgs = append(countArgs, minInactiveDays)
+
+	var total int64
+	if err := r.DB.Raw(countSQL, countArgs...).Scan(&total).Error; err != nil {
+		return nil, 0, err
 	}
-	sql += " ORDER BY inactive_days DESC, c.name ASC"
+
+	// 再查分页数据
+	selectSQL := fmt.Sprintf(`
+		SELECT c.name, c.mobile, c.position, c.department, c.user_id,
+		       COALESCE(stats.active_days, 0) AS active_days,
+		       %d - COALESCE(stats.active_days, 0) AS inactive_days
+	`, totalDays) + baseQuery
+
+	dataArgs := append([]interface{}{}, args...)
+	dataArgs = append(dataArgs, minInactiveDays)
+	selectSQL += " HAVING inactive_days >= ? ORDER BY inactive_days DESC, c.name ASC LIMIT ? OFFSET ?"
+	dataArgs = append(dataArgs, limit, offset)
 
 	var users []InactiveUser
-	if err := r.DB.Raw(sql, args...).Scan(&users).Error; err != nil {
+	if err := r.DB.Raw(selectSQL, dataArgs...).Scan(&users).Error; err != nil {
+		return nil, 0, err
+	}
+	return users, total, nil
+}
+
+// GetDeptInactiveStats 按部门统计未使用人数（SQL 侧聚合，替代 Go 遍历）
+func (r *LogRepository) GetDeptInactiveStats(featureIDs []int, startTime int64, totalDays int, minInactiveDays int) (map[int]int, error) {
+	fidPlaceholders := make([]string, len(featureIDs))
+	fidArgs := make([]interface{}, len(featureIDs))
+	for i, fid := range featureIDs {
+		fidPlaceholders[i] = "?"
+		fidArgs[i] = fid
+	}
+
+	startDate := time.Unix(startTime, 0).Format("2006-01-02")
+
+	sql := fmt.Sprintf(`
+		SELECT cd.department AS dept_id, COUNT(*) AS cnt
+		FROM contacts c
+		INNER JOIN contact_departments cd ON cd.user_id = c.user_id
+		LEFT JOIN (
+			SELECT mobile, COUNT(DISTINCT stat_date) AS active_days
+			FROM user_daily_stats
+			WHERE feature_id IN (%s) AND stat_date >= ?
+			GROUP BY mobile
+		) stats ON stats.mobile = c.mobile
+		WHERE c.status = 1 AND (%d - COALESCE(stats.active_days, 0)) >= ?
+		GROUP BY cd.department
+	`, strings.Join(fidPlaceholders, ","), totalDays)
+
+	args := make([]interface{}, 0, len(fidArgs)+2)
+	args = append(args, fidArgs...)
+	args = append(args, startDate, minInactiveDays)
+
+	var rows []struct {
+		DeptID int
+		Cnt    int
+	}
+	if err := r.DB.Raw(sql, args...).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
-	return users, nil
+	result := make(map[int]int, len(rows))
+	for _, row := range rows {
+		result[row.DeptID] = row.Cnt
+	}
+	return result, nil
 }

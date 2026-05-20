@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
@@ -71,7 +72,7 @@ func (s *SyncService) SyncFeature(featureID int, startTime, endTime int64) (int,
 		if di%5 == 0 {
 			slog.Info(fmt.Sprintf("SyncFeature: feature=%d, day %d/%d (ts=%d)", featureID, di+1, len(days), day.start))
 		}
-		fetched, failed, dayMax, err := s.syncFeatureDay(featureID, day.start, day.end, limit)
+		fetched, failed, dayMax, err := s.syncFeatureDay(nil, featureID, day.start, day.end, limit)
 		totalFetched += fetched
 		totalFailed += failed
 		if dayMax > maxLogTime {
@@ -112,7 +113,7 @@ func (s *SyncService) splitByDay(startTime, endTime int64) []dayRange {
 	return days
 }
 
-func (s *SyncService) syncFeatureDay(featureID int, startTime, endTime int64, limit int) (int, int, int64, error) {
+func (s *SyncService) syncFeatureDay(tx *gorm.DB, featureID int, startTime, endTime int64, limit int) (int, int, int64, error) {
 	totalFetched := 0
 	totalFailed := 0
 	var maxLogTime int64
@@ -153,26 +154,42 @@ func (s *SyncService) syncFeatureDay(featureID int, startTime, endTime int64, li
 			entries = append(entries, *entry)
 		}
 
-		// 当前页全部解密失败，密钥不匹配，跳过该 feature
 		if pageFailed == len(logItems) {
-			slog.Info(fmt.Sprintf("feature %d: all %d items failed to decrypt (likely missing key), skipping", featureID, len(logItems)))
+			slog.Warn(fmt.Sprintf("feature %d: all %d items failed to decrypt (likely missing key), skipping", featureID, len(logItems)))
 			break
 		}
 
 		if len(entries) > 0 {
-			if err := s.logRepo.BatchSave(featureID, entries); err != nil {
-				slog.Info(fmt.Sprintf("batch save failed for feature %d: %v", featureID, err))
-				totalFailed += len(entries)
+			if tx != nil {
+				// 事务模式：使用事务写入，失败则回滚当天
+				ms, count, err := s.logRepo.BatchSaveWithTx(tx, featureID, entries)
+				if err != nil {
+					slog.Error(fmt.Sprintf("batch save failed for feature %d: %v", featureID, err))
+					totalFailed += len(entries)
+					return totalFetched, totalFailed, maxLogTime, err
+				}
+				totalFetched += count
+				if len(ms) > 0 {
+					if err := s.logRepo.BatchUpsertDailyStatsWithTx(tx, featureID, ms, startTime); err != nil {
+						slog.Error(fmt.Sprintf("upsert daily stats failed for feature %d: %v", featureID, err))
+						return totalFetched, totalFailed, maxLogTime, err
+					}
+				}
 			} else {
-				totalFetched += len(entries)
-				// 提取已保存条目中的手机号，用于日活跃汇总
-				for _, e := range entries {
-					if e.ParsedJSON != "" {
-						var parsed map[string]interface{}
-						if json.Unmarshal([]byte(e.ParsedJSON), &parsed) == nil {
-							if lu, ok := parsed["login_user"].(map[string]interface{}); ok {
-								if openid, ok := lu["openid"].(string); ok && openid != "" {
-									savedMobiles[openid] = true
+				// 非事务模式：直接写入，失败仅计数
+				if err := s.logRepo.BatchSave(featureID, entries); err != nil {
+					slog.Error(fmt.Sprintf("batch save failed for feature %d: %v", featureID, err))
+					totalFailed += len(entries)
+				} else {
+					totalFetched += len(entries)
+					for _, e := range entries {
+						if e.ParsedJSON != "" {
+							var parsed map[string]interface{}
+							if json.Unmarshal([]byte(e.ParsedJSON), &parsed) == nil {
+								if lu, ok := parsed["login_user"].(map[string]interface{}); ok {
+									if openid, ok := lu["openid"].(string); ok && openid != "" {
+										savedMobiles[openid] = true
+									}
 								}
 							}
 						}
@@ -188,82 +205,9 @@ func (s *SyncService) syncFeatureDay(featureID int, startTime, endTime int64, li
 		startIndex += len(logItems)
 	}
 
-	// 写入日活跃汇总表
-	if len(savedMobiles) > 0 {
+	// 非事务模式：最后统一写入日活跃汇总
+	if tx == nil && len(savedMobiles) > 0 {
 		s.logRepo.BatchUpsertDailyStats(featureID, savedMobiles, startTime)
-	}
-
-	return totalFetched, totalFailed, maxLogTime, nil
-}
-
-func (s *SyncService) syncFeatureDayWithTx(tx *gorm.DB, featureID int, startTime, endTime int64, limit int) (int, int, int64, error) {
-	totalFetched := 0
-	totalFailed := 0
-	var maxLogTime int64
-	startIndex := 0
-
-	for {
-		if s.isCancelled() {
-			return totalFetched, totalFailed, maxLogTime, nil
-		}
-		logItems, err := s.weworkSvc.GetLogList(featureID, startTime, endTime, startIndex, limit)
-		if err != nil {
-			return totalFetched, totalFailed, maxLogTime, fmt.Errorf("fetch log list failed: %w", err)
-		}
-
-		if len(logItems) == 0 {
-			break
-		}
-
-		var entries []model.LogEntry
-		pageFailed := 0
-		for _, item := range logItems {
-			if item.LogTime > maxLogTime {
-				maxLogTime = item.LogTime
-			}
-			entry, err := s.decryptSvc.DecryptWithKey(&model.WeWorkLogItem{
-				FeatureID: item.FeatureID,
-				LogTime:   item.LogTime,
-				IDC:       item.IDC,
-				EncKey:    item.EncKey,
-				EncData:   item.EncData,
-			}, "")
-			if err != nil {
-				pageFailed++
-				totalFailed++
-				continue
-			}
-			entries = append(entries, *entry)
-		}
-
-		// 当前页全部解密失败，密钥不匹配，跳过该 feature
-		if pageFailed == len(logItems) {
-			slog.Info(fmt.Sprintf("feature %d: all %d items failed to decrypt (likely missing key), skipping", featureID, len(logItems)))
-			break
-		}
-
-		if len(entries) > 0 {
-			savedMobiles, savedCount, err := s.logRepo.BatchSaveWithTx(tx, featureID, entries)
-			if err != nil {
-				slog.Info(fmt.Sprintf("batch save failed for feature %d: %v", featureID, err))
-				totalFailed += len(entries)
-				return totalFetched, totalFailed, maxLogTime, err
-			} else {
-				totalFetched += savedCount
-				if len(savedMobiles) > 0 {
-					if err := s.logRepo.BatchUpsertDailyStatsWithTx(tx, featureID, savedMobiles, startTime); err != nil {
-						slog.Info(fmt.Sprintf("upsert daily stats failed for feature %d: %v", featureID, err))
-						return totalFetched, totalFailed, maxLogTime, err
-					}
-				}
-			}
-		}
-
-		if len(logItems) < limit {
-			break
-		}
-
-		startIndex += len(logItems)
 	}
 
 	return totalFetched, totalFailed, maxLogTime, nil
@@ -318,15 +262,15 @@ func (s *SyncService) SyncFeatureIncremental(featureID int) (int, int, error) {
 		// 启动事务
 		tx := s.syncStateRepo.DB.Begin()
 		if tx.Error != nil {
-			slog.Info(fmt.Sprintf("SyncFeatureIncremental: failed to begin transaction for feature %d: %v", featureID, tx.Error))
+			slog.Error(fmt.Sprintf("SyncFeatureIncremental: failed to begin transaction for feature %d: %v", featureID, tx.Error))
 			continue
 		}
 
 		// 同步当天数据
-		fetched, failed, dayMax, err := s.syncFeatureDayWithTx(tx, featureID, day.start, day.end, limit)
+		fetched, failed, dayMax, err := s.syncFeatureDay(tx, featureID, day.start, day.end, limit)
 		if err != nil {
 			tx.Rollback()
-			slog.Info(fmt.Sprintf("SyncFeatureIncremental: failed to sync day for feature %d: %v", featureID, err))
+			slog.Error(fmt.Sprintf("SyncFeatureIncremental: failed to sync day for feature %d: %v", featureID, err))
 			totalFailed += failed
 			continue
 		}
@@ -336,14 +280,14 @@ func (s *SyncService) SyncFeatureIncremental(featureID int) (int, int, error) {
 			maxLogTime = dayMax
 			if updateErr := s.syncStateRepo.UpdateStateWithTx(tx, featureID, maxLogTime, fetched); updateErr != nil {
 				tx.Rollback()
-				slog.Info(fmt.Sprintf("SyncFeatureIncremental: UpdateState failed for feature %d: %v", featureID, updateErr))
+				slog.Error(fmt.Sprintf("SyncFeatureIncremental: UpdateState failed for feature %d: %v", featureID, updateErr))
 				continue
 			}
 		}
 
 		// 提交事务
 		if commitErr := tx.Commit().Error; commitErr != nil {
-			slog.Info(fmt.Sprintf("SyncFeatureIncremental: commit failed for feature %d: %v", featureID, commitErr))
+			slog.Error(fmt.Sprintf("SyncFeatureIncremental: commit failed for feature %d: %v", featureID, commitErr))
 			continue
 		}
 
@@ -379,7 +323,6 @@ func (s *SyncService) syncFeaturesIncremental(featureIDs []int) map[int]int {
 
 	defer func() {
 		s.mu.Lock()
-		s.status.Running = false
 		s.status.LastSync = time.Now()
 		errCount := len(s.status.Errors)
 		s.mu.Unlock()
@@ -420,7 +363,7 @@ func (s *SyncService) syncFeaturesIncremental(featureIDs []int) map[int]int {
 			fidStr := strconv.Itoa(fid)
 
 			if err != nil {
-				slog.Info(fmt.Sprintf("incremental sync feature %d failed: %v", fid, err))
+				slog.Error(fmt.Sprintf("incremental sync feature %d failed: %v", fid, err))
 				metrics.RecordSyncOperation(fidStr, "failure", time.Since(featureStart), 0)
 				s.mu.Lock()
 				s.status.Errors[fid] = err.Error()
@@ -472,7 +415,6 @@ func (s *SyncService) syncFeatures(featureIDs []int, startTime, endTime int64) m
 	syncStart := time.Now()
 	defer func() {
 		s.mu.Lock()
-		s.status.Running = false
 		s.status.LastSync = time.Now()
 		s.mu.Unlock()
 		s.saveSyncHistory("log", "manual", syncStart)
@@ -505,7 +447,7 @@ func (s *SyncService) syncFeatures(featureIDs []int, startTime, endTime int64) m
 			fidStr := strconv.Itoa(fid)
 
 			if err != nil {
-				slog.Info(fmt.Sprintf("sync feature %d failed: %v", fid, err))
+				slog.Error(fmt.Sprintf("sync feature %d failed: %v", fid, err))
 				metrics.RecordSyncOperation(fidStr, "failure", time.Since(featureStart), 0)
 				s.mu.Lock()
 				s.status.Errors[fid] = err.Error()
@@ -514,7 +456,7 @@ func (s *SyncService) syncFeatures(featureIDs []int, startTime, endTime int64) m
 				metrics.RecordSyncOperation(fidStr, "success", time.Since(featureStart), count)
 				if maxLogTime > 0 {
 					if updateErr := s.syncStateRepo.UpdateState(fid, maxLogTime, count); updateErr != nil {
-						slog.Info(fmt.Sprintf("sync feature %d: UpdateState failed: %v", fid, updateErr))
+						slog.Error(fmt.Sprintf("sync feature %d: UpdateState failed: %v", fid, updateErr))
 					}
 				}
 			}
@@ -596,6 +538,22 @@ func (s *SyncService) ResetRunning() {
 	s.status.Running = false
 }
 
+// StartSync 在后台 goroutine 中启动同步，自动处理 TryStartRunning、panic 恢复和 ResetRunning。
+func (s *SyncService) StartSync(fn func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error(fmt.Sprintf("sync goroutine panic: %v\n%s", r, debug.Stack()))
+			}
+			s.ResetRunning()
+		}()
+		if !s.TryStartRunning() {
+			return
+		}
+		fn()
+	}()
+}
+
 func (s *SyncService) GetStatus() *SyncStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -665,7 +623,7 @@ func (s *SyncService) saveSyncHistory(syncType, trigger string, startTime time.T
 		Details:    string(detailsJSON),
 	}
 	if err := s.syncHistoryRepo.Create(history); err != nil {
-		slog.Info(fmt.Sprintf("save sync history failed: %v", err))
+		slog.Error(fmt.Sprintf("save sync history failed: %v", err))
 	}
 }
 
@@ -673,7 +631,7 @@ func (s *SyncService) saveSyncHistory(syncType, trigger string, startTime time.T
 func (s *SyncService) VerifySyncState() {
 	states, err := s.syncStateRepo.GetAll()
 	if err != nil {
-		slog.Info(fmt.Sprintf("verify sync state: failed to get states: %v", err))
+		slog.Error(fmt.Sprintf("verify sync state: failed to get states: %v", err))
 		return
 	}
 
@@ -683,7 +641,7 @@ func (s *SyncService) VerifySyncState() {
 			slog.Info(fmt.Sprintf("verify sync state: feature %d last_log_time corrected from %d to %d",
 				state.FeatureID, state.LastLogTime, actualMax))
 			if updateErr := s.syncStateRepo.UpdateState(state.FeatureID, actualMax, 0); updateErr != nil {
-				slog.Info(fmt.Sprintf("verify sync state: UpdateState failed for feature %d: %v", state.FeatureID, updateErr))
+				slog.Error(fmt.Sprintf("verify sync state: UpdateState failed for feature %d: %v", state.FeatureID, updateErr))
 			}
 		} else if actualMax < state.LastLogTime && actualMax > 0 {
 			slog.Info(fmt.Sprintf("verify sync state: feature %d last_log_time %d ahead of actual max %d (state is fine, data may have been purged)",

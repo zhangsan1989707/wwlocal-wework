@@ -1,10 +1,6 @@
 package handler
 
 import (
-	"fmt"
-	"log/slog"
-	"runtime/debug"
-
 	"wwlocal-wework/internal/service"
 	"wwlocal-wework/pkg/response"
 
@@ -36,22 +32,13 @@ func (h *SyncHandler) Sync(c echo.Context) error {
 		return response.Error(c, 409, "sync already in progress")
 	}
 
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				slog.Info(fmt.Sprintf("sync goroutine panic: %v\n%s", r, debug.Stack()))
-			}
-			h.syncSvc.ResetRunning()
-		}()
-		if !h.syncSvc.TryStartRunning() {
-			return
-		}
+	h.syncSvc.StartSync(func() {
 		if req.SyncAll {
 			h.syncSvc.SyncAllFeatures(req.StartTime, req.EndTime)
 		} else if len(req.FeatureIDs) > 0 {
 			h.syncSvc.SyncMultipleFeatures(req.FeatureIDs, req.StartTime, req.EndTime)
 		}
-	}()
+	})
 
 	return response.Success(c, map[string]interface{}{
 		"message": "sync started",

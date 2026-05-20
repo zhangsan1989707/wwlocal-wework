@@ -25,7 +25,7 @@ export interface LogQueryParams {
   start_time: number
   end_time: number
   mobile?: string
-  conditions?: QueryCondition[]
+  conditions?: Record<string, { value: string; operator: string }> | null
   page?: number
   page_size?: number
   realtime?: boolean
@@ -134,11 +134,14 @@ export interface DeptMember {
 
 export interface ContactSyncStatus {
   running: boolean
+  phase?: string
   progress: number
   total: number
   synced: number
   failed: number
   started_at?: string
+  last_sync?: string
+  error_msg?: string
 }
 
 export interface KeyVersion {
@@ -165,13 +168,15 @@ export interface SyncHistory {
   feature_id: number
   feature_name: string
   sync_type: string
+  trigger: string
   start_time: string
   end_time: string
   status: string
   total: number
-  synced: number
+  succeeded: number
   failed: number
-  duration: number
+  duration_ms: number
+  error_msg?: string
   created_at: string
 }
 
@@ -223,26 +228,35 @@ export interface AdminOperLogStats {
 }
 
 export interface DashboardOverview {
-  kpi: {
+  kpis: {
     latest_sync_time?: string
     recent_sync_count: number
-    failed_types_count: number
-    active_keys_count: number
-    contacts_count: number
-    inactive_percentage: number
+    synced_7d_count: number
+    failed_feature_count: number
+    active_key_version?: string
+    active_key_days: number
+    key_count: number
+    contact_count: number
+    contact_last_sync?: string
+    inactive_rate: number
+    inactive_count: number
   }
   recent_syncs: Array<{
     feature_id: number
     feature_name: string
-    synced: number
+    succeeded: number
     failed: number
-    duration: number
-    created_at: string
+    duration_ms: number
+    start_time: string
+    sync_type: string
+    trigger: string
+    error?: string
   }>
-  alerts: Array<{
+  problems: Array<{
     type: string
     level: 'critical' | 'warning' | 'info'
     message: string
+    action?: string
   }>
 }
 
@@ -252,7 +266,21 @@ export interface InactiveUser {
   position?: string
   department?: string
   user_id: string
+  active_days: number
   inactive_days: number
+}
+
+export interface InactiveUsersResponse {
+  total_contacts: number
+  inactive_count: number
+  inactive_users: InactiveUser[]
+  feature_names: Record<number, string>
+  dept_stats: Array<{ id: number; name: string; total: number; active: number; inactive: number }>
+  range: string
+  total_days: number
+  min_inactive_days: number
+  page: number
+  page_size: number
 }
 
 export interface SystemStatus {

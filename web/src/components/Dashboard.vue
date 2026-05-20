@@ -11,9 +11,9 @@
 
       <div class="kpi-grid" v-if="overview">
         <div class="kpi-card">
-          <div class="kpi-value">{{ formatRelativeTime(overview.kpis.latest_sync_time) }}</div>
+          <div class="kpi-value">{{ formatRelativeTime(overview.kpis.latest_sync_time || '') }}</div>
           <div class="kpi-label">最新同步时间</div>
-          <div class="kpi-sub">{{ formatTime(overview.kpis.latest_sync_time) }}</div>
+          <div class="kpi-sub">{{ formatTime(overview.kpis.latest_sync_time || '') }}</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-value">{{ formatNumber(overview.kpis.synced_7d_count) }}</div>
@@ -33,7 +33,7 @@
         <div class="kpi-card">
           <div class="kpi-value">{{ formatNumber(overview.kpis.contact_count) }}</div>
           <div class="kpi-label">通讯录人数</div>
-          <div class="kpi-sub">上次同步 {{ formatRelativeTime(overview.kpis.contact_last_sync) }}</div>
+          <div class="kpi-sub">上次同步 {{ formatRelativeTime(overview.kpis.contact_last_sync || '') }}</div>
         </div>
         <div class="kpi-card" :class="{ 'kpi-danger': overview.kpis.inactive_rate > 50 }">
           <div class="kpi-value">{{ overview.kpis.inactive_rate?.toFixed(1) }}%</div>
@@ -88,15 +88,15 @@
           <template #header>
             <span class="card-title">需要处理</span>
           </template>
-          <div v-if="overview?.problems?.length > 0" class="problem-list">
+          <div v-if="overview?.problems && overview.problems.length > 0" class="problem-list">
             <div
-              v-for="(p, i) in overview.problems"
+              v-for="(p, i) in overview?.problems"
               :key="i"
               class="problem-item"
               @click="handleProblemClick(p)"
             >
-              <el-tag :type="p.level === 'error' ? 'danger' : 'warning'" size="small" class="problem-tag">
-                {{ p.level === 'error' ? '异常' : '提醒' }}
+              <el-tag :type="p.level === 'critical' ? 'danger' : 'warning'" size="small" class="problem-tag">
+                {{ p.level === 'critical' ? '异常' : '提醒' }}
               </el-tag>
               <span class="problem-text">{{ p.message }}</span>
             </div>
@@ -176,7 +176,7 @@
       </div>
 
       <div v-if="!loading && data" style="margin-top: 12px; color: #909399; font-size: 13px;">
-        统计范围：{{ data.months?.join('、') }}，共{{ totalDays }}天，
+        统计范围：共{{ totalDays }}天，
         统计指标：{{ featureLabel }}，
         筛选条件：未使用天数 ≥ {{ minInactiveDays }}天
       </div>
@@ -218,7 +218,7 @@
         </div>
       </template>
 
-      <el-table :data="pagedData" stripe v-loading="loading" style="width: 100%" @row-click="handleUserClick" highlight-current-row>
+      <el-table :data="data?.inactive_users || []" stripe v-loading="loading" style="width: 100%" @row-click="handleUserClick" highlight-current-row>
         <el-table-column prop="name" label="姓名" width="100" />
         <el-table-column prop="mobile" label="手机号" width="140" />
         <el-table-column prop="position" label="职位" />
@@ -237,12 +237,13 @@
       </el-table>
 
       <el-pagination
-        v-if="data?.inactive_users?.length > pageSize"
+        v-if="(data?.inactive_count || 0) > pageSize"
         style="margin-top: 16px; justify-content: center;"
-        layout="prev, pager, next"
-        :total="data.inactive_users.length"
+        layout="total, prev, pager, next"
+        :total="data?.inactive_count || 0"
         :page-size="pageSize"
         v-model:current-page="currentPage"
+        @current-change="onPageChange"
       />
     </el-card>
   </div>
@@ -252,6 +253,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { dashboardAPI, contactAPI } from '../api'
+import type { DashboardOverview, InactiveUsersResponse, Department } from '../types/api'
 import { ElMessage } from 'element-plus'
 
 const router = useRouter()
@@ -260,19 +262,19 @@ const isMounted = { value: true }
 onUnmounted(() => { isMounted.value = false })
 
 // 总览看板
-const overview = ref<any>(null)
+const overview = ref<DashboardOverview | null>(null)
 const overviewLoading = ref(false)
 
 // 使用分析
 const loading = ref(false)
-const data = ref<any>(null)
+const data = ref<InactiveUsersResponse | null>(null)
 const expandedKeys = ref<number[]>([])
 const currentPage = ref(1)
 const pageSize = 20
-const rangeVal = ref('quarter')
+const rangeVal = ref('week')
 const deptVal = ref<number | undefined>(undefined)
-const minDays = ref(90)
-const deptTree = ref<any[]>([])
+const minDays = ref(1)
+const deptTree = ref<Department[]>([])
 const totalDays = ref(90)
 
 const maxDays = computed(() => totalDays.value)
@@ -289,19 +291,13 @@ const featureLabel = computed(() => {
 
 const minInactiveDays = computed(() => data.value?.min_inactive_days || minDays.value)
 
-const pagedData = computed(() => {
-  if (!data.value?.inactive_users) return []
-  const start = (currentPage.value - 1) * pageSize
-  return data.value.inactive_users.slice(start, start + pageSize)
-})
-
 const loadOverview = async () => {
   overviewLoading.value = true
   try {
-    const res: any = await dashboardAPI.getOverview()
+    const res = await dashboardAPI.getOverview()
     if (!isMounted.value) return
     if (res.code === 0) {
-      overview.value = res.data
+      overview.value = res.data ?? null
     }
   } catch (err) {
     console.error(err)
@@ -312,33 +308,38 @@ const loadOverview = async () => {
 
 const loadDeptTree = async () => {
   try {
-    const res: any = await contactAPI.getDeptTree()
+    const res = await contactAPI.getDeptTree()
     if (!isMounted.value) return
     if (res.code === 0) {
-      deptTree.value = res.data?.tree || []
-      expandedKeys.value = deptTree.value.map((n: any) => n.id)
+      deptTree.value = res.data || []
+      expandedKeys.value = deptTree.value.map((n: Department) => n.id)
     }
-  } catch (err: any) {
-    if (isMounted.value) ElMessage.error(err.response?.data?.msg || '加载部门树失败')
+  } catch (err: unknown) {
+    if (isMounted.value) ElMessage.error(err instanceof Error ? err.message : '加载部门树失败')
   }
 }
 
 const fetchData = async () => {
   loading.value = true
   try {
-    const params: any = { range: rangeVal.value, min_inactive_days: minDays.value }
+    const params: { range: string; min_inactive_days: number; dept_id?: number; page: number; page_size: number } = {
+      range: rangeVal.value,
+      min_inactive_days: minDays.value,
+      page: currentPage.value,
+      page_size: pageSize,
+    }
     if (deptVal.value) params.dept_id = deptVal.value
-    const res: any = await dashboardAPI.getInactiveUsers(params)
+    const res = await dashboardAPI.getInactiveUsers(params)
     if (!isMounted.value) return
-    if (res.code === 0) {
+    if (res.code === 0 && res.data) {
       data.value = res.data
       totalDays.value = res.data.total_days || totalDays.value
       if (minDays.value > totalDays.value) {
         minDays.value = totalDays.value
       }
     }
-  } catch (err: any) {
-    if (isMounted.value) ElMessage.error(err.response?.data?.msg || '加载使用分析失败')
+  } catch (err: unknown) {
+    if (isMounted.value) ElMessage.error(err instanceof Error ? err.message : '加载使用分析失败')
   } finally {
     if (isMounted.value) loading.value = false
   }
@@ -346,42 +347,33 @@ const fetchData = async () => {
 
 const onFilterChange = () => {
   currentPage.value = 1
+  minDays.value = 1
   fetchData()
 }
 
-const handleProblemClick = (problem: any) => {
+const onPageChange = () => {
+  fetchData()
+}
+
+const handleProblemClick = (problem: { action?: string }) => {
   if (problem.action) {
     router.push('/' + problem.action)
   }
 }
 
-const handleUserClick = (row: any) => {
+const handleUserClick = (row: { mobile?: string }) => {
   if (row.mobile) {
     router.push({ path: '/query', query: { mobile: row.mobile } })
   }
 }
 
-const csvEscape = (val: any) => {
-  const s = String(val ?? '')
-  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
-    return '"' + s.replace(/"/g, '""') + '"'
-  }
-  return s
-}
-
 const exportCSV = () => {
-  if (!data.value?.inactive_users?.length) return
-  const header = '姓名,手机号,职位,所属部门,活跃天数,未使用天数,UserID\n'
-  const rows = data.value.inactive_users.map((u: any) =>
-    [u.name, u.mobile, u.position, u.department, u.active_days, u.inactive_days, u.user_id].map(csvEscape).join(',')
-  ).join('\n')
-  const blob = new Blob(['﻿' + header + rows], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = '未使用人员.csv'
-  a.click()
-  URL.revokeObjectURL(url)
+  const url = dashboardAPI.exportInactiveUsersURL({
+    range: rangeVal.value,
+    dept_id: deptVal.value,
+    min_inactive_days: minDays.value,
+  })
+  window.open(url, '_blank')
 }
 
 const formatTime = (timeStr: string) => {

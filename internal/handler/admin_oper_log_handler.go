@@ -17,15 +17,6 @@ func NewAdminOperLogHandler(svc *service.AdminOperLogService) *AdminOperLogHandl
 	return &AdminOperLogHandler{svc: svc}
 }
 
-type ListAdminOperLogsRequest struct {
-	OperType   string `json:"oper_type"`
-	OperUserID string `json:"oper_userid"`
-	StartTime  int64  `json:"start_time"`
-	EndTime    int64  `json:"end_time"`
-	Page       int    `json:"page"`
-	PageSize   int    `json:"page_size"`
-}
-
 func (h *AdminOperLogHandler) List(c echo.Context) error {
 	page, _ := strconv.Atoi(c.QueryParam("page"))
 	pageSize, _ := strconv.Atoi(c.QueryParam("page_size"))
@@ -43,7 +34,7 @@ func (h *AdminOperLogHandler) List(c echo.Context) error {
 
 	logs, total, err := h.svc.Query(operType, operUserID, startTime, endTime, page, pageSize)
 	if err != nil {
-		return response.Error(c, 500, "query admin oper logs failed: "+err.Error())
+		return response.Error(c, 500, "查询操作日志失败")
 	}
 
 	return response.Success(c, map[string]interface{}{
@@ -78,7 +69,7 @@ func (h *AdminOperLogHandler) Sync(c echo.Context) error {
 		count, err = h.svc.SyncIncremental()
 	}
 	if err != nil {
-		return response.Error(c, 500, "sync failed: "+err.Error())
+		return response.Error(c, 500, "同步失败")
 	}
 
 	return response.Success(c, map[string]interface{}{
@@ -122,7 +113,7 @@ func (h *AdminOperLogHandler) GetStats(c echo.Context) error {
 
 	stats, err := h.svc.GetStats(startTime, endTime)
 	if err != nil {
-		return response.Error(c, 500, "get stats failed: "+err.Error())
+		return response.Error(c, 500, "获取统计数据失败")
 	}
 
 	return response.Success(c, stats)
@@ -131,7 +122,7 @@ func (h *AdminOperLogHandler) GetStats(c echo.Context) error {
 func (h *AdminOperLogHandler) GetOperTypes(c echo.Context) error {
 	types, err := h.svc.GetOperTypes()
 	if err != nil {
-		return response.Error(c, 500, "get oper types failed: "+err.Error())
+		return response.Error(c, 500, "获取操作类型失败")
 	}
 	return response.Success(c, types)
 }
@@ -139,7 +130,7 @@ func (h *AdminOperLogHandler) GetOperTypes(c echo.Context) error {
 func (h *AdminOperLogHandler) GetOperUsers(c echo.Context) error {
 	users, err := h.svc.GetOperUsers()
 	if err != nil {
-		return response.Error(c, 500, "get oper users failed: "+err.Error())
+		return response.Error(c, 500, "获取操作用户失败")
 	}
 	return response.Success(c, users)
 }
@@ -153,7 +144,7 @@ func (h *AdminOperLogHandler) Cleanup(c echo.Context) error {
 
 	deleted, err := h.svc.Cleanup(days)
 	if err != nil {
-		return response.Error(c, 500, "cleanup failed: "+err.Error())
+		return response.Error(c, 500, "清理失败")
 	}
 
 	return response.Success(c, map[string]interface{}{
@@ -165,7 +156,7 @@ func (h *AdminOperLogHandler) Cleanup(c echo.Context) error {
 func (h *AdminOperLogHandler) Status(c echo.Context) error {
 	running, total, lastTime, err := h.svc.GetStatus()
 	if err != nil {
-		return response.Error(c, 500, "get status failed: "+err.Error())
+		return response.Error(c, 500, "获取状态失败")
 	}
 
 	return response.Success(c, map[string]interface{}{

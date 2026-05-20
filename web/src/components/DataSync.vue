@@ -288,16 +288,21 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { syncAPI, schedulerAPI, syncHistoryAPI, syncFeatureAPI, adminOperLogAPI } from '../api'
+import type { SyncFeature, SyncHistory } from '../types/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { VideoPlay, VideoPause, Refresh, Clock } from '@element-plus/icons-vue'
 
 const dateRange = ref<[Date, Date] | null>(null)
 const activeShortcut = ref<string | null>(null)
-const syncStatus = ref<any>({
+const syncStatus = ref({
   running: false,
   progress: 0,
   total: 0,
-  results: {}
+  current_feature: 0,
+  last_sync: '',
+  failed: 0,
+  results: {} as Record<number, number>,
+  errors: {} as Record<number, string>,
 })
 const schedulerStatus = ref<any>({
   running: false,
@@ -309,10 +314,10 @@ const syncAdminOperLog = ref(false)
 const form = reactive({
   feature_ids: [] as number[],
 })
-const features = ref<any[]>([])
+const features = ref<SyncFeature[]>([])
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
-const syncHistory = ref<any[]>([])
+const syncHistory = ref<SyncHistory[]>([])
 const historyTotal = ref(0)
 const historyPage = ref(1)
 const historyPageSize = ref(10)
@@ -333,13 +338,14 @@ const progressPercentage = computed(() => {
 const progressFormat = (percentage: number) => `${percentage}%`
 
 const resultTableData = computed(() => {
-  if (!syncStatus.value?.results) return []
-  const errors = syncStatus.value?.errors || {}
-  return Object.entries(syncStatus.value.results).map(([featureId, count]) => ({
-    feature_id: featureId,
+  const results = syncStatus.value.results
+  const errors = syncStatus.value.errors
+  if (!results || Object.keys(results).length === 0) return []
+  return Object.entries(results).map(([featureId, count]) => ({
+    feature_id: Number(featureId),
     name: getFeatureName(Number(featureId)),
-    count: count as number,
-    error: errors[featureId] || '',
+    count,
+    error: errors[Number(featureId)] || '',
   }))
 })
 

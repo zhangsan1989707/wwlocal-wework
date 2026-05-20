@@ -175,26 +175,27 @@
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { contactAPI } from '../api'
+import type { ApiResponse, Contact, ContactSyncStatus, Department, DeptMember, PaginatedResponse } from '../types/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 
 const router = useRouter()
 
-const contacts = ref<any[]>([])
+const contacts = ref<(Contact | DeptMember)[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const searchName = ref('')
 const searchMobile = ref('')
 const loading = ref(false)
-const syncStatus = ref<any>({ running: false })
+const syncStatus = ref<ContactSyncStatus>({ running: false, progress: 0, total: 0, synced: 0, failed: 0 })
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
-const deptTree = ref<any[]>([])
+const deptTree = ref<Department[]>([])
 const totalContacts = ref(0)
 const treeFilterText = ref('')
-const treeRef = ref<any>(null)
-const selectedDept = ref<any | null>(null)
+const treeRef = ref<{ filter: (val: string) => void; setCurrentKey: (key: number | null) => void } | null>(null)
+const selectedDept = ref<Department | null>(null)
 
 const drawerVisible = ref(false)
 const drawerContact = ref<any | null>(null)
@@ -225,11 +226,11 @@ const deptNames = computed(() => {
   }
 })
 
-function findDeptById(tree: any[], id: number): any | null {
+function findDeptById(tree: Department[], id: number): Department | null {
   for (const node of tree) {
     if (node.id === id) return node
-    if (node.children) {
-      const found = findDeptById(node.children, id)
+    if (node.childrens) {
+      const found = findDeptById(node.childrens, id)
       if (found) return found
     }
   }
@@ -258,7 +259,7 @@ onUnmounted(() => {
 
 const loadDeptTree = async () => {
   try {
-    const res: any = await contactAPI.getDeptTree()
+    const res = await contactAPI.getDeptTree() as unknown as ApiResponse<{ tree: Department[]; total: number }>
     if (res.code === 0) {
       deptTree.value = res.data?.tree || []
       totalContacts.value = res.data?.total || 0
@@ -272,11 +273,11 @@ const loadDeptMembers = async () => {
   if (!selectedDept.value) return
   loading.value = true
   try {
-    const res: any = await contactAPI.getDeptMembers(selectedDept.value.id, {
+    const res = await contactAPI.getDeptMembers(selectedDept.value.id, {
       page: page.value,
       page_size: pageSize.value,
-    })
-    if (res.code === 0) {
+    }) as unknown as ApiResponse<PaginatedResponse<DeptMember>>
+    if (res.code === 0 && res.data) {
       contacts.value = res.data.data || []
       total.value = res.data.total || 0
     }
@@ -290,13 +291,13 @@ const loadDeptMembers = async () => {
 const loadContacts = async () => {
   loading.value = true
   try {
-    const res: any = await contactAPI.list({
+    const res = await contactAPI.list({
       page: page.value,
       page_size: pageSize.value,
       name: searchName.value,
       mobile: searchMobile.value,
-    })
-    if (res.code === 0) {
+    }) as unknown as ApiResponse<PaginatedResponse<Contact>>
+    if (res.code === 0 && res.data) {
       contacts.value = res.data.data || []
       total.value = res.data.total || 0
     }
@@ -307,7 +308,7 @@ const loadContacts = async () => {
   }
 }
 
-const handleDeptClick = (data: any) => {
+const handleDeptClick = (data: Department) => {
   selectedDept.value = data
   page.value = 1
   searchName.value = ''
@@ -359,9 +360,10 @@ const handleSizeChange = (size: number) => {
   }
 }
 
-const handleRowClick = async (row: any) => {
+const handleRowClick = async (row: Contact | DeptMember) => {
   try {
-    const res: any = await contactAPI.getContact(row.userid || row.user_id)
+    const uid = 'userid' in row ? row.userid : row.user_id
+    const res = await contactAPI.getContact(uid) as unknown as ApiResponse<Contact>
     if (res.code === 0) {
       drawerContact.value = res.data
       drawerVisible.value = true
@@ -378,7 +380,7 @@ const viewUserLogs = () => {
   }
 }
 
-const filterNode = (value: string, data: any) => {
+const filterNode = (value: string, data: Department) => {
   if (!value) return true
   return data.name.includes(value)
 }
@@ -393,14 +395,14 @@ const handleSyncFull = async () => {
   } catch { return }
 
   try {
-    const res: any = await contactAPI.sync()
+    const res = await contactAPI.sync() as unknown as ApiResponse<{ message: string }>
     if (res.code === 0) {
       ElMessage.success('通讯录同步已启动')
       await checkSyncStatus()
       startPolling()
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '同步启动失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '同步启动失败')
   }
 }
 
@@ -414,30 +416,30 @@ const handleSyncIncremental = async () => {
   } catch { return }
 
   try {
-    const res: any = await contactAPI.syncIncremental()
+    const res = await contactAPI.syncIncremental() as unknown as ApiResponse<{ message: string }>
     if (res.code === 0) {
       ElMessage.success('通讯录同步已启动')
       await checkSyncStatus()
       startPolling()
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '同步启动失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '同步启动失败')
   }
 }
 
 const handleCancel = async () => {
   try {
-    const res: any = await contactAPI.cancel()
+    const res = await contactAPI.cancel() as unknown as ApiResponse<{ message: string }>
     if (res.code === 0) ElMessage.success('已发送取消请求')
-  } catch (err: any) {
-    ElMessage.error(err.message || '取消失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '取消失败')
   }
 }
 
 const checkSyncStatus = async () => {
   try {
-    const res: any = await contactAPI.status()
-    if (res.code === 0) syncStatus.value = res.data
+    const res = await contactAPI.status() as unknown as ApiResponse<ContactSyncStatus>
+    if (res.code === 0 && res.data) syncStatus.value = res.data
   } catch (err) { console.error(err) }
 }
 

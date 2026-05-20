@@ -20,6 +20,7 @@ const passwordHashKey = "auth_password_hash"
 
 type AuthHandler struct {
 	cfg          *config.AuthConfig
+	mu           sync.Mutex
 	passwordHash []byte
 	settingRepo  *repository.SettingRepository
 	limiter      *loginLimiter
@@ -65,7 +66,10 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		return response.Error(c, 400, "invalid request body")
 	}
 
-	if req.Username != h.cfg.Username || bcrypt.CompareHashAndPassword(h.passwordHash, []byte(req.Password)) != nil {
+	h.mu.Lock()
+	hash := h.passwordHash
+	h.mu.Unlock()
+	if req.Username != h.cfg.Username || bcrypt.CompareHashAndPassword(hash, []byte(req.Password)) != nil {
 		h.limiter.RecordFailure(ip)
 		return response.Error(c, 401, "invalid username or password")
 	}
@@ -175,7 +179,10 @@ func (h *AuthHandler) ChangePassword(c echo.Context) error {
 	}
 
 	// 校验旧密码
-	if bcrypt.CompareHashAndPassword(h.passwordHash, []byte(req.OldPassword)) != nil {
+	h.mu.Lock()
+	hash := h.passwordHash
+	h.mu.Unlock()
+	if bcrypt.CompareHashAndPassword(hash, []byte(req.OldPassword)) != nil {
 		return response.Error(c, 401, "旧密码不正确")
 	}
 
@@ -193,7 +200,9 @@ func (h *AuthHandler) ChangePassword(c echo.Context) error {
 	}
 
 	// 更新内存
+	h.mu.Lock()
 	h.passwordHash = newHash
+	h.mu.Unlock()
 	slog.Info("password changed successfully")
 
 	return response.Success(c, map[string]string{"message": "密码修改成功"})

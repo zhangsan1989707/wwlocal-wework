@@ -75,6 +75,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { adminOperLogAPI } from '../api'
+import type { AdminOperLog, AdminOperLogParams } from '../types/api'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh } from '@element-plus/icons-vue'
 
@@ -87,7 +88,7 @@ const form = reactive({
 
 const dateRange = ref<[Date, Date] | null>(null)
 const loading = ref(false)
-const tableData = ref<any[]>([])
+const tableData = ref<AdminOperLog[]>([])
 const total = ref(0)
 const pagination = reactive({
   page: 1,
@@ -110,7 +111,7 @@ onMounted(async () => {
 const handleQuery = async () => {
   loading.value = true
   try {
-    const params: any = {
+    const params: AdminOperLogParams = {
       page: pagination.page,
       page_size: pagination.page_size,
     }
@@ -121,15 +122,15 @@ const handleQuery = async () => {
     if (form.oper_type) params.oper_type = form.oper_type
     if (form.oper_userid) params.oper_userid = form.oper_userid
 
-    const res: any = await adminOperLogAPI.query(params)
-    if (res.code === 0) {
+    const res = await adminOperLogAPI.query(params)
+    if (res.code === 0 && res.data) {
       tableData.value = res.data.data
       total.value = res.data.total
     } else {
       ElMessage.error(res.msg || '查询失败')
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '查询失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '查询失败')
   } finally {
     loading.value = false
   }

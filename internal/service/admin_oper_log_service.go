@@ -46,13 +46,17 @@ func (s *AdminOperLogService) SyncLogs(startTime, endTime int64) (int, error) {
 		}
 
 		var logs []model.AdminOperLog
+
+		// 批量检查已存在的记录，避免 N+1 查询
+		existing, err := s.adminLogRepo.BatchExistByOperTimeAndUserIDs(apiLogs)
+		if err != nil {
+			slog.Warn(fmt.Sprintf("batch check exists failed: %v, falling back to insert-ignore", err))
+			existing = make(map[[2]string]bool)
+		}
+
 		for _, apiLog := range apiLogs {
-			exists, err := s.adminLogRepo.ExistsByOperTimeAndUserID(apiLog.OperTime, apiLog.OperUserID)
-			if err != nil {
-				slog.Info(fmt.Sprintf("check exists failed for oper_time=%d, oper_userid=%s: %v", apiLog.OperTime, apiLog.OperUserID, err))
-				continue
-			}
-			if exists {
+			key := [2]string{fmt.Sprint(apiLog.OperTime), apiLog.OperUserID}
+			if existing[key] {
 				continue
 			}
 
@@ -79,7 +83,7 @@ func (s *AdminOperLogService) SyncLogs(startTime, endTime int64) (int, error) {
 
 		if len(logs) > 0 {
 			if err := s.adminLogRepo.BatchSave(logs); err != nil {
-				slog.Info(fmt.Sprintf("batch save admin oper logs failed: %v", err))
+				slog.Error(fmt.Sprintf("batch save admin oper logs failed: %v", err))
 				return totalSynced, fmt.Errorf("batch save failed: %w", err)
 			}
 			totalSynced += len(logs)

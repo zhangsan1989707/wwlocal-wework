@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -311,6 +312,22 @@ func (s *ContactSyncService) ResetRunning() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.status.Running = false
+}
+
+// StartSync 在后台 goroutine 中启动同步，自动处理 TryStartRunning、panic 恢复和 ResetRunning。
+func (s *ContactSyncService) StartSync(fn func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error(fmt.Sprintf("contact sync goroutine panic: %v\n%s", r, debug.Stack()))
+			}
+			s.ResetRunning()
+		}()
+		if !s.TryStartRunning() {
+			return
+		}
+		fn()
+	}()
 }
 
 func (s *ContactSyncService) GetStatus() *ContactSyncStatus {

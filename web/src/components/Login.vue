@@ -25,6 +25,7 @@
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { authAPI } from '../api'
+import type { ApiResponse, LoginResponse } from '../types/api'
 import { useAuthStore } from '../stores/auth'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
@@ -46,18 +47,17 @@ const handleLogin = async () => {
 
   loading.value = true
   try {
-    const res: any = await authAPI.login({ username: form.username, password: form.password })
-    // api 拦截器已存 token，res 可能是 {code,data} 或直接 {token,username}
-    const username = res?.data?.username || res?.username
-    if (username) {
-      authStore.login(username)
+    const res = await authAPI.login({ username: form.username, password: form.password })
+    const loginData = (res as unknown as ApiResponse<LoginResponse>).data
+    if (res.code === 0 && loginData?.username) {
+      authStore.login(loginData.username)
       ElMessage.success('登录成功')
       router.push('/dashboard')
     } else {
-      ElMessage.error(res?.msg || res?.data?.msg || '登录失败')
+      ElMessage.error(res.msg || '登录失败')
     }
-  } catch (err: any) {
-    ElMessage.error(err?.message || '登录失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '登录失败')
   } finally {
     loading.value = false
   }

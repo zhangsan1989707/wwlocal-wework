@@ -289,6 +289,47 @@ func (s *QueryService) QueryByCursor(req *model.QueryRequest) (*model.CursorQuer
 	}, nil
 }
 
+func (s *QueryService) ExportCSV(req *model.QueryRequest) ([]map[string]interface{}, error) {
+	if req.PageSize <= 0 {
+		req.PageSize = 50000
+	}
+	if req.PageSize > 50000 {
+		req.PageSize = 50000
+	}
+
+	const maxRangeSeconds = 90 * 24 * 3600
+	if req.EndTime-req.StartTime > int64(maxRangeSeconds) {
+		return nil, fmt.Errorf("time range cannot exceed 90 days")
+	}
+	if len(req.FeatureIDs) > 10 {
+		return nil, fmt.Errorf("cannot query more than 10 feature types at the same time")
+	}
+
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+
+	var allData []map[string]interface{}
+
+	for _, featureID := range req.FeatureIDs {
+		entries, _, err := s.logRepo.QueryAcrossMonths(featureID, req.StartTime, req.EndTime, req.Page, req.PageSize)
+		if err != nil {
+			return nil, fmt.Errorf("query feature %d failed: %w", featureID, err)
+		}
+		for _, entry := range entries {
+			allData = append(allData, s.parseEntry(&entry))
+		}
+	}
+
+	sort.Slice(allData, func(i, j int) bool {
+		ti, _ := allData[i]["log_time"].(int64)
+		tj, _ := allData[j]["log_time"].(int64)
+		return ti > tj
+	})
+
+	return allData, nil
+}
+
 func extractPaths(data map[string]interface{}, prefix string, result map[string]struct{}) {
 	for key, val := range data {
 		path := key

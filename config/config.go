@@ -152,6 +152,9 @@ func Load(path string) (*Config, error) {
 	cfg.RateLimit.RequestsPerMin = getEnvInt("RATE_LIMIT_REQUESTS_PER_MINUTE", 100)
 	cfg.RateLimit.Burst = getEnvInt("RATE_LIMIT_BURST", 20)
 
+	cfg.Scheduler.Enabled = getEnvBool("SCHEDULER_ENABLED", cfg.Scheduler.Enabled)
+	cfg.Scheduler.Interval = getEnv("SCHEDULER_INTERVAL", cfg.Scheduler.Interval)
+
 	// 校验必需配置
 	var missing []string
 	if cfg.Database.Password == "" {

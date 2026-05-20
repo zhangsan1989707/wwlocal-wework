@@ -118,15 +118,6 @@ func main() {
 	keyHandler := handler.NewKeyHandler(keySvc)
 	syncHandler := handler.NewSyncHandler(syncSvc)
 
-	interval := time.Hour
-	if cfg.Scheduler.Interval != "" {
-		if d, err := time.ParseDuration(cfg.Scheduler.Interval); err == nil {
-			interval = d
-		}
-	}
-	schedulerSvc := service.NewSchedulerService(syncSvc, interval)
-	schedulerHandler := handler.NewSchedulerHandler(schedulerSvc, syncSvc)
-
 	contactSvc := service.NewContactService(&cfg.WeWork)
 	contactSyncSvc := service.NewContactSyncService(contactSvc, contactRepo, syncHistoryRepo)
 	contactHandler := handler.NewContactHandler(contactSyncSvc, contactRepo)
@@ -145,6 +136,15 @@ func main() {
 	adminOperLogSvc := service.NewAdminOperLogService(weworkSvc, adminOperLogRepo, &cfg.WeWork)
 	adminOperLogHandler := handler.NewAdminOperLogHandler(adminOperLogSvc)
 
+	interval := time.Hour
+	if cfg.Scheduler.Interval != "" {
+		if d, err := time.ParseDuration(cfg.Scheduler.Interval); err == nil {
+			interval = d
+		}
+	}
+	schedulerSvc := service.NewSchedulerService(syncSvc, adminOperLogSvc, interval)
+	schedulerHandler := handler.NewSchedulerHandler(schedulerSvc, syncSvc)
+
 	dashboardSvc := service.NewDashboardService(logRepo, contactRepo, syncHistoryRepo, syncStateRepo, keyRepo, cfg)
 	dashboardHandler := handler.NewDashboardHandler(dashboardSvc)
 	syncHistoryHandler := handler.NewSyncHistoryHandler(syncHistoryRepo)
@@ -154,7 +154,7 @@ func main() {
 	// 初始化任务队列服务
 	taskQueueSvc, err := service.NewTaskQueueService(cfg, syncSvc, contactSyncSvc, adminOperLogSvc)
 	if err != nil {
-		slog.Info(fmt.Sprintf("init task queue service failed: %v", err))
+		slog.Error(fmt.Sprintf("init task queue service failed: %v", err))
 	}
 	taskHandler := handler.NewTaskHandler(taskQueueSvc)
 
@@ -173,7 +173,27 @@ func main() {
 	}
 	metricsIPs := []string{"127.0.0.1", "::1"}
 
-	r := router.NewRouter(healthHandler, authHandler, logHandler, keyHandler, syncHandler, schedulerHandler, contactHandler, operationLogHandler, adminOperLogHandler, dashboardHandler, syncHistoryHandler, syncFeatureHandler, systemHandler, taskHandler, operationLogSvc, cfg.Auth.JWTSecret, rateLimiter, allowedOrigins, metricsIPs)
+	r := router.NewRouter(router.RouterDeps{
+		Health:       healthHandler,
+		Auth:         authHandler,
+		Log:          logHandler,
+		Key:          keyHandler,
+		Sync:         syncHandler,
+		Scheduler:    schedulerHandler,
+		Contact:      contactHandler,
+		OperationLog: operationLogHandler,
+		AdminOperLog: adminOperLogHandler,
+		Dashboard:    dashboardHandler,
+		SyncHistory:  syncHistoryHandler,
+		SyncFeature:  syncFeatureHandler,
+		System:       systemHandler,
+		Task:         taskHandler,
+		OperationSvc: operationLogSvc,
+		JWTSecret:    cfg.Auth.JWTSecret,
+		RateLimiter:  rateLimiter,
+		Origins:      allowedOrigins,
+		MetricsIPs:   metricsIPs,
+	})
 
 	e := echo.New()
 	r.Setup(e)
@@ -212,7 +232,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := e.Shutdown(ctx); err != nil {
-		slog.Info(fmt.Sprintf("shutdown error: %v", err))
+		slog.Error(fmt.Sprintf("shutdown error: %v", err))
 	}
 
 	// 5. 停止后台 goroutine
@@ -229,33 +249,26 @@ func main() {
 func checkKeyPermissions(keysDir string) {
 	entries, err := os.ReadDir(keysDir)
 	if err != nil {
-		slog.Info(fmt.Sprintf("keys directory not readable: %v", err))
+		slog.Warn(fmt.Sprintf("keys directory not readable: %v", err))
 		return
 	}
 	for _, entry := range entries {
+		path := filepath.Join(keysDir, entry.Name())
 		if entry.IsDir() {
+			checkKeyPermissions(path)
 			continue
 		}
-		name := entry.Name()
-		if filepath.Ext(name) != ".pem" {
+		if filepath.Ext(entry.Name()) != ".pem" {
 			continue
 		}
-		path := filepath.Join(keysDir, name)
 		info, err := os.Stat(path)
 		if err != nil {
 			continue
 		}
 		perm := info.Mode().Perm()
 		if perm&0077 != 0 {
-			slog.Info(fmt.Sprintf("WARNING: key file %s has overly permissive permissions (%o), fixing to 600", path, perm))
+			slog.Warn(fmt.Sprintf("key file %s has overly permissive permissions (%o), fixing to 600", path, perm))
 			os.Chmod(path, 0600)
-		}
-	}
-	// 递归检查子目录（如 keys/v1/）
-	subdirs, _ := os.ReadDir(keysDir)
-	for _, sub := range subdirs {
-		if sub.IsDir() {
-			checkKeyPermissions(filepath.Join(keysDir, sub.Name()))
 		}
 	}
 }

@@ -1,9 +1,6 @@
 package handler
 
 import (
-	"fmt"
-	"log/slog"
-	"runtime/debug"
 	"strconv"
 
 	"wwlocal-wework/internal/repository"
@@ -63,18 +60,9 @@ func (h *ContactHandler) Sync(c echo.Context) error {
 		return response.Error(c, 409, "contact sync already in progress")
 	}
 
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				slog.Info(fmt.Sprintf("contact sync goroutine panic: %v\n%s", r, debug.Stack()))
-			}
-			h.contactSyncSvc.ResetRunning()
-		}()
-		if !h.contactSyncSvc.TryStartRunning() {
-			return
-		}
+	h.contactSyncSvc.StartSync(func() {
 		h.contactSyncSvc.SyncContactsFull()
-	}()
+	})
 
 	return response.Success(c, map[string]interface{}{
 		"message": "contact sync started",
@@ -87,18 +75,9 @@ func (h *ContactHandler) SyncIncremental(c echo.Context) error {
 		return response.Error(c, 409, "contact sync already in progress")
 	}
 
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				slog.Info(fmt.Sprintf("contact incremental sync goroutine panic: %v\n%s", r, debug.Stack()))
-			}
-			h.contactSyncSvc.ResetRunning()
-		}()
-		if !h.contactSyncSvc.TryStartRunning() {
-			return
-		}
+	h.contactSyncSvc.StartSync(func() {
 		h.contactSyncSvc.SyncContactsIncremental()
-	}()
+	})
 
 	return response.Success(c, map[string]interface{}{
 		"message": "contact incremental sync started",

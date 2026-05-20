@@ -1,9 +1,6 @@
 package handler
 
 import (
-	"fmt"
-	"log/slog"
-	"runtime/debug"
 	"time"
 
 	"wwlocal-wework/internal/service"
@@ -62,16 +59,7 @@ func (h *SchedulerHandler) IncrementalSync(c echo.Context) error {
 		return response.Error(c, 409, "sync already in progress")
 	}
 
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				slog.Info(fmt.Sprintf("incremental sync goroutine panic: %v\n%s", r, debug.Stack()))
-			}
-			h.syncSvc.ResetRunning()
-		}()
-		if !h.syncSvc.TryStartRunning() {
-			return
-		}
+	h.syncSvc.StartSync(func() {
 		if req.SyncAll {
 			h.syncSvc.SyncAllFeaturesIncremental()
 		} else if len(req.FeatureIDs) > 0 {
@@ -79,7 +67,7 @@ func (h *SchedulerHandler) IncrementalSync(c echo.Context) error {
 		} else {
 			h.syncSvc.SyncAllFeaturesIncremental()
 		}
-	}()
+	})
 
 	return response.Success(c, map[string]interface{}{
 		"message": "incremental sync started",

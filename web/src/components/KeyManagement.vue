@@ -75,9 +75,10 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { keyAPI } from '../api'
+import type { KeyVersion } from '../types/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-const keys = ref<any[]>([])
+const keys = ref<KeyVersion[]>([])
 const form = reactive({
   version: '',
   private_key_pem: '',
@@ -89,11 +90,11 @@ onMounted(async () => {
 
 const loadKeys = async () => {
   try {
-    const res: any = await keyAPI.list()
+    const res = await keyAPI.list()
     if (res.code === 0) {
-      keys.value = res.data
+      keys.value = res.data ?? []
     }
-  } catch (err) {
+  } catch {
     ElMessage.error('加载密钥列表失败')
   }
 }
@@ -105,7 +106,7 @@ const handleAdd = async () => {
   }
 
   try {
-    const res: any = await keyAPI.add(form)
+    const res = await keyAPI.add(form)
     if (res.code === 0) {
       ElMessage.success('添加成功')
       form.version = ''
@@ -114,8 +115,8 @@ const handleAdd = async () => {
     } else {
       ElMessage.error(res.msg || '添加失败')
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '添加失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '添加失败')
   }
 }
 
@@ -131,28 +132,28 @@ const handleActivate = async (version: string) => {
   }
 
   try {
-    const res: any = await keyAPI.activate({ version })
+    const res = await keyAPI.activate({ version })
     if (res.code === 0) {
       ElMessage.success('激活成功')
       await loadKeys()
     } else {
       ElMessage.error(res.msg || '激活失败')
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '激活失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '激活失败')
   }
 }
 
 const handleTest = async (version: string) => {
   try {
-    const res: any = await keyAPI.test(version)
+    const res = await keyAPI.test(version)
     if (res.code === 0) {
-      ElMessage.success(`密钥验证通过：${res.data.key_size} 位 RSA (${res.data.key_type})`)
+      ElMessage.success(res.data?.message || '密钥验证通过')
     } else {
       ElMessage.error(res.msg || '密钥验证失败')
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '密钥验证失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '密钥验证失败')
   }
 }
 

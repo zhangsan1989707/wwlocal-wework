@@ -7,6 +7,8 @@
 .env.*
 .DS_Store
 server
+dist/
+keys/
 web/node_modules
 web/dist
 deploy/

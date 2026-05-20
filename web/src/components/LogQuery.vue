@@ -34,12 +34,12 @@
                 </template>
                 <el-option
                   v-for="item in features"
-                  :key="item.id"
+                  :key="item.feature_id"
                   :label="item.name"
-                  :value="item.id"
+                  :value="item.feature_id"
                 >
                   <span style="float: left">{{ item.name }}</span>
-                  <span style="float: right; color: #8492a6; font-size: 12px">{{ item.id }}</span>
+                  <span style="float: right; color: #8492a6; font-size: 12px">{{ item.feature_id }}</span>
                 </el-option>
               </el-select>
             </el-form-item>
@@ -207,6 +207,7 @@
 import { ref, reactive, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { logAPI, syncFeatureAPI, contactAPI } from '../api'
+import type { LogQueryParams, SyncFeature } from '../types/api'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh, DataAnalysis, Plus, Delete, Close, QuestionFilled, Download } from '@element-plus/icons-vue'
 
@@ -216,28 +217,48 @@ interface Condition {
   value: string
 }
 
-const form = reactive({
-  feature_ids: [] as number[],
+interface FeatureItem {
+  feature_id: number
+  name: string
+  enabled: boolean
+}
+
+interface LogRow {
+  feature_id: number
+  log_date: string
+  log_time: number
+  openid?: string
+  sender?: { openid?: string; name?: string }
+  msg_type?: string
+  chat_type?: string
+  _decrypt_failed?: boolean
+  [key: string]: unknown
+}
+
+const form = reactive<LogQueryParams>({
+  feature_ids: [],
   start_time: 0,
   end_time: 0,
-  conditions: null as any,
+  conditions: null,
   mobile: '',
   realtime: true,
+  page: 1,
+  page_size: 50,
 })
 
 const dateRange = ref<[Date, Date] | null>(null)
 const activeShortcut = ref<string | null>(null)
 const conditions = ref<Condition[]>([])
 const loading = ref(false)
-const rawTableData = ref<any[]>([])
-const tableData = ref<any[]>([])
+const rawTableData = ref<LogRow[]>([])
+const tableData = ref<LogRow[]>([])
 const rawTotal = ref(0)
 const total = ref(0)
 const pagination = reactive({
   page: 1,
   page_size: 50,
 })
-const features = ref<any[]>([])
+const features = ref<FeatureItem[]>([])
 const fieldPaths = ref<string[]>([])
 const expandedRows = ref<number[]>([])
 const contactNames = ref<Record<string, string>>({})
@@ -254,16 +275,15 @@ const route = useRoute()
 
 onMounted(async () => {
   try {
-    const res: any = await syncFeatureAPI.list()
+    const res = await syncFeatureAPI.list()
     if (res.code === 0) {
-      features.value = (res.data || []).map((f: any) => ({ id: f.feature_id, name: f.name }))
+      features.value = (res.data || []).map((f: SyncFeature) => ({ feature_id: f.feature_id, name: f.name, enabled: f.enabled }))
     }
-  } catch (err) {
+  } catch {
     ElMessage.error('加载数据失败')
   }
   loadFieldPaths()
 
-  // 处理路由查询参数
   const query = route.query
   if (query.mobile) {
     form.mobile = String(query.mobile)
@@ -278,15 +298,15 @@ onMounted(async () => {
     ]
     activeShortcut.value = '最近7天'
   }
-  // 自动执行查询
   if (query.mobile || form.feature_ids.length > 0) {
     if (!dateRange.value) {
       try {
-        const timeRes: any = await logAPI.getTimeRange()
+        const timeRes = await logAPI.getTimeRange()
         if (timeRes.code === 0) {
+          const t = timeRes.data as unknown as { start_time: number; end_time: number; now: number }
           dateRange.value = [
-            new Date(timeRes.data.start_time * 1000),
-            new Date(timeRes.data.end_time * 1000),
+            new Date(t.start_time ? t.start_time * 1000 : (Date.now() - 7 * 24 * 3600 * 1000)),
+            new Date(t.end_time ? t.end_time * 1000 : Date.now()),
           ]
         }
       } catch { /* ignore */ }
@@ -295,13 +315,13 @@ onMounted(async () => {
       handleQuery()
     }
   } else {
-    // 默认行为：加载时间范围
     try {
-      const timeRes: any = await logAPI.getTimeRange()
+      const timeRes = await logAPI.getTimeRange()
       if (timeRes.code === 0) {
+        const t = timeRes.data as unknown as { start_time: number; end_time: number; now: number }
         dateRange.value = [
-          new Date(timeRes.data.start_time * 1000),
-          new Date(timeRes.data.end_time * 1000),
+          new Date(t.start_time ? t.start_time * 1000 : (Date.now() - 7 * 24 * 3600 * 1000)),
+          new Date(t.end_time ? t.end_time * 1000 : Date.now()),
         ]
       }
     } catch { /* ignore */ }
@@ -310,9 +330,9 @@ onMounted(async () => {
 
 const loadFieldPaths = async () => {
   try {
-    const res: any = await logAPI.getFieldPaths()
-    if (res.code === 0) {
-      fieldPaths.value = res.data
+    const res = await logAPI.getFieldPaths()
+    if (res.code === 0 && res.data) {
+      fieldPaths.value = (res.data as unknown as Array<{ path: string }>).map((p) => p.path)
     }
   } catch {
     // ignore
@@ -353,18 +373,17 @@ const clearConditions = () => {
   applyClientFilter()
 }
 
-// 通过点号路径获取嵌套字段值，如 "sender.openid"
-const resolveNestedValue = (data: any, path: string): any => {
+const resolveNestedValue = (data: Record<string, unknown>, path: string): unknown => {
   const parts = path.split('.')
-  let current: any = data
+  let current: unknown = data
   for (const part of parts) {
     if (current == null || typeof current !== 'object') return null
-    current = current[part]
+    current = (current as Record<string, unknown>)[part]
   }
   return current
 }
 
-const matchCondition = (row: any, cond: Condition): boolean => {
+const matchCondition = (row: LogRow, cond: Condition): boolean => {
   if (!cond.key || !cond.value) return true
   const value = resolveNestedValue(row, cond.key)
   if (value == null) return false
@@ -393,10 +412,10 @@ watch(conditions, () => {
   applyClientFilter()
 }, { deep: true })
 
-const buildConditions = () => {
+const buildConditions = (): Record<string, { value: string; operator: string }> | null => {
   if (conditions.value.length === 0) return null
 
-  const result: any = {}
+  const result: Record<string, { value: string; operator: string }> = {}
   for (const condition of conditions.value) {
     if (condition.key && condition.value) {
       result[condition.key] = {
@@ -408,13 +427,13 @@ const buildConditions = () => {
   return Object.keys(result).length > 0 ? result : null
 }
 
-const extractOpenids = (data: any[]): string[] => {
+const extractOpenids = (data: LogRow[]): string[] => {
   const ids = new Set<string>()
   for (const row of data) {
     if (row.openid) ids.add(row.openid)
     if (row.sender?.openid) ids.add(row.sender.openid)
-    if (row.tolist) {
-      for (const u of row.tolist) {
+    if (row.tolist && Array.isArray(row.tolist)) {
+      for (const u of row.tolist as Array<{ userid?: string }>) {
         if (u?.userid) ids.add(u.userid)
       }
     }
@@ -422,11 +441,11 @@ const extractOpenids = (data: any[]): string[] => {
   return Array.from(ids)
 }
 
-const fetchContactNames = async (data: any[]) => {
+const fetchContactNames = async (data: LogRow[]) => {
   const ids = extractOpenids(data)
   if (ids.length === 0) return
   try {
-    const res: any = await contactAPI.getNames(ids)
+    const res = await contactAPI.getNames(ids)
     if (res.code === 0 && res.data) {
       contactNames.value = { ...contactNames.value, ...res.data }
     }
@@ -449,23 +468,27 @@ const handleQuery = async () => {
   try {
     form.start_time = Math.floor(dateRange.value[0].getTime() / 1000)
     form.end_time = Math.floor(dateRange.value[1].getTime() / 1000)
-    form.conditions = buildConditions()
 
-    const res: any = await logAPI.query({
-      ...form,
+    const res = await logAPI.query({
+      feature_ids: form.feature_ids,
+      start_time: form.start_time,
+      end_time: form.end_time,
+      conditions: buildConditions(),
+      mobile: form.mobile,
+      realtime: form.realtime,
       page: pagination.page,
       page_size: pagination.page_size,
     })
-    if (res.code === 0) {
-      rawTableData.value = res.data.data
+    if (res.code === 0 && res.data) {
+      rawTableData.value = res.data.data as unknown as LogRow[]
       rawTotal.value = res.data.total
       applyClientFilter()
-      fetchContactNames(res.data.data)
+      fetchContactNames(res.data.data as unknown as LogRow[])
     } else {
       ElMessage.error(res.msg || '查询失败')
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '查询失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '查询失败')
   } finally {
     loading.value = false
   }
@@ -473,7 +496,6 @@ const handleQuery = async () => {
 
 const handleReset = () => {
   form.feature_ids = []
-  form.conditions = null
   form.mobile = ''
   conditions.value = []
   activeShortcut.value = null
@@ -486,10 +508,9 @@ const handleReset = () => {
   pagination.page_size = 50
 }
 
-// 常用关键字段，展示时置顶
 const priorityKeys = ['openid', 'msg_type', 'chat_type', 'sender', 'roomname', 'tolist', 'content']
 
-const isUnixTimestamp = (key: string, val: any): boolean => {
+const isUnixTimestamp = (key: string, val: unknown): boolean => {
   if (typeof val !== 'number') return false
   if (!key.endsWith('_time') && !key.endsWith('time') && key !== 'log_time') return false
   return val > 1_000_000_000 && val < 2_000_000_000
@@ -500,12 +521,12 @@ const formatTimestamp = (val: number): string => {
   return d.toISOString().replace('T', ' ').slice(0, 19)
 }
 
-const formatValue = (key: string, val: any): any => {
+const formatValue = (key: string, val: unknown): unknown => {
   if (isUnixTimestamp(key, val)) {
-    return `${val} (${formatTimestamp(val)})`
+    return `${val} (${formatTimestamp(val as number)})`
   }
   if (typeof val === 'object' && val !== null) {
-    const formatted: any = {}
+    const formatted: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(val)) {
       formatted[k] = formatValue(k, v)
     }
@@ -514,10 +535,9 @@ const formatValue = (key: string, val: any): any => {
   return val
 }
 
-const formatData = (row: any) => {
+const formatData = (row: LogRow) => {
   const { feature_id, log_date, _decrypt_failed, ...rest } = row
-  // 按 key 排序，关键字段置顶
-  const sorted: any = {}
+  const sorted: Record<string, unknown> = {}
   for (const k of priorityKeys) {
     if (k in rest) {
       sorted[k] = formatValue(k, rest[k])
@@ -530,7 +550,7 @@ const formatData = (row: any) => {
   return JSON.stringify(sorted, null, 2)
 }
 
-const formatPreview = (row: any) => {
+const formatPreview = (row: LogRow) => {
   const { feature_id, log_date, _decrypt_failed, ...rest } = row
   if (_decrypt_failed) return '[解密失败]'
   const parts: string[] = []
@@ -562,25 +582,48 @@ const toggleRow = (index: number) => {
   }
 }
 
-const handleExport = () => {
-  if (tableData.value.length === 0) return
+const handleExport = async () => {
+  if (form.feature_ids.length === 0 || !dateRange.value) {
+    ElMessage.warning('请先执行查询')
+    return
+  }
 
-  const headers = ['日志类型编号', '时间', '数据内容']
-  const rows = tableData.value.map(row => [
-    row.feature_id,
-    row.log_date,
-    JSON.stringify((() => { const { feature_id, log_date, _decrypt_failed, ...rest } = row; return rest })()),
-  ])
+  try {
+    const exportForm = {
+      feature_ids: form.feature_ids,
+      start_time: Math.floor(dateRange.value[0].getTime() / 1000),
+      end_time: Math.floor(dateRange.value[1].getTime() / 1000),
+      mobile: form.mobile,
+      conditions: buildConditions(),
+      page: 1,
+      page_size: 20000,
+      realtime: false,
+    }
 
-  const bom = '﻿'
-  const csv = bom + [headers.join(','), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n')
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `query_result_${new Date().toISOString().slice(0, 10)}.csv`
-  a.click()
-  URL.revokeObjectURL(url)
+    const res = await fetch(logAPI.exportCSVURL(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+      },
+      body: JSON.stringify(exportForm),
+    })
+
+    if (!res.ok) {
+      throw new Error('导出失败')
+    }
+
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `query_result_${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success('导出成功')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '导出失败')
+  }
 }
 </script>
 
