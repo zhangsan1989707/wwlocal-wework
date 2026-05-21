@@ -260,7 +260,7 @@ export const contactAPI = {
   getDepartments: () =>
     api.get<ApiResponse<Department[]>>('/contacts/departments') as unknown as ApiResult<Department[]>,
   getDeptTree: () =>
-    api.get<ApiResponse<Department[]>>('/contacts/tree') as unknown as ApiResult<Department[]>,
+    api.get<ApiResponse<{ tree: Department[]; total: number }>>('/contacts/tree') as unknown as ApiResult<{ tree: Department[]; total: number }>,
   getDeptMembers: (deptId: number, params: ContactMemberParams) =>
     api.get<ApiResponse<PaginatedResponse<DeptMember>>>(
       `/contacts/departments/${deptId}/members`,

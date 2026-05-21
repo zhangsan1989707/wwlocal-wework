@@ -109,6 +109,8 @@ export interface Contact {
   avatar?: string
   email?: string
   is_active: number
+  gender?: number
+  status?: number
   created_at: string
   updated_at: string
 }
@@ -118,7 +120,8 @@ export interface Department {
   name: string
   parent_id: number
   order: number
-  childrens?: Department[]
+  member_count?: number
+  children?: Department[]
 }
 
 export interface DeptMember {

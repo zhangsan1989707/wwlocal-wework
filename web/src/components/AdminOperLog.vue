@@ -73,7 +73,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watchEffect } from 'vue'
 import { adminOperLogAPI } from '../api'
 import type { AdminOperLog, AdminOperLogParams } from '../types/api'
 import { ElMessage } from 'element-plus'
@@ -103,9 +103,19 @@ const setTodayRange = () => {
   dateRange.value = [today, end]
 }
 
+let isInitial = true
+
 onMounted(async () => {
   setTodayRange()
   await handleQuery()
+  isInitial = false
+})
+
+watchEffect(() => {
+  if (dateRange.value && !isInitial) {
+    pagination.page = 1
+    handleQuery()
+  }
 })
 
 const handleQuery = async () => {
@@ -140,8 +150,6 @@ const handleReset = () => {
   setTodayRange()
   form.oper_type = ''
   form.oper_userid = ''
-  pagination.page = 1
-  handleQuery()
 }
 
 const formatTime = (ts: number | string) => {

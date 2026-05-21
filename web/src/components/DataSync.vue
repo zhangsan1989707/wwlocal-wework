@@ -523,7 +523,11 @@ const handleSync = async () => {
     const endTime = Math.floor(dateRange.value[1].getTime() / 1000)
 
     if (syncAdminOperLog.value) {
-      await adminOperLogAPI.sync({ start_time: startTime, end_time: endTime })
+      const adminRes: any = await adminOperLogAPI.sync({ start_time: startTime, end_time: endTime })
+      if (adminRes.code !== 0) {
+        ElMessage.error(adminRes.msg || '企微操作日志同步启动失败')
+        return
+      }
     }
 
     if (syncAll.value || form.feature_ids.length > 0) {

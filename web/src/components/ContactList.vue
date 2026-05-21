@@ -153,7 +153,7 @@
         </el-descriptions-item>
         <el-descriptions-item label="邮箱">{{ drawerContact.email || '-' }}</el-descriptions-item>
         <el-descriptions-item label="职位">{{ drawerContact.position || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="UserID">{{ drawerContact.userid }}</el-descriptions-item>
+        <el-descriptions-item label="UserID">{{ drawerContact.user_id }}</el-descriptions-item>
         <el-descriptions-item label="状态">
           <el-tag :type="drawerContact.status === 1 ? 'success' : drawerContact.status === 2 ? 'danger' : 'info'" size="small">
             {{ drawerContact.status === 1 ? '已激活' : drawerContact.status === 2 ? '已禁用' : '未激活' }}
@@ -198,7 +198,7 @@ const treeRef = ref<{ filter: (val: string) => void; setCurrentKey: (key: number
 const selectedDept = ref<Department | null>(null)
 
 const drawerVisible = ref(false)
-const drawerContact = ref<any | null>(null)
+const drawerContact = ref<Contact | null>(null)
 
 const progressPercentage = computed(() => {
   if (!syncStatus.value || syncStatus.value.total === 0) return 0
@@ -214,12 +214,13 @@ const phaseText = computed(() => {
 })
 
 const deptNames = computed(() => {
-  if (!drawerContact.value?.department) return '-'
+  const dept = drawerContact.value?.department
+  if (!dept) return '-'
   try {
-    const ids = JSON.parse(drawerContact.value.department)
+    const ids: number[] = typeof dept === 'string' ? JSON.parse(dept) : Array.isArray(dept) ? dept : []
     return ids.map((id: number) => {
-      const dept = findDeptById(deptTree.value, id)
-      return dept ? dept.name : `部门${id}`
+      const d = findDeptById(deptTree.value, id)
+      return d ? d.name : `部门${id}`
     }).join('、') || '-'
   } catch {
     return '-'
@@ -229,8 +230,8 @@ const deptNames = computed(() => {
 function findDeptById(tree: Department[], id: number): Department | null {
   for (const node of tree) {
     if (node.id === id) return node
-    if (node.childrens) {
-      const found = findDeptById(node.childrens, id)
+    if (node.children) {
+      const found = findDeptById(node.children, id)
       if (found) return found
     }
   }
@@ -259,7 +260,7 @@ onUnmounted(() => {
 
 const loadDeptTree = async () => {
   try {
-    const res = await contactAPI.getDeptTree() as unknown as ApiResponse<{ tree: Department[]; total: number }>
+    const res = await contactAPI.getDeptTree() as unknown as { code: number; data?: { tree: Department[]; total: number } }
     if (res.code === 0) {
       deptTree.value = res.data?.tree || []
       totalContacts.value = res.data?.total || 0
@@ -365,8 +366,11 @@ const handleRowClick = async (row: Contact | DeptMember) => {
     const uid = 'userid' in row ? row.userid : row.user_id
     const res = await contactAPI.getContact(uid) as unknown as ApiResponse<Contact>
     if (res.code === 0) {
-      drawerContact.value = res.data
-      drawerVisible.value = true
+      const data = res.data
+      if (data) {
+        drawerContact.value = data
+        drawerVisible.value = true
+      }
     }
   } catch (err) {
     ElMessage.error('获取人员详情失败')

@@ -117,6 +117,7 @@ const handleMenuSelect = (index: string) => {
 
 const handleLogout = () => {
   authStore.logout()
+  router.push('/dashboard')
 }
 
 const showPwDialog = ref(false)
@@ -144,9 +145,11 @@ const handleChangePassword = async () => {
       new_password: pwForm.value.new_password,
     })
     if (res.code === 0) {
-      ElMessage.success('密码修改成功')
+      ElMessage.success('密码修改成功，请重新登录')
       showPwDialog.value = false
       pwForm.value = { old_password: '', new_password: '', confirm: '' }
+      authStore.logout()
+      router.push('/dashboard')
     } else {
       ElMessage.error(res.msg || '修改失败')
     }

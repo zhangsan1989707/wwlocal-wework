@@ -455,6 +455,7 @@ const fetchContactNames = async (data: LogRow[]) => {
 }
 
 const handleQuery = async () => {
+  expandedRows.value = []
   if (form.feature_ids.length === 0) {
     ElMessage.warning('请选择至少一个日志类型')
     return

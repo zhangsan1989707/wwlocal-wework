@@ -191,8 +191,8 @@ const viewRecentLogs = (featureId: number) => {
     path: '/query',
     query: {
       feature_ids: String(featureId),
-      date_start: String(Math.floor(start.getTime() / 1000)),
-      date_end: String(Math.floor(end.getTime() / 1000)),
+      start_time: String(Math.floor(start.getTime() / 1000)),
+      end_time: String(Math.floor(end.getTime() / 1000)),
     },
   })
 }
