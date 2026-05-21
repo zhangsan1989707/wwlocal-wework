@@ -69,7 +69,7 @@ func (s *ContactSyncService) SyncContactsFull() {
 		deptModels = append(deptModels, repository.DeptItemToDepartment(d))
 	}
 	if err := s.contactRepo.BatchUpsertDepts(deptModels); err != nil {
-		slog.Info(fmt.Sprintf("contact sync: upsert departments failed: %v", err))
+		slog.Error(fmt.Sprintf("contact sync: upsert departments failed: %v (sync continues)", err))
 	}
 
 	s.mu.Lock()
@@ -183,7 +183,9 @@ func (s *ContactSyncService) SyncContactsIncremental() {
 	for _, d := range depts {
 		deptModels = append(deptModels, repository.DeptItemToDepartment(d))
 	}
-	s.contactRepo.BatchUpsertDepts(deptModels)
+	if err := s.contactRepo.BatchUpsertDepts(deptModels); err != nil {
+		slog.Error(fmt.Sprintf("contact incremental sync: upsert departments failed: %v (sync continues)", err))
+	}
 
 	s.mu.Lock()
 	s.status.Phase = "members"

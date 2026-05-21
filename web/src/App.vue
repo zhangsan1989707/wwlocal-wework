@@ -93,9 +93,8 @@
 import { ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { authAPI } from './api/index'
-import type { ApiResponse } from './types/api'
 import { useAuthStore } from './stores/auth'
+import { authAPI } from './api'
 import Login from './components/Login.vue'
 import {
   DataLine, Document, Refresh, User, Setting, Key, Monitor,
@@ -143,7 +142,7 @@ const handleChangePassword = async () => {
     const res = await authAPI.changePassword({
       old_password: pwForm.value.old_password,
       new_password: pwForm.value.new_password,
-    }) as unknown as ApiResponse<{ message: string }>
+    })
     if (res.code === 0) {
       ElMessage.success('密码修改成功')
       showPwDialog.value = false

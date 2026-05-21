@@ -54,11 +54,10 @@ const router = createRouter({
 router.beforeEach((to) => {
   const authStore = useAuthStore()
   if (!authStore.isLoggedIn) {
-    // Not logged in — App.vue will show Login component,
-    // but ensure URL is clean
     if (to.path !== '/dashboard') {
-      return '/dashboard'
+      return { path: '/dashboard', query: to.fullPath !== '/dashboard' ? { redirect: to.fullPath } : undefined }
     }
+    return false
   }
 })
 
