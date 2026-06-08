@@ -108,6 +108,55 @@
       </el-col>
     </el-row>
 
+    <!-- 运营趋势 -->
+    <el-card shadow="never" class="trend-card" v-loading="trendLoading">
+      <template #header>
+        <div class="card-header">
+          <span class="card-title">运营趋势</span>
+          <div style="display: flex; gap: 12px; align-items: center;">
+            <el-button type="success" size="small" @click="exportTrendCSV" :disabled="!trendData?.dates?.length">导出 CSV</el-button>
+          </div>
+        </div>
+      </template>
+
+      <div class="filter-row">
+        <div class="filter-item">
+          <span class="filter-label">时间范围</span>
+          <el-radio-group v-model="trendRange" size="default" @change="onTrendFilterChange">
+            <el-radio-button value="week">周</el-radio-button>
+            <el-radio-button value="month">月</el-radio-button>
+            <el-radio-button value="quarter">季</el-radio-button>
+          </el-radio-group>
+        </div>
+        <div class="filter-item">
+          <span class="filter-label">粒度</span>
+          <el-radio-group v-model="trendGranularity" size="default" @change="onTrendFilterChange">
+            <el-radio-button value="day">日</el-radio-button>
+            <el-radio-button value="week">周</el-radio-button>
+            <el-radio-button value="month">月</el-radio-button>
+            <el-radio-button value="quarter">季</el-radio-button>
+          </el-radio-group>
+        </div>
+      </div>
+
+      <el-alert
+        v-if="trendData"
+        :title="trendCoverageText"
+        :type="trendCoverageType"
+        show-icon
+        :closable="false"
+        style="margin-bottom: 12px;"
+      />
+
+      <TrendChart
+        v-if="trendData?.dates?.length"
+        :dates="trendData.dates"
+        :series="trendChartSeries"
+        height="320px"
+      />
+      <el-empty v-else-if="!trendLoading" description="暂无趋势数据" />
+    </el-card>
+
     <!-- 使用分析（原有功能） -->
     <el-card shadow="never" class="analysis-card">
       <template #header>
@@ -253,8 +302,9 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { dashboardAPI, contactAPI } from '../api'
-import type { DashboardOverview, InactiveUsersResponse, Department } from '../types/api'
+import type { DashboardOverview, InactiveUsersResponse, Department, TrendResponse } from '../types/api'
 import { ElMessage } from 'element-plus'
+import TrendChart from './TrendChart.vue'
 
 const router = useRouter()
 
@@ -276,6 +326,12 @@ const deptVal = ref<number | undefined>(undefined)
 const minDays = ref(1)
 const deptTree = ref<Department[]>([])
 const totalDays = ref(90)
+
+// 运营趋势
+const trendLoading = ref(false)
+const trendData = ref<TrendResponse | null>(null)
+const trendGranularity = ref('day')
+const trendRange = ref('week')
 
 const maxDays = computed(() => totalDays.value)
 
@@ -408,10 +464,58 @@ const formatDuration = (ms: number) => {
   return `${min}m${sec}s`
 }
 
+// 运营趋势
+const trendChartSeries = computed(() => {
+  if (!trendData.value) return []
+  return [{ name: '活跃人数', data: trendData.value.series.active_users, type: 'line' as const }]
+})
+
+const trendCoverageText = computed(() => {
+  if (!trendData.value) return ''
+  const c = trendData.value.coverage
+  return `数据覆盖 ${c.covered_days}/${c.expected_days} 天 (${(c.rate * 100).toFixed(0)}%)`
+})
+
+const trendCoverageType = computed(() => {
+  if (!trendData.value) return 'info'
+  return trendData.value.coverage.rate < 0.8 ? 'warning' : 'success'
+})
+
+const fetchTrend = async () => {
+  trendLoading.value = true
+  try {
+    const res = await dashboardAPI.getTrend({
+      granularity: trendGranularity.value,
+      range: trendRange.value,
+    })
+    if (!isMounted.value) return
+    if (res.code === 0 && res.data) {
+      trendData.value = res.data
+    }
+  } catch (err: unknown) {
+    if (isMounted.value) ElMessage.error(err instanceof Error ? err.message : '加载趋势数据失败')
+  } finally {
+    if (isMounted.value) trendLoading.value = false
+  }
+}
+
+const onTrendFilterChange = () => {
+  fetchTrend()
+}
+
+const exportTrendCSV = () => {
+  const url = dashboardAPI.exportTrendURL({
+    granularity: trendGranularity.value,
+    range: trendRange.value,
+  })
+  window.open(url, '_blank')
+}
+
 onMounted(() => {
   loadOverview()
   loadDeptTree()
   fetchData()
+  fetchTrend()
 })
 </script>
 
@@ -421,7 +525,8 @@ onMounted(() => {
 }
 
 .overview-card,
-.analysis-card {
+.analysis-card,
+.trend-card {
   margin-bottom: 16px;
 }
 

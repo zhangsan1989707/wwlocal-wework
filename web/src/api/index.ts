@@ -33,6 +33,8 @@ import type {
   OperationLog,
   FieldPath,
   TimeRange,
+  TrendResponse,
+  TrendDeptResponse,
 } from '../types/api'
 
 const api = axios.create({
@@ -303,6 +305,18 @@ export const dashboardAPI = {
     if (params.min_inactive_days) qs.set('min_inactive_days', String(params.min_inactive_days))
     return `/api/v1/dashboard/inactive-users/export?${qs.toString()}`
   },
+  getTrend: (params: { granularity?: string; range?: string; dept_id?: number; feature_ids?: string }) =>
+    api.get<ApiResponse<TrendResponse>>('/dashboard/trend', { params }) as unknown as ApiResult<TrendResponse>,
+  getTrendByDept: (params: { range?: string; feature_id?: number }) =>
+    api.get<ApiResponse<TrendDeptResponse>>('/dashboard/trend/dept', { params }) as unknown as ApiResult<TrendDeptResponse>,
+  exportTrendURL: (params: { granularity?: string; range?: string; dept_id?: number; feature_ids?: string }) => {
+    const qs = new URLSearchParams()
+    if (params.granularity) qs.set('granularity', params.granularity)
+    if (params.range) qs.set('range', params.range)
+    if (params.dept_id) qs.set('dept_id', String(params.dept_id))
+    if (params.feature_ids) qs.set('feature_ids', params.feature_ids)
+    return `/api/v1/dashboard/trend/export?${qs.toString()}`
+  },
 }
 
 export const systemAPI = {
@@ -409,6 +423,8 @@ export type {
   OperationLog,
   FieldPath,
   TimeRange,
+  TrendResponse,
+  TrendDeptResponse,
 }
 
 export default api

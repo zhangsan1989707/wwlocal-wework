@@ -142,6 +142,9 @@ func (r *Router) Setup(e *echo.Echo) {
 			dashboard.GET("/overview", d.Dashboard.GetOverview)
 			dashboard.GET("/inactive-users", d.Dashboard.GetInactiveUsers)
 			dashboard.GET("/inactive-users/export", d.Dashboard.ExportInactiveUsers)
+			dashboard.GET("/trend", d.Dashboard.GetTrend)
+			dashboard.GET("/trend/dept", d.Dashboard.GetTrendByDept)
+			dashboard.GET("/trend/export", d.Dashboard.ExportTrend)
 		}
 
 		system := api.Group("/system")

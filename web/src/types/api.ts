@@ -356,3 +356,43 @@ export interface TimeRange {
   earliest?: number
   latest?: number
 }
+
+export interface TrendCoverage {
+  expected_days: number
+  covered_days: number
+  rate: number
+  by_feature: Record<number, number>
+}
+
+export interface TrendFeature {
+  id: number
+  name: string
+  counts: number[]
+}
+
+export interface TrendResponse {
+  granularity: string
+  range: string
+  total_days: number
+  coverage: TrendCoverage
+  dates: string[]
+  series: {
+    active_users: number[]
+    total_contacts: number
+  }
+  features: TrendFeature[]
+}
+
+export interface TrendDeptStat {
+  id: number
+  name: string
+  total: number
+  active: number
+  inactive: number
+  active_rate: number
+  avg_active_days: number
+}
+
+export interface TrendDeptResponse {
+  departments: TrendDeptStat[]
+}

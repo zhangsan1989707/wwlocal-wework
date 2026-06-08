@@ -2,6 +2,7 @@ package service
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"wwlocal-wework/config"
@@ -273,6 +274,153 @@ func (s *DashboardService) ExportInactiveUsersCSV(rangeParam string, deptID int,
 	rows = append(rows, []string{"姓名", "手机号", "职位", "所属部门", "活跃天数", "未使用天数", "UserID"})
 	for _, u := range users {
 		rows = append(rows, []string{u.Name, u.Mobile, u.Position, u.Department, strconv.Itoa(u.ActiveDays), strconv.Itoa(u.InactiveDays), u.UserID})
+	}
+	return rows, nil
+}
+
+// parseFeatureIDs 解析逗号分隔的 feature ID 字符串，空则返回全部
+func (s *DashboardService) parseFeatureIDs(featureIDStr string) []int {
+	if featureIDStr == "" {
+		return s.cfg.Features.IDs
+	}
+	var ids []int
+	for _, part := range strings.Split(featureIDStr, ",") {
+		if id, err := strconv.Atoi(strings.TrimSpace(part)); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return s.cfg.Features.IDs
+	}
+	return ids
+}
+
+// calcDateRange 根据 rangeParam 计算起止日期
+func (s *DashboardService) calcDateRange(rangeParam string) (string, string) {
+	now := time.Now()
+	var start time.Time
+	switch rangeParam {
+	case "week":
+		start = now.AddDate(0, 0, -7)
+	case "month":
+		loc := now.Location()
+		start = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc)
+	default: // quarter
+		start = now.AddDate(0, -3, 0)
+	}
+	return start.Format("2006-01-02"), now.Format("2006-01-02")
+}
+
+func (s *DashboardService) GetTrend(granularity, rangeParam string, deptID int, featureIDStr string) (map[string]interface{}, error) {
+	if granularity == "" {
+		granularity = "day"
+	}
+	featureIDs := s.parseFeatureIDs(featureIDStr)
+	startDate, endDate := s.calcDateRange(rangeParam)
+
+	// 趋势数据
+	trend, err := s.logRepo.GetTrendStats(featureIDs, startDate, endDate, granularity)
+	if err != nil {
+		return nil, err
+	}
+	dates := make([]string, 0, len(trend))
+	activeUsers := make([]int, 0, len(trend))
+	for _, p := range trend {
+		dates = append(dates, p.Period)
+		activeUsers = append(activeUsers, p.ActiveUsers)
+	}
+
+	// 数据覆盖率
+	expectedDays, coveredDays, byFeature, _ := s.logRepo.GetDataCoverage(featureIDs, startDate, endDate)
+	var coverageRate float64
+	if expectedDays > 0 {
+		coverageRate = float64(coveredDays) / float64(expectedDays)
+	}
+
+	// 各 feature 活跃趋势
+	features := make([]map[string]interface{}, 0, len(featureIDs))
+	for _, fid := range featureIDs {
+		name := s.cfg.Features.Names[fid]
+		if name == "" {
+			name = strconv.Itoa(fid)
+		}
+		singleTrend, _ := s.logRepo.GetTrendStats([]int{fid}, startDate, endDate, granularity)
+		counts := make([]int, 0, len(singleTrend))
+		for _, p := range singleTrend {
+			counts = append(counts, p.ActiveUsers)
+		}
+		features = append(features, map[string]interface{}{
+			"id":     fid,
+			"name":   name,
+			"counts": counts,
+		})
+	}
+
+	// 通讯录总数
+	totalContacts, _ := s.contactRepo.GetTotalContacts()
+
+	return map[string]interface{}{
+		"granularity": granularity,
+		"range":       rangeParam,
+		"total_days":  expectedDays,
+		"coverage": map[string]interface{}{
+			"expected_days": expectedDays,
+			"covered_days":  coveredDays,
+			"rate":          coverageRate,
+			"by_feature":    byFeature,
+		},
+		"dates": dates,
+		"series": map[string]interface{}{
+			"active_users":  activeUsers,
+			"total_contacts": totalContacts,
+		},
+		"features": features,
+	}, nil
+}
+
+func (s *DashboardService) GetTrendByDept(rangeParam string, featureID int) (map[string]interface{}, error) {
+	if featureID <= 0 {
+		featureID = 90000031 // 默认登录
+	}
+	startDate, endDate := s.calcDateRange(rangeParam)
+
+	depts, err := s.logRepo.GetTrendByDept([]int{featureID}, startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"departments": depts,
+	}, nil
+}
+
+func (s *DashboardService) ExportTrendCSV(granularity, rangeParam string, deptID int, featureIDStr string) ([][]string, error) {
+	if granularity == "" {
+		granularity = "day"
+	}
+	featureIDs := s.parseFeatureIDs(featureIDStr)
+	startDate, endDate := s.calcDateRange(rangeParam)
+
+	trend, err := s.logRepo.GetTrendStats(featureIDs, startDate, endDate, granularity)
+	if err != nil {
+		return nil, err
+	}
+
+	expectedDays, coveredDays, _, _ := s.logRepo.GetDataCoverage(featureIDs, startDate, endDate)
+	var coverageRate float64
+	if expectedDays > 0 {
+		coverageRate = float64(coveredDays) / float64(expectedDays)
+	}
+
+	rows := make([][]string, 0, len(trend)+1)
+	rows = append(rows, []string{"日期", "活跃人数", "数据覆盖天数", "覆盖率"})
+	for _, p := range trend {
+		rows = append(rows, []string{
+			p.Period,
+			strconv.Itoa(p.ActiveUsers),
+			strconv.Itoa(coveredDays) + "/" + strconv.Itoa(expectedDays),
+			strconv.FormatFloat(coverageRate*100, 'f', 1, 64) + "%",
+		})
 	}
 	return rows, nil
 }

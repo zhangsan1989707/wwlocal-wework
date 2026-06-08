@@ -307,3 +307,190 @@ func (r *LogRepository) GetDeptInactiveStats(featureIDs []int, startTime int64, 
 	}
 	return result, nil
 }
+
+// TrendPoint 趋势数据点
+type TrendPoint struct {
+	Period      string `json:"period"`
+	ActiveUsers int    `json:"active_users"`
+}
+
+// DeptTrendStat 部门趋势统计
+type DeptTrendStat struct {
+	DeptID        int     `json:"id"`
+	DeptName      string  `json:"name"`
+	TotalContacts int64   `json:"total"`
+	ActiveCount   int64   `json:"active"`
+	InactiveCount int64   `json:"inactive"`
+	ActiveRate    float64 `json:"active_rate"`
+	AvgActiveDays float64 `json:"avg_active_days"`
+}
+
+// GetTrendStats 按时间粒度聚合活跃人数
+func (r *LogRepository) GetTrendStats(featureIDs []int, startDate, endDate string, granularity string) ([]TrendPoint, error) {
+	fidPlaceholders := make([]string, len(featureIDs))
+	fidArgs := make([]interface{}, len(featureIDs))
+	for i, fid := range featureIDs {
+		fidPlaceholders[i] = "?"
+		fidArgs[i] = fid
+	}
+
+	var groupExpr, orderExpr string
+	switch granularity {
+	case "week":
+		groupExpr = "DATE_FORMAT(stat_date, '%x-W%v')"
+		orderExpr = "MIN(stat_date)"
+	case "month":
+		groupExpr = "DATE_FORMAT(stat_date, '%Y-%m')"
+		orderExpr = "MIN(stat_date)"
+	case "quarter":
+		groupExpr = "CONCAT(YEAR(stat_date), '-Q', QUARTER(stat_date))"
+		orderExpr = "MIN(stat_date)"
+	default: // day
+		groupExpr = "stat_date"
+		orderExpr = "stat_date"
+	}
+
+	sql := fmt.Sprintf(`
+		SELECT %s AS period, COUNT(DISTINCT mobile) AS active_users
+		FROM user_daily_stats
+		WHERE feature_id IN (%s) AND stat_date >= ? AND stat_date <= ?
+		GROUP BY %s
+		ORDER BY %s
+	`, groupExpr, strings.Join(fidPlaceholders, ","), groupExpr, orderExpr)
+
+	args := make([]interface{}, 0, len(fidArgs)+2)
+	args = append(args, fidArgs...)
+	args = append(args, startDate, endDate)
+
+	var points []TrendPoint
+	if err := r.DB.Raw(sql, args...).Scan(&points).Error; err != nil {
+		return nil, err
+	}
+	return points, nil
+}
+
+// GetDataCoverage 计算数据覆盖率
+func (r *LogRepository) GetDataCoverage(featureIDs []int, startDate, endDate string) (int, int, map[int]int, error) {
+	fidPlaceholders := make([]string, len(featureIDs))
+	fidArgs := make([]interface{}, len(featureIDs))
+	for i, fid := range featureIDs {
+		fidPlaceholders[i] = "?"
+		fidArgs[i] = fid
+	}
+
+	// 总覆盖天数
+	totalSQL := fmt.Sprintf(`
+		SELECT COUNT(DISTINCT stat_date) FROM user_daily_stats
+		WHERE feature_id IN (%s) AND stat_date >= ? AND stat_date <= ?
+	`, strings.Join(fidPlaceholders, ","))
+
+	totalArgs := make([]interface{}, 0, len(fidArgs)+2)
+	totalArgs = append(totalArgs, fidArgs...)
+	totalArgs = append(totalArgs, startDate, endDate)
+
+	var coveredDays int64
+	if err := r.DB.Raw(totalSQL, totalArgs...).Scan(&coveredDays).Error; err != nil {
+		return 0, 0, nil, err
+	}
+
+	// 按 feature 分组覆盖天数
+	featureSQL := fmt.Sprintf(`
+		SELECT feature_id, COUNT(DISTINCT stat_date) AS days
+		FROM user_daily_stats
+		WHERE feature_id IN (%s) AND stat_date >= ? AND stat_date <= ?
+		GROUP BY feature_id
+	`, strings.Join(fidPlaceholders, ","))
+
+	var featureRows []struct {
+		FeatureID int
+		Days      int
+	}
+	if err := r.DB.Raw(featureSQL, totalArgs...).Scan(&featureRows).Error; err != nil {
+		return 0, 0, nil, err
+	}
+
+	byFeature := make(map[int]int, len(featureRows))
+	for _, row := range featureRows {
+		byFeature[row.FeatureID] = row.Days
+	}
+
+	// 计算期望天数
+	start, _ := time.Parse("2006-01-02", startDate)
+	end, _ := time.Parse("2006-01-02", endDate)
+	expectedDays := int(end.Sub(start).Hours()/24) + 1
+
+	return expectedDays, int(coveredDays), byFeature, nil
+}
+
+// GetTrendByDept 部门维度活跃统计
+func (r *LogRepository) GetTrendByDept(featureIDs []int, startDate, endDate string) ([]DeptTrendStat, error) {
+	fidPlaceholders := make([]string, len(featureIDs))
+	fidArgs := make([]interface{}, len(featureIDs))
+	for i, fid := range featureIDs {
+		fidPlaceholders[i] = "?"
+		fidArgs[i] = fid
+	}
+
+	sql := fmt.Sprintf(`
+		SELECT
+			cd.department AS dept_id,
+			COUNT(DISTINCT c.mobile) AS total_contacts,
+			COUNT(DISTINCT CASE WHEN uds.mobile IS NOT NULL THEN c.mobile END) AS active_count,
+			COALESCE(AVG(CASE WHEN uds.mobile IS NOT NULL THEN uds.active_days END), 0) AS avg_active_days
+		FROM contacts c
+		INNER JOIN contact_departments cd ON cd.user_id = c.user_id
+		LEFT JOIN (
+			SELECT mobile, COUNT(DISTINCT stat_date) AS active_days
+			FROM user_daily_stats
+			WHERE feature_id IN (%s) AND stat_date >= ? AND stat_date <= ?
+			GROUP BY mobile
+		) uds ON uds.mobile = c.mobile
+		WHERE c.status = 1
+		GROUP BY cd.department
+		ORDER BY active_count DESC
+	`, strings.Join(fidPlaceholders, ","))
+
+	args := make([]interface{}, 0, len(fidArgs)+2)
+	args = append(args, fidArgs...)
+	args = append(args, startDate, endDate)
+
+	var rows []struct {
+		DeptID        int
+		TotalContacts int64
+		ActiveCount   int64
+		AvgActiveDays float64
+	}
+	if err := r.DB.Raw(sql, args...).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	// 获取部门名称
+	deptNames := make(map[int]string)
+	var depts []struct {
+		ID   int
+		Name string
+	}
+	r.DB.Raw("SELECT id, name FROM departments").Scan(&depts)
+	for _, d := range depts {
+		deptNames[d.ID] = d.Name
+	}
+
+	result := make([]DeptTrendStat, 0, len(rows))
+	for _, row := range rows {
+		inactive := row.TotalContacts - row.ActiveCount
+		var rate float64
+		if row.TotalContacts > 0 {
+			rate = float64(row.ActiveCount) / float64(row.TotalContacts)
+		}
+		result = append(result, DeptTrendStat{
+			DeptID:        row.DeptID,
+			DeptName:      deptNames[row.DeptID],
+			TotalContacts: row.TotalContacts,
+			ActiveCount:   row.ActiveCount,
+			InactiveCount: inactive,
+			ActiveRate:    rate,
+			AvgActiveDays: row.AvgActiveDays,
+		})
+	}
+	return result, nil
+}
