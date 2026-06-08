@@ -7,7 +7,7 @@
 - 生产环境: `http://<host>:19010`
 - 开发环境: `http://localhost:19010`
 
-### 认证方式
+### 认证与权限
 
 登录接口无需认证。其余 `/api/v1/*` 接口均需要在请求头中携带 JWT Token：
 
@@ -16,6 +16,15 @@ Authorization: Bearer <token>
 ```
 
 Token 通过 `/api/v1/auth/login` 获取，有效期 24 小时。
+
+系统内置两类角色：
+
+| 角色 | 数据范围 |
+|------|----------|
+| `super_admin` | 不限制，可访问全部日志、通讯录、看板和导出 |
+| `dept_admin` | 仅限已授权部门及其子部门成员 |
+
+部门管理员访问通用日志查询和导出时，必须指定本部门成员的手机号或 UserID；访问行为查询和行为导出时，`openid` 也必须属于授权部门成员。越权访问返回 HTTP 403。
 
 ### 统一响应格式
 
@@ -129,7 +138,7 @@ Token 通过 `/api/v1/auth/login` 获取，有效期 24 小时。
 
 ### POST /api/v1/logs/query
 
-查询业务日志数据。支持按数据类型、时间范围、手机号、自定义条件过滤，支持分页和实时查询模式。
+查询业务日志数据。支持按数据类型、时间范围、手机号/UserID、自定义条件过滤，支持分页和实时查询模式。查询在数据库侧按 `log_time DESC, id DESC` 排序分页，避免跨月表全量拉取后再分页。
 
 **请求体（JSON）：**
 
@@ -139,7 +148,7 @@ Token 通过 `/api/v1/auth/login` 获取，有效期 24 小时。
 | start_time | int64 | 是 | 开始时间（Unix 时间戳，秒） |
 | end_time | int64 | 是 | 结束时间（Unix 时间戳，秒） |
 | conditions | map | 否 | 自定义过滤条件（key 为字段路径，value 为匹配值） |
-| mobile | string | 否 | 手机号过滤（匹配 openid） |
+| mobile | string | 否 | 手机号或 UserID 过滤（匹配日志中的 openid/userid 索引字段） |
 | page | int | 否 | 页码，默认 1 |
 | page_size | int | 否 | 每页条数，默认 20 |
 | realtime | bool | 否 | 是否实时查询（直连政务微信 API，跳过本地存储） |
@@ -182,6 +191,146 @@ Token 通过 `/api/v1/auth/login` 获取，有效期 24 小时。
   }
 }
 ```
+
+---
+
+### POST /api/v1/logs/export
+
+按通用日志查询条件导出 CSV。请求体与 `/api/v1/logs/query` 相同，导出同样应用 `feature_ids`、时间范围、`mobile` 和 `conditions`，部门管理员权限规则也一致。
+
+**响应：**
+
+- `Content-Type: text/csv; charset=utf-8`
+- `Content-Disposition: attachment; filename=log_query_YYYYMMDD_HHMMSS.csv`
+
+CSV 列：`日志类型编号, 日志类型名称, 时间, openid, 数据内容`。
+
+---
+
+### POST /api/v1/logs/behavior-query
+
+按单个 OpenID/手机号/UserID 查询成员行为时间线。行为查询只读取已同步到本地的结构化字段，不会执行撤回消息、删除消息、删除文件、解散群、移除群成员等任何干预动作。
+
+**请求体（JSON）：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| openid | string | 是 | 要查询的 OpenID、手机号或 UserID |
+| feature_ids | int[] | 否 | 数据类型 ID 列表；为空时使用当前启用的数据类型 |
+| start_time | int64 | 是 | 开始时间（Unix 时间戳，秒） |
+| end_time | int64 | 是 | 结束时间（Unix 时间戳，秒），最大跨度 31 天 |
+| page | int | 否 | 页码，默认 1 |
+| page_size | int | 否 | 每页条数，默认 50，上限 200 |
+
+**行为查询支持范围：**
+
+| feature_id | 名称 | 命中字段 |
+|------------|------|----------|
+| 90000031 | 登录 | `login_user_openid` |
+| 90000032 | 唤醒客户端 | `login_user_openid` |
+| 90000033 | 访问应用 | `user_openid` |
+| 90000034 | 推送消息 | `to_user` |
+| 90000035 | 发送消息 | `sender_openid` |
+| 90000036 | 单聊消息 | `sender_openid`, `receiver_openid` |
+| 90000037 | 群聊消息 | `sender_openid`, `receiver` |
+| 90000038 | 创建群聊 | `creator_openid`, `members` |
+| 90000039 | 添加群成员 | `oper_openid`, `add_members`, `original_members` |
+| 90000040 | 移除群成员 | `oper_openid`, `del_members`, `original_members` |
+| 90000041 | 退出群聊 | `quit_user_openid`, `original_members` |
+| 90000042 | 转让群主 | `oper_openid`, `new_owner_openid`, `members` |
+| 90000043 | 解散群聊 | `oper_openid`, `members` |
+| 90000044 | 修改群名称 | `oper_openid` |
+| 90000046 | 应用消息 | `user_openid`, `agent_user_openid` |
+| 90000047 | 添加成员 | `user_openid` |
+| 90000048 | 激活成员 | `user_openid` |
+| 90000054 | 客户端安装 | `openid` |
+| 90000055 | 客户端升级 | `openid` |
+| 90000058 | 通讯录更新 | `openid` |
+| 90000059 | 网络质量统计 | `openid` |
+| 90000061 | 微盘文件操作 | `oper_name` |
+| 90000062 | 微盘账号行为 | `oper_name` |
+| 90000063 | 微盘空间操作 | `oper_name` |
+
+`90000066`（API 调用日志）当前不纳入行为查询，因为该类型没有稳定的用户 OpenID/UserID 字段；返回摘要中会显示“暂不支持行为查询”。
+
+**请求示例：**
+
+```json
+{
+  "openid": "13800138000",
+  "feature_ids": [90000031, 90000036, 90000061],
+  "start_time": 1700000000,
+  "end_time": 1700086400,
+  "page": 1,
+  "page_size": 50
+}
+```
+
+**响应示例：**
+
+```json
+{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "total": 1,
+    "page": 1,
+    "page_size": 50,
+    "features": [
+      {
+        "feature_id": 90000036,
+        "feature_name": "单聊消息",
+        "status": "queried",
+        "tables": 1,
+        "queried_tables": 1,
+        "matched_rows": 1
+      }
+    ],
+    "data": [
+      {
+        "feature_id": 90000036,
+        "feature_name": "单聊消息",
+        "log_time": 1700012345,
+        "log_date": "2023-11-15 06:59:05",
+        "matched_fields": [
+          {
+            "field": "sender_openid",
+            "label": "发送人",
+            "value": "13800138000",
+            "display_value": "13800138000(张三)"
+          }
+        ],
+        "data": {
+          "sender_openid": "13800138000",
+          "receiver_openid": "13900139000",
+          "msgid": "xxx"
+        }
+      }
+    ]
+  }
+}
+```
+
+**常见错误：**
+
+| HTTP | msg | 含义 |
+|------|-----|------|
+| 400 | `openid is required` | 未提供查询对象 |
+| 400 | `time range cannot exceed 31 days` | 时间范围超过 31 天 |
+| 403 | `无权查询该成员行为` | 部门管理员查询了非授权部门成员 |
+
+---
+
+### POST /api/v1/logs/behavior-export
+
+按行为查询条件导出行为时间线 CSV。请求体与 `/api/v1/logs/behavior-query` 相同，导出上限 50000 条。
+
+**响应：**
+
+- `Content-Type: text/csv; charset=utf-8`
+- `Content-Disposition: attachment; filename=behavior_timeline_YYYYMMDD_HHMMSS.csv`
+
+CSV 列：`时间, 日志类型编号, 日志类型名称, 命中字段, 摘要, 数据详情`。
 
 ---
 
