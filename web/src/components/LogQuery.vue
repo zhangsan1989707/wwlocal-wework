@@ -61,6 +61,8 @@
                 <el-date-picker
                   v-model="dateRange"
                   type="datetimerange"
+                  format="YYYY-MM-DD HH:mm:ss"
+                  value-format="YYYY-MM-DD HH:mm:ss"
                   range-separator="至"
                   start-placeholder="开始时间"
                   end-placeholder="结束时间"
@@ -519,7 +521,7 @@ const isUnixTimestamp = (key: string, val: unknown): boolean => {
 
 const formatTimestamp = (val: number): string => {
   const d = new Date(val * 1000)
-  return d.toISOString().replace('T', ' ').slice(0, 19)
+  return d.toLocaleString('zh-CN')
 }
 
 const formatValue = (key: string, val: unknown): unknown => {
