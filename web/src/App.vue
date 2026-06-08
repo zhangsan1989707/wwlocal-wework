@@ -33,6 +33,10 @@
               <el-icon><DataLine /></el-icon>
               <span>总览看板</span>
             </el-menu-item>
+            <el-menu-item index="dashboard-v2" title="运营数据看板">
+              <el-icon><DataLine /></el-icon>
+              <span>运营数据看板</span>
+            </el-menu-item>
             <el-menu-item index="query" title="日志审计">
               <el-icon><Document /></el-icon>
               <span>日志审计</span>

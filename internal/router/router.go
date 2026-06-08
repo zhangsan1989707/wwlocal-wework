@@ -21,6 +21,8 @@ type RouterDeps struct {
 	OperationLog  *handler.OperationLogHandler
 	AdminOperLog  *handler.AdminOperLogHandler
 	Dashboard     *handler.DashboardHandler
+	DashboardV2   *handler.DashboardV2Handler
+	Nightly       *handler.NightlyHandler
 	SyncHistory   *handler.SyncHistoryHandler
 	SyncFeature   *handler.SyncFeatureHandler
 	System        *handler.SystemHandler
@@ -145,6 +147,24 @@ func (r *Router) Setup(e *echo.Echo) {
 			dashboard.GET("/trend", d.Dashboard.GetTrend)
 			dashboard.GET("/trend/dept", d.Dashboard.GetTrendByDept)
 			dashboard.GET("/trend/export", d.Dashboard.ExportTrend)
+		}
+
+		dashboardV2 := api.Group("/dashboard/v2")
+		{
+			dashboardV2.GET("/overview", d.DashboardV2.GetOverview)
+			dashboardV2.GET("/trend", d.DashboardV2.GetTrend)
+			dashboardV2.GET("/multi-trend", d.DashboardV2.GetMultiTrend)
+			dashboardV2.GET("/departments", d.DashboardV2.GetDepartmentStats)
+			dashboardV2.GET("/devices", d.DashboardV2.GetDeviceStats)
+			dashboardV2.GET("/users", d.DashboardV2.GetUserList)
+			dashboardV2.GET("/export/overview", d.DashboardV2.ExportOverviewCSV)
+			dashboardV2.GET("/export/users", d.DashboardV2.ExportUserListCSV)
+		}
+
+		nightly := api.Group("/nightly")
+		{
+			nightly.POST("/run", d.Nightly.Run)
+			nightly.GET("/status", d.Nightly.Status)
 		}
 
 		system := api.Group("/system")

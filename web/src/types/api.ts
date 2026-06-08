@@ -396,3 +396,49 @@ export interface TrendDeptStat {
 export interface TrendDeptResponse {
   departments: TrendDeptStat[]
 }
+
+// Dashboard V2 types
+export interface DashboardV2Overview {
+  date: string
+  registered: number
+  activated: number
+  not_activated: number
+  active: number
+  inactive: number
+  rate_activation: number  // permille
+  rate_active: number      // permille
+  msg_count: number
+  msg_sender: number
+  group_created: number
+  group_active: number
+  rate_group_active: number
+  app_access_user: number
+  app_access_count: number
+  devices: {
+    total: number
+    types: Array<{ type: string; name: string; count: number; percentage: number }>
+  }
+}
+
+export interface DashboardV2Trend {
+  periods: string[]
+  series: Record<string, number[]>
+  granularity: string
+}
+
+export interface DashboardV2DeptStat {
+  dept_id: number
+  dept_name: string
+  total_contacts: number
+  active: number
+  inactive: number
+  active_rate: number
+}
+
+export interface DashboardV2UserItem {
+  mobile: string
+  user_id: string
+  name: string
+  department: string
+  extra?: Record<string, unknown>
+}

@@ -17,6 +17,7 @@ type Config struct {
 	Features  FeaturesConfig  `yaml:"features"`
 	Auth      AuthConfig      `yaml:"auth"`
 	Scheduler SchedulerConfig `yaml:"scheduler"`
+	Nightly   NightlyConfig   `yaml:"nightly"`
 	Redis     RedisConfig     `yaml:"redis"`
 	RateLimit RateLimitConfig `yaml:"rate_limit"`
 }
@@ -67,6 +68,13 @@ type AuthConfig struct {
 type SchedulerConfig struct {
 	Enabled  bool   `yaml:"enabled"`
 	Interval string `yaml:"interval"` // "1h", "30m", "24h"
+}
+
+type NightlyConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	Hour         int    `yaml:"hour"`          // 执行小时，默认 1
+	Minute       int    `yaml:"minute"`        // 执行分钟，默认 0
+	LookbackDays int    `yaml:"lookback_days"` // 回溯天数，默认 1（昨天）
 }
 
 type RedisConfig struct {
@@ -154,6 +162,14 @@ func Load(path string) (*Config, error) {
 
 	cfg.Scheduler.Enabled = getEnvBool("SCHEDULER_ENABLED", cfg.Scheduler.Enabled)
 	cfg.Scheduler.Interval = getEnv("SCHEDULER_INTERVAL", cfg.Scheduler.Interval)
+
+	cfg.Nightly.Enabled = getEnvBool("NIGHTLY_ENABLED", cfg.Nightly.Enabled)
+	if cfg.Nightly.Hour <= 0 {
+		cfg.Nightly.Hour = 1
+	}
+	if cfg.Nightly.LookbackDays <= 0 {
+		cfg.Nightly.LookbackDays = 1
+	}
 
 	// 校验必需配置
 	var missing []string

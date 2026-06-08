@@ -14,6 +14,11 @@ const router = createRouter({
       component: () => import('../components/Dashboard.vue'),
     },
     {
+      path: '/dashboard-v2',
+      name: 'DashboardV2',
+      component: () => import('../components/DashboardV2.vue'),
+    },
+    {
       path: '/query',
       name: 'Query',
       component: () => import('../components/LogQuery.vue'),

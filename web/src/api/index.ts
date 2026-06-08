@@ -35,6 +35,10 @@ import type {
   TimeRange,
   TrendResponse,
   TrendDeptResponse,
+  DashboardV2Overview,
+  DashboardV2Trend,
+  DashboardV2DeptStat,
+  DashboardV2UserItem,
 } from '../types/api'
 
 const api = axios.create({
@@ -284,6 +288,26 @@ export const contactAPI = {
     api.get<ApiResponse<ContactSyncStatus>>('/contacts/sync/status') as unknown as ApiResult<ContactSyncStatus>,
 }
 
+// Dashboard V2 API
+export const dashboardV2Api = {
+  getOverview: (date?: string) =>
+    api.get<ApiResponse<DashboardV2Overview>>('/dashboard/v2/overview', { params: { date } }) as unknown as ApiResult<DashboardV2Overview>,
+  getTrend: (params: { metric_type: string; start_date?: string; end_date?: string; granularity?: string; dimension_key?: string }) =>
+    api.get<ApiResponse<DashboardV2Trend>>('/dashboard/v2/trend', { params }) as unknown as ApiResult<DashboardV2Trend>,
+  getMultiTrend: (params: { metric_types: string; start_date?: string; end_date?: string; granularity?: string }) =>
+    api.get<ApiResponse<DashboardV2Trend>>('/dashboard/v2/multi-trend', { params }) as unknown as ApiResult<DashboardV2Trend>,
+  getDepartments: (date?: string) =>
+    api.get<ApiResponse<DashboardV2DeptStat[]>>('/dashboard/v2/departments', { params: { date } }) as unknown as ApiResult<DashboardV2DeptStat[]>,
+  getDevices: (date?: string) =>
+    api.get<ApiResponse<DashboardV2Overview['devices']>>('/dashboard/v2/devices', { params: { date } }) as unknown as ApiResult<DashboardV2Overview['devices']>,
+  getUsers: (params: { date?: string; list_type?: string; page?: number; page_size?: number }) =>
+    api.get<ApiResponse<{ total: number; users: DashboardV2UserItem[] }>>('/dashboard/v2/users', { params }) as unknown as ApiResult<{ total: number; users: DashboardV2UserItem[] }>,
+  exportOverview: (date?: string) =>
+    api.get('/dashboard/v2/export/overview', { params: { date }, responseType: 'blob' }),
+  exportUsers: (params: { date?: string; list_type?: string }) =>
+    api.get('/dashboard/v2/export/users', { params, responseType: 'blob' }),
+}
+
 export const dashboardAPI = {
   getOverview: () =>
     api.get<ApiResponse<DashboardOverview>>('/dashboard/overview') as unknown as ApiResult<DashboardOverview>,
@@ -425,6 +449,10 @@ export type {
   TimeRange,
   TrendResponse,
   TrendDeptResponse,
+  DashboardV2Overview,
+  DashboardV2Trend,
+  DashboardV2DeptStat,
+  DashboardV2UserItem,
 }
 
 export default api

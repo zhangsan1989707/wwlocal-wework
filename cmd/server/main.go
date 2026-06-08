@@ -147,6 +147,15 @@ func main() {
 
 	dashboardSvc := service.NewDashboardService(logRepo, contactRepo, syncHistoryRepo, syncStateRepo, keyRepo, cfg)
 	dashboardHandler := handler.NewDashboardHandler(dashboardSvc)
+
+	dashboardStatsRepo := repository.NewDashboardStatsRepository(db)
+	if err := dashboardStatsRepo.AutoMigrate(); err != nil {
+		slog.Error(fmt.Sprintf("migrate dashboard stats repository failed: %v", err)); os.Exit(1)
+	}
+	dashboardV2Svc := service.NewDashboardV2Service(dashboardStatsRepo, contactRepo, cfg)
+	dashboardV2Handler := handler.NewDashboardV2Handler(dashboardV2Svc)
+	nightlySvc := service.NewNightlyJobService(syncSvc, contactSyncSvc, dashboardStatsRepo, contactRepo, logRepo, cfg)
+	nightlyHandler := handler.NewNightlyHandler(nightlySvc)
 	syncHistoryHandler := handler.NewSyncHistoryHandler(syncHistoryRepo)
 	syncFeatureHandler := handler.NewSyncFeatureHandler(syncFeatureRepo)
 	systemHandler := handler.NewSystemHandler(syncStateRepo, keyRepo, contactRepo, logRepo)
@@ -162,6 +171,10 @@ func main() {
 
 	if cfg.Scheduler.Enabled {
 		schedulerSvc.Start(interval)
+	}
+
+	if cfg.Nightly.Enabled {
+		nightlySvc.Start()
 	}
 
 	// 启动任务队列工作线程
@@ -184,6 +197,8 @@ func main() {
 		OperationLog: operationLogHandler,
 		AdminOperLog: adminOperLogHandler,
 		Dashboard:    dashboardHandler,
+		DashboardV2:  dashboardV2Handler,
+		Nightly:      nightlyHandler,
 		SyncHistory:  syncHistoryHandler,
 		SyncFeature:  syncFeatureHandler,
 		System:       systemHandler,
@@ -221,6 +236,7 @@ func main() {
 
 	// 1. 停止定时调度
 	schedulerSvc.Stop()
+	nightlySvc.Stop()
 
 	// 2. 停止任务队列
 	taskQueueSvc.Stop()
