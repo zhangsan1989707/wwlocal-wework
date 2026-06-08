@@ -224,6 +224,52 @@
             </template>
           </el-table-column>
         </el-table>
+
+        <div v-if="schemaAcceptanceData.length > 0" class="schema-acceptance">
+          <div class="subsection-header">
+            <h4>结构化验收</h4>
+            <el-button size="small" link :loading="schemaLoading" @click="loadSchemaQuality">
+              刷新验收
+            </el-button>
+          </div>
+          <el-table :data="schemaAcceptanceData" border max-height="260" size="small" v-loading="schemaLoading">
+            <el-table-column prop="feature_id" label="日志类型编号" width="120" align="center" />
+            <el-table-column prop="name" label="数据类型" min-width="150" />
+            <el-table-column label="结构化" width="100" align="center">
+              <template #default="{ row }">
+                <el-tag :type="row.structured_supported ? 'success' : 'info'" size="small">
+                  {{ row.structured_supported ? '已定义' : '未定义' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="行为查询" width="100" align="center">
+              <template #default="{ row }">
+                <el-tag :type="row.behavior_supported ? 'success' : 'info'" size="small">
+                  {{ row.behavior_supported ? '支持' : '仅原文' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="记录数" width="100" align="center">
+              <template #default="{ row }">{{ formatNumber(row.rows) }}</template>
+            </el-table-column>
+            <el-table-column prop="field_count" label="字段数" width="90" align="center" />
+            <el-table-column label="平均覆盖" width="110" align="center">
+              <template #default="{ row }">
+                <el-tag :type="coverageTagType(row.avg_coverage)" size="small">
+                  {{ formatPercent(row.avg_coverage) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="最低覆盖" width="110" align="center">
+              <template #default="{ row }">
+                <el-tag :type="coverageTagType(row.min_coverage)" size="small">
+                  {{ formatPercent(row.min_coverage) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="missing_fields" label="缺失字段" min-width="180" show-overflow-tooltip />
+          </el-table>
+        </div>
       </div>
 
       <el-empty v-if="!syncStatus.running && (!syncStatus.results || Object.keys(syncStatus.results).length === 0)" description="暂无同步记录" />
@@ -289,8 +335,8 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
-import { syncAPI, schedulerAPI, syncHistoryAPI, syncFeatureAPI, adminOperLogAPI } from '../api'
-import type { SyncFeature, SyncHistory } from '../types/api'
+import { syncAPI, schedulerAPI, syncHistoryAPI, syncFeatureAPI, adminOperLogAPI, systemAPI } from '../api'
+import type { SchemaQualityInfo, SyncFeature, SyncHistory } from '../types/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { VideoPlay, VideoPause, Refresh, Clock } from '@element-plus/icons-vue'
 
@@ -324,6 +370,8 @@ const historyTotal = ref(0)
 const historyPage = ref(1)
 const historyPageSize = ref(10)
 const historyLoading = ref(false)
+const schemaQuality = ref<SchemaQualityInfo[]>([])
+const schemaLoading = ref(false)
 
 const timeShortcuts = [
   { label: '最近1天', hours: 24 },
@@ -351,6 +399,34 @@ const resultTableData = computed(() => {
   }))
 })
 
+const schemaAcceptanceData = computed(() => {
+  const resultIDs = new Set(Object.keys(syncStatus.value.results || {}).map(Number))
+  if (resultIDs.size === 0) return []
+  return schemaQuality.value
+    .filter(item => resultIDs.has(item.feature_id))
+    .map(item => {
+      const fields = item.fields || []
+      const presentFields = fields.filter(field => field.present)
+      const coverages = presentFields.map(field => field.coverage_rate || 0)
+      const avgCoverage = coverages.length > 0
+        ? coverages.reduce((sum, value) => sum + value, 0) / coverages.length
+        : 0
+      const minCoverage = coverages.length > 0 ? Math.min(...coverages) : 0
+      const missingFields = fields.filter(field => !field.present).map(field => field.name)
+      return {
+        feature_id: item.feature_id,
+        name: getFeatureName(item.feature_id),
+        structured_supported: item.structured_supported,
+        behavior_supported: item.behavior_supported,
+        rows: item.rows,
+        field_count: fields.length,
+        avg_coverage: avgCoverage,
+        min_coverage: minCoverage,
+        missing_fields: missingFields.length > 0 ? missingFields.join(', ') : '-',
+      }
+    })
+})
+
 const getFeatureName = (featureId: number) => {
   const feature = features.value.find(f => f.feature_id === featureId)
   return feature ? feature.name : `Feature ${featureId}`
@@ -374,6 +450,7 @@ onMounted(async () => {
   }
   await checkStatus()
   await checkSchedulerStatus()
+  await loadSchemaQuality()
   await loadSyncHistory()
   if (syncStatus.value.running) startPolling()
 })
@@ -387,6 +464,7 @@ const startPolling = () => {
   pollTimer = setInterval(async () => {
     await checkStatus()
     if (syncStatus.value && !syncStatus.value.running) {
+      await loadSchemaQuality()
       stopPolling()
     }
   }, 2000)
@@ -594,6 +672,20 @@ const checkStatus = async () => {
   }
 }
 
+const loadSchemaQuality = async () => {
+  schemaLoading.value = true
+  try {
+    const res: any = await systemAPI.getStatus()
+    if (res.code === 0) {
+      schemaQuality.value = res.data?.schema_quality || []
+    }
+  } catch (err) {
+    console.error(err)
+  } finally {
+    schemaLoading.value = false
+  }
+}
+
 const checkSchedulerStatus = async () => {
   try {
     const res: any = await schedulerAPI.status()
@@ -640,6 +732,21 @@ const formatDuration = (ms: number) => {
   const min = Math.floor(ms / 60000)
   const sec = Math.round((ms % 60000) / 1000)
   return `${min}m${sec}s`
+}
+
+const formatNumber = (n: number) => {
+  if (n >= 10000) return (n / 10000).toFixed(1) + '万'
+  return Number(n || 0).toLocaleString()
+}
+
+const formatPercent = (rate: number) => {
+  return `${Math.round((rate || 0) * 100)}%`
+}
+
+const coverageTagType = (rate: number) => {
+  if (rate >= 0.8) return 'success'
+  if (rate > 0) return 'warning'
+  return 'info'
 }
 
 </script>
@@ -751,6 +858,16 @@ const formatDuration = (ms: number) => {
   margin: 0 0 12px 0;
   font-size: 14px;
   color: #303133;
+}
+
+.schema-acceptance {
+  margin-top: 16px;
+}
+
+.subsection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .error-text {
