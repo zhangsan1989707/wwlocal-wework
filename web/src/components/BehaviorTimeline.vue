@@ -171,6 +171,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh, Download } from '@element-plus/icons-vue'
 import { logAPI, syncFeatureAPI, contactAPI } from '../api'
@@ -185,6 +186,7 @@ const form = reactive({
   openid: '',
   feature_ids: [] as number[],
 })
+const route = useRoute()
 const pagination = reactive({
   page: 1,
   page_size: 50,
@@ -208,6 +210,7 @@ const timeShortcuts = [
 
 onMounted(async () => {
   applyTimeShortcut(timeShortcuts[1])
+  applyRouteQuery()
   try {
     const res = await syncFeatureAPI.list()
     if (res.code === 0) {
@@ -219,7 +222,30 @@ onMounted(async () => {
   } catch {
     ElMessage.error('加载日志类型失败')
   }
+  if (route.query.auto_query === '1' && form.openid.trim()) {
+    await handleQuery()
+  }
 })
+
+const applyRouteQuery = () => {
+  const queryOpenID = route.query.openid || route.query.mobile
+  if (queryOpenID) {
+    form.openid = String(queryOpenID)
+  }
+  if (route.query.feature_ids) {
+    form.feature_ids = String(route.query.feature_ids).split(',').map(Number).filter(Boolean)
+  }
+  const start = route.query.date_start || route.query.start_time
+  const end = route.query.date_end || route.query.end_time
+  if (start && end) {
+    const startTime = Number(start)
+    const endTime = Number(end)
+    if (Number.isFinite(startTime) && Number.isFinite(endTime) && startTime > 0 && endTime > 0) {
+      dateRange.value = [new Date(startTime * 1000), new Date(endTime * 1000)]
+      activeShortcut.value = null
+    }
+  }
+}
 
 const applyTimeShortcut = (shortcut: { label: string; hours: number }) => {
   activeShortcut.value = shortcut.label

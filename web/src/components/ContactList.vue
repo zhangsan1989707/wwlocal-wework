@@ -166,6 +166,10 @@
           <el-icon><Search /></el-icon>
           查看该人员日志
         </el-button>
+        <el-button type="success" @click="viewUserBehavior">
+          <el-icon><Connection /></el-icon>
+          查看行为轨迹
+        </el-button>
       </div>
     </el-drawer>
   </div>
@@ -178,7 +182,7 @@ import { useAuthStore } from '../stores/auth'
 import { contactAPI } from '../api'
 import type { ApiResponse, Contact, ContactSyncStatus, Department, DeptMember, PaginatedResponse } from '../types/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search } from '@element-plus/icons-vue'
+import { Search, Connection } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -386,6 +390,13 @@ const viewUserLogs = () => {
   if (drawerContact.value?.mobile) {
     drawerVisible.value = false
     router.push({ path: '/query', query: { mobile: drawerContact.value.mobile } })
+  }
+}
+
+const viewUserBehavior = () => {
+  if (drawerContact.value?.mobile) {
+    drawerVisible.value = false
+    router.push({ path: '/behavior', query: { openid: drawerContact.value.mobile, auto_query: '1' } })
   }
 }
 
