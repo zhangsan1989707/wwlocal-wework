@@ -63,7 +63,7 @@ docker-compose up -d
 # 等待健康检查
 echo "[4/4] 等待服务启动..."
 for i in $(seq 1 30); do
-    if curl -sf http://localhost:${BACKEND_PORT:-3010}/health > /dev/null 2>&1; then
+    if curl -sf http://localhost:${BACKEND_PORT:-19010}/health > /dev/null 2>&1; then
         break
     fi
     sleep 1
@@ -76,8 +76,8 @@ echo "================================"
 echo ""
 docker-compose ps
 echo ""
-echo "前端地址: http://$(hostname -I 2>/dev/null | awk '{print $1}' || hostname):${FRONTEND_PORT:-5173}"
-echo "后端地址: http://$(hostname -I 2>/dev/null | awk '{print $1}' || hostname):${BACKEND_PORT:-3010}"
+echo "前端地址: http://$(hostname -I 2>/dev/null | awk '{print $1}' || hostname):${FRONTEND_PORT:-18073}"
+echo "后端地址: http://$(hostname -I 2>/dev/null | awk '{print $1}' || hostname):${BACKEND_PORT:-19010}"
 echo ""
 echo "管理命令:"
 echo "  查看状态: docker-compose ps"

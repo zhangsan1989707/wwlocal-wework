@@ -5,7 +5,7 @@
 ### 基础 URL
 
 - 生产环境: `http://<host>:19010`
-- 开发环境: `http://localhost:8080`
+- 开发环境: `http://localhost:19010`
 
 ### 认证方式
 
