@@ -259,6 +259,9 @@ export const logAPI = {
   exportCSVURL: () => {
     return '/api/v1/logs/export'
   },
+  behaviorExportCSVURL: () => {
+    return '/api/v1/logs/behavior-export'
+  },
 }
 
 export const syncAPI = {

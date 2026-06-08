@@ -20,6 +20,24 @@ func NewBehaviorQueryService(logRepo *repository.LogRepository, syncFeatureRepo 
 }
 
 func (s *BehaviorQueryService) Query(req *model.BehaviorQueryRequest) (*model.BehaviorQueryResult, error) {
+	featureIDs, err := s.prepareRequest(req, 50, 200)
+	if err != nil {
+		return nil, err
+	}
+	return s.query(req, featureIDs)
+}
+
+func (s *BehaviorQueryService) Export(req *model.BehaviorQueryRequest) (*model.BehaviorQueryResult, error) {
+	req.Page = 1
+	req.PageSize = 50000
+	featureIDs, err := s.prepareRequest(req, 50000, 50000)
+	if err != nil {
+		return nil, err
+	}
+	return s.query(req, featureIDs)
+}
+
+func (s *BehaviorQueryService) prepareRequest(req *model.BehaviorQueryRequest, defaultPageSize, maxPageSize int) ([]int, error) {
 	req.OpenID = strings.TrimSpace(req.OpenID)
 	if req.OpenID == "" {
 		return nil, fmt.Errorf("openid is required")
@@ -37,10 +55,10 @@ func (s *BehaviorQueryService) Query(req *model.BehaviorQueryRequest) (*model.Be
 		req.Page = 1
 	}
 	if req.PageSize <= 0 {
-		req.PageSize = 50
+		req.PageSize = defaultPageSize
 	}
-	if req.PageSize > 200 {
-		req.PageSize = 200
+	if req.PageSize > maxPageSize {
+		req.PageSize = maxPageSize
 	}
 	featureIDs := req.FeatureIDs
 	if len(featureIDs) == 0 {
@@ -51,7 +69,10 @@ func (s *BehaviorQueryService) Query(req *model.BehaviorQueryRequest) (*model.Be
 			featureIDs = s.cfg.Features.IDs
 		}
 	}
+	return featureIDs, nil
+}
 
+func (s *BehaviorQueryService) query(req *model.BehaviorQueryRequest, featureIDs []int) (*model.BehaviorQueryResult, error) {
 	rows, summaries, total, err := s.logRepo.QueryBehavior(featureIDs, req.OpenID, req.StartTime, req.EndTime, req.Page, req.PageSize)
 	if err != nil {
 		return nil, err

@@ -9,6 +9,10 @@
               <el-icon><Search /></el-icon>
               查询
             </el-button>
+            <el-button type="success" :loading="exporting" @click="handleExport">
+              <el-icon><Download /></el-icon>
+              导出 CSV
+            </el-button>
             <el-button @click="handleReset">
               <el-icon><Refresh /></el-icon>
               重置
@@ -168,7 +172,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Search, Refresh } from '@element-plus/icons-vue'
+import { Search, Refresh, Download } from '@element-plus/icons-vue'
 import { logAPI, syncFeatureAPI } from '../api'
 import type { BehaviorFeatureSummary, BehaviorRecord, SyncFeature } from '../types/api'
 
@@ -192,6 +196,7 @@ const records = ref<BehaviorRecord[]>([])
 const featureSummaries = ref<BehaviorFeatureSummary[]>([])
 const total = ref(0)
 const loading = ref(false)
+const exporting = ref(false)
 
 const timeShortcuts = [
   { label: '最近1天', hours: 24 },
@@ -223,24 +228,15 @@ const applyTimeShortcut = (shortcut: { label: string; hours: number }) => {
 }
 
 const handleQuery = async () => {
-  if (!form.openid.trim()) {
-    ElMessage.warning('请输入 OpenID 或手机号')
-    return
-  }
-  if (!dateRange.value) {
-    ElMessage.warning('请选择时间范围')
+  if (!validateQueryForm()) {
     return
   }
 
   loading.value = true
   try {
     const res = await logAPI.behaviorQuery({
-      openid: form.openid.trim(),
-      feature_ids: form.feature_ids,
-      start_time: Math.floor(dateRange.value[0].getTime() / 1000),
-      end_time: Math.floor(dateRange.value[1].getTime() / 1000),
+      ...buildQueryPayload(pagination.page_size),
       page: pagination.page,
-      page_size: pagination.page_size,
     })
     if (res.code === 0 && res.data) {
       records.value = res.data.data
@@ -253,6 +249,59 @@ const handleQuery = async () => {
     ElMessage.error(err instanceof Error ? err.message : '查询失败')
   } finally {
     loading.value = false
+  }
+}
+
+const validateQueryForm = () => {
+  if (!form.openid.trim()) {
+    ElMessage.warning('请输入 OpenID 或手机号')
+    return false
+  }
+  if (!dateRange.value) {
+    ElMessage.warning('请选择时间范围')
+    return false
+  }
+  return true
+}
+
+const buildQueryPayload = (pageSize: number) => ({
+  openid: form.openid.trim(),
+  feature_ids: form.feature_ids,
+  start_time: Math.floor((dateRange.value as [Date, Date])[0].getTime() / 1000),
+  end_time: Math.floor((dateRange.value as [Date, Date])[1].getTime() / 1000),
+  page: 1,
+  page_size: pageSize,
+})
+
+const handleExport = async () => {
+  if (!validateQueryForm()) {
+    return
+  }
+  exporting.value = true
+  try {
+    const res = await fetch(logAPI.behaviorExportCSVURL(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+      },
+      body: JSON.stringify(buildQueryPayload(50000)),
+    })
+    if (!res.ok) {
+      throw new Error('导出失败')
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `behavior_timeline_${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success('导出成功')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '导出失败')
+  } finally {
+    exporting.value = false
   }
 }
 
