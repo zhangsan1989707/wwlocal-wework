@@ -1,4 +1,2 @@
--- 创建应用专用数据库用户（避免使用 root）
-CREATE USER IF NOT EXISTS 'wework_app'@'%' IDENTIFIED BY '${DB_PASSWORD}';
-GRANT ALL PRIVILEGES ON wework_logs.* TO 'wework_app'@'%';
-FLUSH PRIVILEGES;
+-- 初始化脚本不创建应用用户；MySQL 官方镜像会通过
+-- MYSQL_USER / MYSQL_PASSWORD / MYSQL_DATABASE 创建并授权应用用户。
