@@ -135,8 +135,7 @@ func (h *LogHandler) ExportCSV(c echo.Context) error {
 
 	ctx, cancel := context.WithTimeout(c.Request().Context(), logQueryTimeout)
 	defer cancel()
-	data, err := h.querySvc.ExportCSVContext(ctx, &req)
-	if err != nil {
+	if err := h.querySvc.PrepareExportCSV(&req); err != nil {
 		return h.queryError(c, err, "导出失败")
 	}
 
@@ -150,31 +149,27 @@ func (h *LogHandler) ExportCSV(c echo.Context) error {
 	writer := csv.NewWriter(c.Response())
 	writer.Write([]string{"日志类型编号", "日志类型名称", "时间", "openid", "数据内容"})
 
-	for _, row := range data {
-		featureID := fmt.Sprintf("%d", getInt64(row, "feature_id"))
-		featureName := h.querySvc.GetFeatureName(int(getInt64(row, "feature_id")))
-		logDate := fmt.Sprintf("%v", row["log_date"])
-		openid := fmt.Sprintf("%v", getString(row, "openid"))
-
-		dataContent := ""
-		if _, failed := row["_decrypt_failed"]; !failed {
-			content := make(map[string]interface{})
-			for k, v := range row {
-				if k != "id" && k != "feature_id" && k != "log_time" && k != "log_date" && k != "idc" && k != "_decrypt_failed" {
-					content[k] = v
-				}
-			}
-			if b, err := jsonMarshal(content); err == nil {
-				dataContent = string(b)
-			}
-		} else {
-			dataContent = "[解密失败]"
+	rowCount := 0
+	err := h.querySvc.ExportCSVStreamContext(ctx, &req, func(row map[string]interface{}) error {
+		if err := writer.Write(h.formatLogCSVRow(row)); err != nil {
+			return err
 		}
-
-		writer.Write([]string{featureID, featureName, logDate, openid, dataContent})
-	}
+		rowCount++
+		if rowCount%500 == 0 {
+			writer.Flush()
+			return writer.Error()
+		}
+		return nil
+	})
 
 	writer.Flush()
+	if err == nil {
+		err = writer.Error()
+	}
+	if err != nil {
+		c.Set("op_error_msg", err.Error())
+		return err
+	}
 	return nil
 }
 
@@ -187,6 +182,30 @@ func (h *LogHandler) queryError(c echo.Context, err error, fallback string) erro
 	default:
 		return response.Error(c, http.StatusInternalServerError, fallback)
 	}
+}
+
+func (h *LogHandler) formatLogCSVRow(row map[string]interface{}) []string {
+	featureID := fmt.Sprintf("%d", getInt64(row, "feature_id"))
+	featureName := h.querySvc.GetFeatureName(int(getInt64(row, "feature_id")))
+	logDate := fmt.Sprintf("%v", row["log_date"])
+	openid := fmt.Sprintf("%v", getString(row, "openid"))
+
+	dataContent := ""
+	if _, failed := row["_decrypt_failed"]; !failed {
+		content := make(map[string]interface{})
+		for k, v := range row {
+			if k != "id" && k != "feature_id" && k != "log_time" && k != "log_date" && k != "idc" && k != "_decrypt_failed" {
+				content[k] = v
+			}
+		}
+		if b, err := jsonMarshal(content); err == nil {
+			dataContent = string(b)
+		}
+	} else {
+		dataContent = "[解密失败]"
+	}
+
+	return []string{featureID, featureName, logDate, openid, dataContent}
 }
 
 func (h *LogHandler) checkQueryScope(c echo.Context, req *model.QueryRequest) error {

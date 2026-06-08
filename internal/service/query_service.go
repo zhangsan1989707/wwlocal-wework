@@ -1,6 +1,7 @@
 package service
 
 import (
+	"container/heap"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,13 +18,22 @@ import (
 var ErrQueryTimeout = errors.New("query timeout")
 var ErrQueryCanceled = errors.New("query canceled")
 
+const exportBatchSize = 1000
+
 type QueryService struct {
-	logRepo         *repository.LogRepository
+	logRepo         logQueryRepository
 	contactRepo     *repository.ContactRepository
 	weworkSvc       *WeWorkService
 	decryptSvc      *DecryptService
 	syncFeatureRepo *repository.SyncFeatureRepository
 	cfg             *config.Config
+}
+
+type logQueryRepository interface {
+	QueryAcrossMonthsContext(ctx context.Context, featureID int, startTime, endTime int64, page, pageSize int) ([]model.LogEntry, int64, error)
+	QueryAcrossMonthsWithConditionsContext(ctx context.Context, featureID int, startTime, endTime int64, conditions map[string]interface{}, mobile string, page, pageSize int) ([]model.LogEntry, int64, error)
+	QueryByCursorContext(ctx context.Context, featureID int, startTime, endTime int64, cursor int64, pageSize int, conditions map[string]interface{}, mobile string) ([]model.LogEntry, int64, int64, error)
+	SampleParsedJSON(featureIDs []int, limit int) []string
 }
 
 func NewQueryService(logRepo *repository.LogRepository, contactRepo *repository.ContactRepository, weworkSvc *WeWorkService, decryptSvc *DecryptService, syncFeatureRepo *repository.SyncFeatureRepository, cfg *config.Config) *QueryService {
@@ -319,7 +329,11 @@ func (s *QueryService) ExportCSV(req *model.QueryRequest) ([]map[string]interfac
 	return s.ExportCSVContext(context.Background(), req)
 }
 
-func (s *QueryService) ExportCSVContext(ctx context.Context, req *model.QueryRequest) ([]map[string]interface{}, error) {
+func (s *QueryService) PrepareExportCSV(req *model.QueryRequest) error {
+	return s.prepareExportRequest(req)
+}
+
+func (s *QueryService) prepareExportRequest(req *model.QueryRequest) error {
 	if req.PageSize <= 0 {
 		req.PageSize = 50000
 	}
@@ -329,14 +343,21 @@ func (s *QueryService) ExportCSVContext(ctx context.Context, req *model.QueryReq
 
 	const maxRangeSeconds = 90 * 24 * 3600
 	if req.EndTime-req.StartTime > int64(maxRangeSeconds) {
-		return nil, fmt.Errorf("time range cannot exceed 90 days")
+		return fmt.Errorf("time range cannot exceed 90 days")
 	}
 	if len(req.FeatureIDs) > 10 {
-		return nil, fmt.Errorf("cannot query more than 10 feature types at the same time")
+		return fmt.Errorf("cannot query more than 10 feature types at the same time")
 	}
 
 	if req.Page <= 0 {
 		req.Page = 1
+	}
+	return nil
+}
+
+func (s *QueryService) ExportCSVContext(ctx context.Context, req *model.QueryRequest) ([]map[string]interface{}, error) {
+	if err := s.prepareExportRequest(req); err != nil {
+		return nil, err
 	}
 
 	var allData []map[string]interface{}
@@ -364,6 +385,136 @@ func (s *QueryService) ExportCSVContext(ctx context.Context, req *model.QueryReq
 	})
 
 	return allData, nil
+}
+
+func (s *QueryService) ExportCSVStreamContext(ctx context.Context, req *model.QueryRequest, writeRow func(map[string]interface{}) error) error {
+	if writeRow == nil {
+		return fmt.Errorf("writeRow is required")
+	}
+	if err := s.prepareExportRequest(req); err != nil {
+		return err
+	}
+
+	streams := make([]exportFeatureStream, 0, len(req.FeatureIDs))
+	items := exportEntryHeap{}
+	for _, featureID := range req.FeatureIDs {
+		offset := (req.Page - 1) * req.PageSize
+		stream := exportFeatureStream{
+			featureID: featureID,
+			page:      offset/exportBatchSize + 1,
+			skip:      offset % exportBatchSize,
+		}
+		streams = append(streams, stream)
+		index := len(streams) - 1
+		entry, err := s.nextExportEntry(ctx, req, &streams[index])
+		if err != nil {
+			return err
+		}
+		if entry != nil {
+			heap.Push(&items, exportEntryItem{streamIndex: index, entry: *entry})
+		}
+	}
+
+	for items.Len() > 0 {
+		item := heap.Pop(&items).(exportEntryItem)
+		if err := writeRow(s.parseEntry(&item.entry)); err != nil {
+			return err
+		}
+		entry, err := s.nextExportEntry(ctx, req, &streams[item.streamIndex])
+		if err != nil {
+			return err
+		}
+		if entry != nil {
+			heap.Push(&items, exportEntryItem{streamIndex: item.streamIndex, entry: *entry})
+		}
+	}
+
+	return nil
+}
+
+type exportFeatureStream struct {
+	featureID int
+	page      int
+	skip      int
+	written   int
+	done      bool
+	buffer    []model.LogEntry
+	pos       int
+}
+
+func (s *QueryService) nextExportEntry(ctx context.Context, req *model.QueryRequest, stream *exportFeatureStream) (*model.LogEntry, error) {
+	if stream.written >= req.PageSize {
+		return nil, nil
+	}
+	for stream.pos >= len(stream.buffer) {
+		if stream.done {
+			return nil, nil
+		}
+		if err := queryContextError(ctx); err != nil {
+			return nil, err
+		}
+		entries, _, err := s.logRepo.QueryAcrossMonthsWithConditionsContext(ctx, stream.featureID, req.StartTime, req.EndTime, req.Conditions, req.Mobile, stream.page, exportBatchSize)
+		if err != nil {
+			if ctxErr := queryContextError(ctx); ctxErr != nil {
+				return nil, ctxErr
+			}
+			return nil, fmt.Errorf("query feature %d failed: %w", stream.featureID, err)
+		}
+		stream.page++
+		if len(entries) < exportBatchSize {
+			stream.done = true
+		}
+		if stream.skip > 0 {
+			if stream.skip >= len(entries) {
+				stream.skip -= len(entries)
+				continue
+			}
+			entries = entries[stream.skip:]
+			stream.skip = 0
+		}
+		stream.buffer = entries
+		stream.pos = 0
+		if len(stream.buffer) == 0 && stream.done {
+			return nil, nil
+		}
+	}
+
+	entry := stream.buffer[stream.pos]
+	stream.pos++
+	stream.written++
+	return &entry, nil
+}
+
+type exportEntryItem struct {
+	streamIndex int
+	entry       model.LogEntry
+}
+
+type exportEntryHeap []exportEntryItem
+
+func (h exportEntryHeap) Len() int { return len(h) }
+
+func (h exportEntryHeap) Less(i, j int) bool {
+	if h[i].entry.LogTime == h[j].entry.LogTime {
+		return h[i].entry.ID > h[j].entry.ID
+	}
+	return h[i].entry.LogTime > h[j].entry.LogTime
+}
+
+func (h exportEntryHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+func (h *exportEntryHeap) Push(x interface{}) {
+	*h = append(*h, x.(exportEntryItem))
+}
+
+func (h *exportEntryHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	item := old[n-1]
+	*h = old[:n-1]
+	return item
 }
 
 func queryContextError(ctx context.Context) error {
