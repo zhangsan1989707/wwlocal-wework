@@ -38,6 +38,9 @@ var behaviorFieldsByFeature = map[int][]behaviorField{
 	90000055: {{Column: "openid", Label: "用户"}},
 	90000058: {{Column: "openid", Label: "用户"}},
 	90000059: {{Column: "openid", Label: "用户"}},
+	90000061: {{Column: "oper_name", Label: "操作用户"}},
+	90000062: {{Column: "oper_name", Label: "操作用户"}},
+	90000063: {{Column: "oper_name", Label: "操作用户"}},
 }
 
 func (r *LogRepository) QueryBehavior(featureIDs []int, openid string, startTime, endTime int64, page, pageSize int) ([]model.BehaviorRecord, []model.BehaviorFeatureSummary, int64, error) {

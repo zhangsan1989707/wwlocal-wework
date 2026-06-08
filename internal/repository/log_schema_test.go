@@ -29,6 +29,43 @@ func TestMapStructuredFieldsUnmappedFeature(t *testing.T) {
 	}
 }
 
+func TestMapStructuredFieldsWeDriveOper(t *testing.T) {
+	parsed := `{
+		"time": 1619586572,
+		"oper_type": 1,
+		"oper_sub_type": 121,
+		"oper_name": "u1",
+		"ext": {"content": "doc", "ip": "127.0.0.1", "cli_type": 3}
+	}`
+
+	for _, featureID := range []int{90000061, 90000062, 90000063} {
+		t.Run("feature", func(t *testing.T) {
+			got := mapStructuredFields(featureID, parsed)
+			if got["oper_name"] != "u1" {
+				t.Fatalf("oper_name = %v, want u1", got["oper_name"])
+			}
+			if got["operate_time"] != int64(1619586572) {
+				t.Fatalf("operate_time = %v, want 1619586572", got["operate_time"])
+			}
+			if got["oper_sub_type"] != 121 {
+				t.Fatalf("oper_sub_type = %v, want 121", got["oper_sub_type"])
+			}
+			if got["ext"] == "" {
+				t.Fatalf("ext should be serialized")
+			}
+		})
+	}
+}
+
+func TestBehaviorFieldsIncludeWeDriveOper(t *testing.T) {
+	for _, featureID := range []int{90000061, 90000062, 90000063} {
+		fields := behaviorFieldsByFeature[featureID]
+		if len(fields) != 1 || fields[0].Column != "oper_name" {
+			t.Fatalf("feature %d fields = %#v, want oper_name", featureID, fields)
+		}
+	}
+}
+
 func TestJSONTextContainsOpenID(t *testing.T) {
 	cases := []struct {
 		name string

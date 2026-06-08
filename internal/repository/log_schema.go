@@ -101,6 +101,9 @@ var logSchemas = map[int]logFeatureSchema{
 		bigintCol("req_count"), bigintCol("req_failed_count"), bigintCol("req_avg_cost"), bigintCol("req_cost_cleaning"),
 		varcharCol("abnormal_cost_percentage"), bigintCol("req_cost_max"),
 	}, Mapper: mapNetworkStatsLog},
+	90000061: {Columns: weDriveOperColumns(), Mapper: mapWeDriveOperLog},
+	90000062: {Columns: weDriveOperColumns(), Mapper: mapWeDriveOperLog},
+	90000063: {Columns: weDriveOperColumns(), Mapper: mapWeDriveOperLog},
 }
 
 func varcharCol(name string) logColumn {
@@ -121,6 +124,12 @@ func bigintCol(name string) logColumn {
 
 func textCol(name string) logColumn {
 	return logColumn{Name: name, SQL: fmt.Sprintf("%s TEXT", name)}
+}
+
+func weDriveOperColumns() []logColumn {
+	return []logColumn{
+		bigintCol("operate_time"), intCol("oper_type"), intCol("oper_sub_type"), varcharIndex("oper_name"), textCol("ext"),
+	}
 }
 
 func mapStructuredFields(featureID int, parsedJSON string) map[string]interface{} {
@@ -389,6 +398,16 @@ func mapNetworkStatsLog(data map[string]interface{}) map[string]interface{} {
 		"req_cost_cleaning":        int64Value(data, "req_cost_cleaning"),
 		"abnormal_cost_percentage": stringValue(data, "abnormal_cost_percentage"),
 		"req_cost_max":             int64Value(data, "req_cost_max"),
+	})
+}
+
+func mapWeDriveOperLog(data map[string]interface{}) map[string]interface{} {
+	return compactMap(map[string]interface{}{
+		"operate_time":  int64Value(data, "time"),
+		"oper_type":     intValue(data, "oper_type"),
+		"oper_sub_type": intValue(data, "oper_sub_type"),
+		"oper_name":     stringValue(data, "oper_name"),
+		"ext":           jsonString(data, "ext"),
 	})
 }
 
