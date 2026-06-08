@@ -23,6 +23,15 @@
       <el-button type="primary" :loading="loading" @click="refreshData">刷新</el-button>
     </div>
 
+    <el-alert
+      class="data-source-alert"
+      :title="`最新统计日期：${selectedDate}`"
+      description="数据来源：夜间 1 点分析预计算的运营总览数据。"
+      type="info"
+      show-icon
+      :closable="false"
+    />
+
     <el-alert v-if="!loading && noData" title="当前范围暂无运营数据" description="可能是所选日期尚未完成统计，或当前授权部门没有可统计数据。" type="info" show-icon :closable="false" style="margin-bottom: 16px;" />
 
     <div class="kpi-row kpi-row-primary">
@@ -503,6 +512,10 @@ onUnmounted(() => {
   font-size: 14px;
   color: #606266;
   white-space: nowrap;
+}
+
+.data-source-alert {
+  margin-bottom: 16px;
 }
 
 /* KPI cards */

@@ -1196,7 +1196,87 @@ CSV 列：`时间, 日志类型编号, 日志类型名称, 命中字段, 摘要,
 
 ---
 
-## 10. 同步历史
+## 10. 夜间分析任务
+
+夜间分析任务用于按天同步最新日志和通讯录，并预计算运营总览需要的指标、趋势、部门、设备和用户明细数据。接口仅限 `super_admin` 调用。
+
+### GET /api/v1/nightly/status
+
+获取夜间分析任务的配置、调度和最近产出状态。
+
+**响应示例：**
+
+```json
+{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "enabled": true,
+    "schedule_time": "01:00",
+    "lookback_days": 1,
+    "running": true,
+    "job_running": false,
+    "latest_stat_date": "2024-01-15",
+    "latest_user_list_date": "2024-01-15"
+  }
+}
+```
+
+**字段说明：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| enabled | bool | 配置中是否启用夜间任务 |
+| schedule_time | string | 每日自动执行时间，格式为 `HH:mm`，默认 `01:00` |
+| lookback_days | int | 自动执行时回算的天数，默认 `1` 表示计算昨天 |
+| running | bool | 夜间任务调度器是否正在运行 |
+| job_running | bool | 当前是否有夜间分析任务正在执行 |
+| latest_stat_date | string | 最近一次成功写入运营总览指标的统计日期 |
+| latest_user_list_date | string | 最近一次成功写入用户明细的统计日期 |
+
+---
+
+### POST /api/v1/nightly/run
+
+手动触发一次夜间分析任务。任务异步执行，接口成功返回表示已触发，不代表计算已完成；完成情况可继续查询 `/api/v1/nightly/status`，或查看运营总览对应日期的数据。
+
+**Query 参数：**
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| date | string | 昨天 | 要重新计算的统计日期，格式为 `YYYY-MM-DD` |
+
+**请求示例：**
+
+```bash
+curl -X POST "http://localhost:19010/api/v1/nightly/run?date=2024-01-15" \
+  -H "Authorization: Bearer <token>"
+```
+
+**响应示例：**
+
+```json
+{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "message": "nightly job triggered",
+    "date": "2024-01-15"
+  }
+}
+```
+
+**错误响应：**
+
+| code | msg | 含义 |
+|------|-----|------|
+| 400 | 日期格式错误，应为 YYYY-MM-DD | `date` 参数格式错误 |
+| 403 | forbidden | 非超级管理员访问 |
+| 409 | nightly job 正在运行中，请稍后再试 | 已有夜间分析任务正在执行 |
+
+---
+
+## 11. 同步历史
 
 ### GET /api/v1/sync-history
 
@@ -1239,7 +1319,7 @@ CSV 列：`时间, 日志类型编号, 日志类型名称, 命中字段, 摘要,
 
 ---
 
-## 11. 数据类型配置
+## 12. 数据类型配置
 
 ### GET /api/v1/sync-features
 
@@ -1308,7 +1388,7 @@ CSV 列：`时间, 日志类型编号, 日志类型名称, 命中字段, 摘要,
 
 ---
 
-## 12. 系统状态
+## 13. 系统状态
 
 ### GET /api/v1/system/status
 

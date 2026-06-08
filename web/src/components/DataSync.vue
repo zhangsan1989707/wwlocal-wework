@@ -463,6 +463,11 @@ const form = reactive({
 const features = ref<SyncFeature[]>([])
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let adminOperPollTimer: ReturnType<typeof setInterval> | null = null
+let nightlyPollTimer: ReturnType<typeof setInterval> | null = null
+let nightlyPollCount = 0
+let nightlySawRunning = false
+const NIGHTLY_POLL_INTERVAL = 3000
+const NIGHTLY_MAX_POLLS = 600
 
 const adminOperStatus = ref<AdminOperLogStats>({
   running: false,
@@ -561,11 +566,13 @@ onMounted(async () => {
   await loadSyncHistory()
   if (syncStatus.value.running) startPolling()
   if (adminOperStatus.value.running) startAdminOperPolling()
+  if (nightlyStatus.value.job_running) startNightlyPolling()
 })
 
 onUnmounted(() => {
   stopPolling()
   stopAdminOperPolling()
+  stopNightlyPolling()
 })
 
 const startPolling = () => {
@@ -602,6 +609,44 @@ const stopAdminOperPolling = () => {
     clearInterval(adminOperPollTimer)
     adminOperPollTimer = null
   }
+}
+
+const refreshAfterNightlyFinished = async () => {
+  await checkNightlyStatus()
+  await loadSyncHistory()
+  await loadSchemaQuality()
+  await checkStatus()
+}
+
+const startNightlyPolling = (assumeRunning = false) => {
+  stopNightlyPolling()
+  nightlyPollCount = 0
+  nightlySawRunning = assumeRunning || nightlyStatus.value.job_running
+  nightlyPollTimer = setInterval(async () => {
+    nightlyPollCount += 1
+    const status = await checkNightlyStatus()
+    if (status?.job_running) {
+      nightlySawRunning = true
+    }
+    if (status && nightlySawRunning && !status.job_running) {
+      stopNightlyPolling()
+      await refreshAfterNightlyFinished()
+      ElMessage.success('夜间分析任务已完成')
+      return
+    }
+    if (nightlyPollCount >= NIGHTLY_MAX_POLLS) {
+      stopNightlyPolling()
+      ElMessage.warning('夜间分析任务仍在执行，请稍后手动刷新状态')
+    }
+  }, NIGHTLY_POLL_INTERVAL)
+}
+
+const stopNightlyPolling = () => {
+  if (nightlyPollTimer) {
+    clearInterval(nightlyPollTimer)
+    nightlyPollTimer = null
+  }
+  nightlySawRunning = false
 }
 
 const applyTimeShortcut = (shortcut: { label: string; hours: number }) => {
@@ -693,6 +738,7 @@ const handleNightlyRun = async () => {
     if (res.code === 0) {
       ElMessage.success('夜间分析任务已启动')
       await checkNightlyStatus()
+      startNightlyPolling(true)
     } else {
       ElMessage.error(res.msg || '夜间分析任务启动失败')
     }
@@ -886,10 +932,12 @@ const checkNightlyStatus = async () => {
     const res = await nightlyAPI.status()
     if (res.code === 0 && res.data) {
       nightlyStatus.value = res.data
+      return res.data
     }
   } catch (err) {
     console.error(err)
   }
+  return null
 }
 
 const loadSyncHistory = async () => {

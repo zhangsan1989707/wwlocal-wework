@@ -1,10 +1,18 @@
 <template>
   <div class="dashboard">
-    <!-- 总览看板 -->
+    <el-alert
+      title="这是运维中心：用于查看同步、密钥、异常提醒和历史诊断；日常业务指标请以“运营总览”为准。"
+      type="info"
+      show-icon
+      :closable="false"
+      style="margin-bottom: 16px;"
+    />
+
+    <!-- 运维总览 -->
     <el-card shadow="never" class="overview-card">
       <template #header>
         <div class="card-header">
-          <span class="card-title">总览看板</span>
+          <span class="card-title">运维总览</span>
           <el-button type="primary" :loading="overviewLoading" @click="loadOverview" size="small">刷新</el-button>
         </div>
       </template>
