@@ -198,7 +198,7 @@ api.interceptors.response.use(
     }
 
     if (status && status >= 500) {
-      return Promise.reject(new Error('服务器错误，请稍后再试'))
+      return Promise.reject(new Error(data?.msg || '服务器错误，请稍后再试'))
     }
 
     const message = data?.msg || error.message || '请求失败'
@@ -276,7 +276,7 @@ export const syncAPI = {
 export const keyAPI = {
   list: () =>
     api.get<ApiResponse<KeyVersion[]>>('/keys') as unknown as ApiResult<KeyVersion[]>,
-  add: (data: { version: string; pem_content?: string }) =>
+  add: (data: { version: string; private_key_pem: string }) =>
     api.post<ApiResponse<KeyVersion>>('/keys', data) as unknown as ApiResult<KeyVersion>,
   activate: (data: { version: string }) =>
     api.put<ApiResponse<KeyVersion>>('/keys/activate', data) as unknown as ApiResult<KeyVersion>,
