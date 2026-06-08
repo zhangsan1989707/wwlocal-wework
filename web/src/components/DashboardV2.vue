@@ -299,6 +299,7 @@ async function fetchTrend() {
   try {
     const res = await dashboardV2Api.getTrend({
       metric_type: trendMetric.value,
+      end_date: selectedDate.value,
       granularity: trendGranularity.value,
     })
     if (!isMounted.value) return
@@ -411,15 +412,15 @@ function exportUsersCSV() {
   dashboardV2Api.exportUsers({
     date: selectedDate.value,
     list_type: userListType.value,
-  }).then((res: unknown) => {
+  }).then((res) => {
     downloadBlob(res, `users_${userListType.value}_${selectedDate.value}.csv`)
   }).catch(() => {
     ElMessage.error('导出失败')
   })
 }
 
-function downloadBlob(res: unknown, filename: string) {
-  const blob = new Blob([res as BlobPart], { type: 'text/csv;charset=utf-8;' })
+function downloadBlob(res: Blob, filename: string) {
+  const blob = new Blob([res], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -431,20 +432,21 @@ function downloadBlob(res: unknown, filename: string) {
 function exportTrendCSV() {
   dashboardV2Api.exportTrend({
     metric_type: trendMetric.value,
+    end_date: selectedDate.value,
     granularity: trendGranularity.value,
-  }).then((res: unknown) => {
+  }).then((res) => {
     downloadBlob(res, `trend_${trendMetric.value}_${trendGranularity.value}.csv`)
   }).catch(() => ElMessage.error('导出失败'))
 }
 
 function exportDepartmentsCSV() {
-  dashboardV2Api.exportDepartments(selectedDate.value).then((res: unknown) => {
+  dashboardV2Api.exportDepartments(selectedDate.value).then((res) => {
     downloadBlob(res, `departments_${selectedDate.value}.csv`)
   }).catch(() => ElMessage.error('导出失败'))
 }
 
 function exportDevicesCSV() {
-  dashboardV2Api.exportDevices(selectedDate.value).then((res: unknown) => {
+  dashboardV2Api.exportDevices(selectedDate.value).then((res) => {
     downloadBlob(res, `devices_${selectedDate.value}.csv`)
   }).catch(() => ElMessage.error('导出失败'))
 }

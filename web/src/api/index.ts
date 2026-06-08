@@ -131,6 +131,7 @@ function setStoredRole(role: string): void {
 
 // 拦截器已将 AxiosResponse 解包为 ApiResponse<T>，此类型标注实际返回值
 type ApiResult<T> = Promise<ApiResponse<T>>
+type BlobResult = Promise<Blob>
 
 let reloading = false
 let refreshPromise: Promise<string | null> | null = null
@@ -342,15 +343,15 @@ export const dashboardV2Api = {
   getUsers: (params: { date?: string; list_type?: string; page?: number; page_size?: number }) =>
     api.get<ApiResponse<{ total: number; users: DashboardV2UserItem[] }>>('/dashboard/v2/users', { params }) as unknown as ApiResult<{ total: number; users: DashboardV2UserItem[] }>,
   exportOverview: (date?: string) =>
-    api.get('/dashboard/v2/export/overview', { params: { date }, responseType: 'blob' }),
+    api.get('/dashboard/v2/export/overview', { params: { date }, responseType: 'blob' }) as unknown as BlobResult,
   exportTrend: (params: { metric_types?: string; metric_type?: string; start_date?: string; end_date?: string; granularity?: string }) =>
-    api.get('/dashboard/v2/export/trend', { params, responseType: 'blob' }),
+    api.get('/dashboard/v2/export/trend', { params, responseType: 'blob' }) as unknown as BlobResult,
   exportDepartments: (date?: string) =>
-    api.get('/dashboard/v2/export/departments', { params: { date }, responseType: 'blob' }),
+    api.get('/dashboard/v2/export/departments', { params: { date }, responseType: 'blob' }) as unknown as BlobResult,
   exportDevices: (date?: string) =>
-    api.get('/dashboard/v2/export/devices', { params: { date }, responseType: 'blob' }),
+    api.get('/dashboard/v2/export/devices', { params: { date }, responseType: 'blob' }) as unknown as BlobResult,
   exportUsers: (params: { date?: string; list_type?: string }) =>
-    api.get('/dashboard/v2/export/users', { params, responseType: 'blob' }),
+    api.get('/dashboard/v2/export/users', { params, responseType: 'blob' }) as unknown as BlobResult,
 }
 
 export const dashboardAPI = {

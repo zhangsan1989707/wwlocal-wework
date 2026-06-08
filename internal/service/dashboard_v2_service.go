@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -16,6 +17,8 @@ type DashboardV2Service struct {
 	cfg         *config.Config
 }
 
+var ErrDashboardInvalidParam = errors.New("invalid dashboard parameter")
+
 func NewDashboardV2Service(statsRepo *repository.DashboardStatsRepository, contactRepo *repository.ContactRepository, cfg *config.Config) *DashboardV2Service {
 	return &DashboardV2Service{statsRepo: statsRepo, contactRepo: contactRepo, cfg: cfg}
 }
@@ -28,31 +31,50 @@ func defaultYesterday(date string) string {
 	return date
 }
 
+func validateDashboardDate(date string) (string, error) {
+	date = defaultYesterday(date)
+	if _, err := time.Parse("2006-01-02", date); err != nil {
+		return "", fmt.Errorf("%w: date must be YYYY-MM-DD", ErrDashboardInvalidParam)
+	}
+	return date, nil
+}
+
 // resolveDateRange 根据 granularity 参数解析起止日期
-func resolveDateRange(startDate, endDate, granularity string) (string, string) {
-	now := time.Now()
-	loc := now.Location()
+func resolveDateRange(startDate, endDate, granularity string) (string, string, error) {
+	if err := validateGranularity(granularity); err != nil {
+		return "", "", err
+	}
 
 	if endDate == "" {
-		endDate = now.Format("2006-01-02")
+		endDate = time.Now().Format("2006-01-02")
+	}
+	end, err := time.Parse("2006-01-02", endDate)
+	if err != nil {
+		return "", "", fmt.Errorf("%w: end_date must be YYYY-MM-DD", ErrDashboardInvalidParam)
 	}
 	if startDate != "" {
-		return startDate, endDate
+		start, err := time.Parse("2006-01-02", startDate)
+		if err != nil {
+			return "", "", fmt.Errorf("%w: start_date must be YYYY-MM-DD", ErrDashboardInvalidParam)
+		}
+		if start.After(end) {
+			return "", "", fmt.Errorf("%w: start_date cannot be after end_date", ErrDashboardInvalidParam)
+		}
+		return startDate, endDate, nil
 	}
 
+	loc := end.Location()
 	switch granularity {
 	case "week":
-		startDate = now.AddDate(0, 0, -7).Format("2006-01-02")
+		startDate = end.AddDate(0, 0, -7).Format("2006-01-02")
 	case "month":
-		startDate = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc).Format("2006-01-02")
+		startDate = time.Date(end.Year(), end.Month(), 1, 0, 0, 0, 0, loc).Format("2006-01-02")
 	case "quarter":
-		startDate = now.AddDate(0, -3, 0).Format("2006-01-02")
-	case "year":
-		startDate = time.Date(now.Year(), 1, 1, 0, 0, 0, 0, loc).Format("2006-01-02")
+		startDate = end.AddDate(0, -3, 0).Format("2006-01-02")
 	default:
-		startDate = now.AddDate(0, 0, -7).Format("2006-01-02")
+		startDate = end.AddDate(0, 0, -7).Format("2006-01-02")
 	}
-	return startDate, endDate
+	return startDate, endDate, nil
 }
 
 // defaultGranularity 空粒度默认为 day
@@ -63,6 +85,39 @@ func defaultGranularity(g string) string {
 	return g
 }
 
+func validateGranularity(granularity string) error {
+	switch defaultGranularity(granularity) {
+	case "day", "week", "month", "quarter":
+		return nil
+	default:
+		return fmt.Errorf("%w: granularity must be one of day, week, month, quarter", ErrDashboardInvalidParam)
+	}
+}
+
+func normalizeListType(listType string) (string, error) {
+	switch listType {
+	case "":
+		return model.ListTypeInactive, nil
+	case "not_login":
+		return model.ListTypeNoLogin, nil
+	case model.ListTypeInactive, model.ListTypeActive, model.ListTypeNoLogin:
+		return listType, nil
+	default:
+		return "", fmt.Errorf("%w: list_type must be one of active, inactive, no_login", ErrDashboardInvalidParam)
+	}
+}
+
+func validateMetricType(metricType string) error {
+	switch metricType {
+	case "login_users", "usage_users", "active", model.MetricUserActive,
+		model.MetricAppAccessUser, model.MetricMsgSender, model.MetricMsgCount,
+		model.MetricAppAccessCount, model.MetricGroupCreated:
+		return nil
+	default:
+		return fmt.Errorf("%w: unsupported metric_type %q", ErrDashboardInvalidParam, metricType)
+	}
+}
+
 func dayRangeFromDate(date string) (string, string) {
 	date = defaultYesterday(date)
 	return date, date
@@ -70,6 +125,10 @@ func dayRangeFromDate(date string) (string, string) {
 
 // GetOverview 获取指定日期的总览数据
 func (s *DashboardV2Service) GetOverview(date string, scope *DataScope) (map[string]interface{}, error) {
+	date, err := validateDashboardDate(date)
+	if err != nil {
+		return nil, err
+	}
 	startDate, endDate := dayRangeFromDate(date)
 	date = startDate
 	if scope == nil {
@@ -148,7 +207,14 @@ func (s *DashboardV2Service) GetTrend(metricType, startDate, endDate, granularit
 		return nil, fmt.Errorf("metric_type 不能为空")
 	}
 	granularity = defaultGranularity(granularity)
-	startDate, endDate = resolveDateRange(startDate, endDate, granularity)
+	if err := validateMetricType(metricType); err != nil {
+		return nil, err
+	}
+	var err error
+	startDate, endDate, err = resolveDateRange(startDate, endDate, granularity)
+	if err != nil {
+		return nil, err
+	}
 	if scope == nil {
 		scope = &DataScope{Unrestricted: true}
 	}
@@ -180,7 +246,16 @@ func (s *DashboardV2Service) GetMultiTrend(metricTypes []string, startDate, endD
 		return nil, fmt.Errorf("metric_types 不能为空")
 	}
 	granularity = defaultGranularity(granularity)
-	startDate, endDate = resolveDateRange(startDate, endDate, granularity)
+	for _, mt := range metricTypes {
+		if err := validateMetricType(mt); err != nil {
+			return nil, err
+		}
+	}
+	var err error
+	startDate, endDate, err = resolveDateRange(startDate, endDate, granularity)
+	if err != nil {
+		return nil, err
+	}
 	if scope == nil {
 		scope = &DataScope{Unrestricted: true}
 	}
@@ -242,12 +317,16 @@ func (s *DashboardV2Service) metricTrend(metricType, startDate, endDate, granula
 	case model.MetricGroupCreated:
 		return s.statsRepo.GetEventTrendScoped([]int{90000038}, startDate, endDate, granularity, "root_openid", scope.DeptIDs, scope.Unrestricted)
 	default:
-		return s.statsRepo.GetPeopleTrend(activeFeatureIDs, startDate, endDate, granularity, scope.DeptIDs, scope.Unrestricted)
+		return nil, fmt.Errorf("%w: unsupported metric_type %q", ErrDashboardInvalidParam, metricType)
 	}
 }
 
 // GetDepartmentStats 获取部门维度统计
 func (s *DashboardV2Service) GetDepartmentStats(date string, scope *DataScope) ([]map[string]interface{}, error) {
+	date, err := validateDashboardDate(date)
+	if err != nil {
+		return nil, err
+	}
 	startDate, endDate := dayRangeFromDate(date)
 	if scope == nil {
 		scope = &DataScope{Unrestricted: true}
@@ -305,12 +384,23 @@ func (s *DashboardV2Service) GetDepartmentStats(date string, scope *DataScope) (
 
 // GetDeviceStats 获取设备类型统计
 func (s *DashboardV2Service) GetDeviceStats(date string, scope *DataScope) (map[string]interface{}, error) {
-	date = defaultYesterday(date)
+	var err error
+	date, err = validateDashboardDate(date)
+	if err != nil {
+		return nil, err
+	}
+	if scope == nil {
+		scope = &DataScope{Unrestricted: true}
+	}
 
 	deviceStats, err := s.statsRepo.GetDeviceStatsScoped(date, scope.DeptIDs, scope.Unrestricted)
 	if err != nil {
 		return nil, fmt.Errorf("查询设备指标失败: %w", err)
 	}
+	return buildDevicePayload(date, deviceStats), nil
+}
+
+func buildDevicePayload(date string, deviceStats map[int]int64) map[string]interface{} {
 	deviceTypes := []struct {
 		devtype    int
 		metricType string
@@ -347,17 +437,19 @@ func (s *DashboardV2Service) GetDeviceStats(date string, scope *DataScope) (map[
 		"date":  date,
 		"total": total,
 		"types": items,
-	}, nil
+	}
 }
 
 // GetUserList 获取用户明细列表（分页）
 func (s *DashboardV2Service) GetUserList(date, listType string, page, pageSize int, scope *DataScope) (map[string]interface{}, error) {
-	date = defaultYesterday(date)
-	if listType == "" {
-		listType = model.ListTypeInactive
+	var err error
+	date, err = validateDashboardDate(date)
+	if err != nil {
+		return nil, err
 	}
-	if listType == "not_login" {
-		listType = model.ListTypeNoLogin
+	listType, err = normalizeListType(listType)
+	if err != nil {
+		return nil, err
 	}
 	if scope == nil {
 		scope = &DataScope{Unrestricted: true}
@@ -405,12 +497,14 @@ func (s *DashboardV2Service) GetUserList(date, listType string, page, pageSize i
 
 // ExportUserListCSV 导出用户明细 CSV
 func (s *DashboardV2Service) ExportUserListCSV(date, listType string, scope *DataScope) ([][]string, error) {
-	date = defaultYesterday(date)
-	if listType == "" {
-		listType = model.ListTypeInactive
+	var err error
+	date, err = validateDashboardDate(date)
+	if err != nil {
+		return nil, err
 	}
-	if listType == "not_login" {
-		listType = model.ListTypeNoLogin
+	listType, err = normalizeListType(listType)
+	if err != nil {
+		return nil, err
 	}
 	if scope == nil {
 		scope = &DataScope{Unrestricted: true}

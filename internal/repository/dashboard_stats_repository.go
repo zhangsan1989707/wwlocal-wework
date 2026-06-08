@@ -551,12 +551,11 @@ func (r *DashboardStatsRepository) GetDeviceStats(statDate string) (map[int]int6
 
 	sql := fmt.Sprintf(`
 		SELECT
-			CAST(JSON_UNQUOTE(JSON_EXTRACT(parsed_json, '$.devtype')) AS UNSIGNED) AS devtype,
-			COUNT(DISTINCT login_openid) AS cnt
+			devtype,
+			COUNT(DISTINCT openid) AS cnt
 		FROM %s
 		WHERE DATE(FROM_UNIXTIME(log_time)) = ?
-			AND parsed_json IS NOT NULL
-			AND JSON_EXTRACT(parsed_json, '$.devtype') IS NOT NULL
+			AND devtype IS NOT NULL
 		GROUP BY devtype
 	`, tableName)
 
@@ -598,7 +597,7 @@ func (r *DashboardStatsRepository) GetDeviceStatsScoped(statDate string, deptIDs
 				AND EXISTS (
 					SELECT 1 FROM contacts c
 					INNER JOIN contact_departments cd_scope ON cd_scope.user_id = c.user_id
-					WHERE c.status = 1 AND c.mobile = %s.login_openid AND cd_scope.department IN ?
+					WHERE c.status = 1 AND c.mobile = %s.openid AND cd_scope.department IN ?
 				)
 			`, tableName)
 			args = append(args, deptIDs)
@@ -607,12 +606,11 @@ func (r *DashboardStatsRepository) GetDeviceStatsScoped(statDate string, deptIDs
 
 	sql := fmt.Sprintf(`
 		SELECT
-			CAST(JSON_UNQUOTE(JSON_EXTRACT(parsed_json, '$.devtype')) AS UNSIGNED) AS devtype,
-			COUNT(DISTINCT login_openid) AS cnt
+			devtype,
+			COUNT(DISTINCT openid) AS cnt
 		FROM %s
 		WHERE DATE(FROM_UNIXTIME(log_time)) = ?
-			AND parsed_json IS NOT NULL
-			AND JSON_EXTRACT(parsed_json, '$.devtype') IS NOT NULL
+			AND devtype IS NOT NULL
 			%s
 		GROUP BY devtype
 	`, tableName, scopeSQL)
