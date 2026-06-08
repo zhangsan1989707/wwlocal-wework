@@ -16,13 +16,12 @@ type AdminOperLogHandler struct {
 
 type adminOperLogService interface {
 	Query(operType, operUserID string, startTime, endTime int64, page, pageSize int) ([]model.AdminOperLog, int64, error)
-	SyncLogs(startTime, endTime int64) (int, error)
-	SyncIncremental() (int, error)
+	StartSync(startTime, endTime int64) bool
 	GetStats(startTime, endTime int64) (map[string]interface{}, error)
 	GetOperTypes() ([]string, error)
 	GetOperUsers() ([]string, error)
 	Cleanup(beforeDays int) (int64, error)
-	GetStatus() (bool, int64, string, error)
+	GetStatus() (service.AdminOperLogSyncStatus, error)
 }
 
 func NewAdminOperLogHandler(svc *service.AdminOperLogService) *AdminOperLogHandler {
@@ -77,20 +76,13 @@ func (h *AdminOperLogHandler) Sync(c echo.Context) error {
 		return response.Error(c, 400, "start_time must be less than end_time")
 	}
 
-	var count int
-	var err error
-	if startTime > 0 && endTime > 0 {
-		count, err = h.svc.SyncLogs(startTime, endTime)
-	} else {
-		count, err = h.svc.SyncIncremental()
-	}
-	if err != nil {
-		return response.Error(c, 500, "同步失败")
+	if !h.svc.StartSync(startTime, endTime) {
+		return response.Error(c, 409, "企微操作日志同步正在进行中")
 	}
 
 	return response.Success(c, map[string]interface{}{
-		"synced":  count,
-		"message": "sync completed",
+		"message": "sync started",
+		"running": true,
 	})
 }
 
@@ -170,14 +162,10 @@ func (h *AdminOperLogHandler) Cleanup(c echo.Context) error {
 }
 
 func (h *AdminOperLogHandler) Status(c echo.Context) error {
-	running, total, lastTime, err := h.svc.GetStatus()
+	status, err := h.svc.GetStatus()
 	if err != nil {
 		return response.Error(c, 500, "获取状态失败")
 	}
 
-	return response.Success(c, map[string]interface{}{
-		"running":   running,
-		"total":     total,
-		"last_time": lastTime,
-	})
+	return response.Success(c, status)
 }

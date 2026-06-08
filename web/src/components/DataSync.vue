@@ -3,7 +3,7 @@
     <el-card class="options-card">
       <template #header>
         <div class="card-header">
-          <span class="card-title">同步选项</span>
+          <span class="card-title">开放数据日志选项</span>
           <el-button size="small" @click="handleReset" :disabled="syncStatus.running">
             <el-icon><Refresh /></el-icon>
             重置选项
@@ -36,12 +36,6 @@
               <span style="float: right; color: #8492a6; font-size: 12px">{{ item.feature_id }}</span>
             </el-option>
           </el-select>
-        </el-form-item>
-
-        <el-form-item label="操作日志">
-          <el-checkbox v-model="syncAdminOperLog" :disabled="syncStatus.running">
-            同步企微操作日志
-          </el-checkbox>
         </el-form-item>
       </el-form>
     </el-card>
@@ -115,7 +109,7 @@
     <el-card class="sync-card">
       <template #header>
         <div class="card-header">
-          <span class="card-title">按时间范围同步</span>
+          <span class="card-title">按时间范围同步开放数据日志</span>
           <el-tag :type="syncStatus.running ? 'warning' : 'success'" size="large">
             {{ syncStatus.running ? '同步中...' : '空闲' }}
           </el-tag>
@@ -159,15 +153,61 @@
             size="large"
           >
             <el-icon><VideoPlay /></el-icon>
-            {{ syncStatus.running ? '同步进行中...' : '开始同步' }}
+            {{ syncStatus.running ? '同步进行中...' : '同步开放数据日志' }}
           </el-button>
         </el-form-item>
       </el-form>
     </el-card>
 
+    <el-card class="sync-card">
+      <template #header>
+        <div class="card-header">
+          <span class="card-title">企微操作日志同步</span>
+          <el-tag :type="adminOperStatus.running ? 'warning' : 'success'" size="large">
+            {{ adminOperStatus.running ? '同步中...' : '空闲' }}
+          </el-tag>
+        </div>
+      </template>
+
+      <el-descriptions :column="3" border size="small">
+        <el-descriptions-item label="已同步总数">
+          {{ adminOperStatus.total > 0 ? formatNumber(adminOperStatus.total) : '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="最新日志时间">
+          {{ formatTime(adminOperStatus.last_time) }}
+        </el-descriptions-item>
+        <el-descriptions-item label="本次同步数量">
+          {{ adminOperStatus.synced ?? 0 }}
+        </el-descriptions-item>
+        <el-descriptions-item label="开始时间">
+          {{ formatTime(adminOperStatus.started_at) }}
+        </el-descriptions-item>
+        <el-descriptions-item label="完成时间">
+          {{ formatTime(adminOperStatus.ended_at) }}
+        </el-descriptions-item>
+        <el-descriptions-item label="错误信息">
+          <span v-if="adminOperStatus.last_error" class="error-text">{{ adminOperStatus.last_error }}</span>
+          <span v-else>-</span>
+        </el-descriptions-item>
+      </el-descriptions>
+
+      <div class="scheduler-actions" style="margin-top: 16px">
+        <el-button
+          type="primary"
+          @click="handleAdminOperSync"
+          :loading="adminOperStatus.running"
+          :disabled="adminOperStatus.running"
+          size="large"
+        >
+          <el-icon><VideoPlay /></el-icon>
+          {{ adminOperStatus.running ? '同步进行中...' : '同步企微操作日志' }}
+        </el-button>
+      </div>
+    </el-card>
+
     <el-card class="status-card">
       <template #header>
-        <span class="card-title">同步状态</span>
+        <span class="card-title">开放数据日志同步状态</span>
       </template>
 
       <div v-if="syncStatus.running" class="sync-progress">
@@ -336,7 +376,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { syncAPI, schedulerAPI, syncHistoryAPI, syncFeatureAPI, adminOperLogAPI, systemAPI } from '../api'
-import type { SchemaQualityInfo, SyncFeature, SyncHistory } from '../types/api'
+import type { AdminOperLogStats, SchemaQualityInfo, SyncFeature, SyncHistory } from '../types/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { VideoPlay, VideoPause, Refresh, Clock } from '@element-plus/icons-vue'
 
@@ -358,12 +398,18 @@ const schedulerStatus = ref<any>({
 })
 const startDelay = ref('1h')
 const syncAll = ref(true)
-const syncAdminOperLog = ref(false)
 const form = reactive({
   feature_ids: [] as number[],
 })
 const features = ref<SyncFeature[]>([])
 let pollTimer: ReturnType<typeof setInterval> | null = null
+let adminOperPollTimer: ReturnType<typeof setInterval> | null = null
+
+const adminOperStatus = ref<AdminOperLogStats>({
+  running: false,
+  total: 0,
+  synced: 0,
+})
 
 const syncHistory = ref<SyncHistory[]>([])
 const historyTotal = ref(0)
@@ -432,7 +478,7 @@ const getFeatureName = (featureId: number) => {
   return feature ? feature.name : `Feature ${featureId}`
 }
 
-const formatTime = (timeStr: string) => {
+const formatTime = (timeStr?: string) => {
   if (!timeStr || timeStr === '0001-01-01T00:00:00Z') return '-'
   const date = new Date(timeStr)
   return date.toLocaleString('zh-CN')
@@ -449,14 +495,17 @@ onMounted(async () => {
     console.error(err)
   }
   await checkStatus()
+  await checkAdminOperStatus()
   await checkSchedulerStatus()
   await loadSchemaQuality()
   await loadSyncHistory()
   if (syncStatus.value.running) startPolling()
+  if (adminOperStatus.value.running) startAdminOperPolling()
 })
 
 onUnmounted(() => {
   stopPolling()
+  stopAdminOperPolling()
 })
 
 const startPolling = () => {
@@ -474,6 +523,24 @@ const stopPolling = () => {
   if (pollTimer) {
     clearInterval(pollTimer)
     pollTimer = null
+  }
+}
+
+const startAdminOperPolling = () => {
+  stopAdminOperPolling()
+  adminOperPollTimer = setInterval(async () => {
+    await checkAdminOperStatus()
+    if (!adminOperStatus.value.running) {
+      stopAdminOperPolling()
+      await loadSyncHistory()
+    }
+  }, 2000)
+}
+
+const stopAdminOperPolling = () => {
+  if (adminOperPollTimer) {
+    clearInterval(adminOperPollTimer)
+    adminOperPollTimer = null
   }
 }
 
@@ -583,14 +650,14 @@ const handleSync = async () => {
     return
   }
 
-  if (!syncAll.value && form.feature_ids.length === 0 && !syncAdminOperLog.value) {
+  if (!syncAll.value && form.feature_ids.length === 0) {
     ElMessage.warning('请选择至少一个数据类型')
     return
   }
 
   try {
     await ElMessageBox.confirm(
-      '将按选定时间范围从政务微信拉取数据并解密存储，确定开始吗？',
+      '将按选定时间范围从政务微信拉取开放数据日志并解密存储，确定开始吗？',
       '确认同步',
       { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' }
     )
@@ -602,39 +669,58 @@ const handleSync = async () => {
     const startTime = Math.floor(dateRange.value[0].getTime() / 1000)
     const endTime = Math.floor(dateRange.value[1].getTime() / 1000)
 
-    if (syncAdminOperLog.value) {
-      const adminRes: any = await adminOperLogAPI.sync({ start_time: startTime, end_time: endTime })
-      if (adminRes.code !== 0) {
-        ElMessage.error(adminRes.msg || '企微操作日志同步启动失败')
-        return
-      }
-    }
+    const res: any = await syncAPI.sync({
+      sync_all: syncAll.value,
+      feature_ids: form.feature_ids,
+      start_time: startTime,
+      end_time: endTime,
+    })
 
-    if (syncAll.value || form.feature_ids.length > 0) {
-      const res: any = await syncAPI.sync({
-        sync_all: syncAll.value,
-        feature_ids: form.feature_ids,
-        start_time: startTime,
-        end_time: endTime,
-      })
-
-      if (res.code === 0) {
-        ElMessage.success('全量同步已启动')
-        startPolling()
-      } else {
-        ElMessage.error(res.msg || '同步启动失败')
-      }
+    if (res.code === 0) {
+      ElMessage.success('开放数据日志同步已启动')
+      startPolling()
     } else {
-      ElMessage.success('企微操作日志同步已启动')
+      ElMessage.error(res.msg || '同步启动失败')
     }
   } catch (err: any) {
     ElMessage.error(err.message || '同步启动失败')
   }
 }
 
+const handleAdminOperSync = async () => {
+  if (!dateRange.value) {
+    ElMessage.warning('请选择时间范围')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      '将按选定时间范围同步企微操作日志，确定开始吗？',
+      '确认同步',
+      { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+
+  try {
+    const startTime = Math.floor(dateRange.value[0].getTime() / 1000)
+    const endTime = Math.floor(dateRange.value[1].getTime() / 1000)
+    const res: any = await adminOperLogAPI.sync({ start_time: startTime, end_time: endTime })
+    if (res.code === 0) {
+      ElMessage.success('企微操作日志同步已启动')
+      await checkAdminOperStatus()
+      startAdminOperPolling()
+    } else {
+      ElMessage.error(res.msg || '企微操作日志同步启动失败')
+    }
+  } catch (err: any) {
+    ElMessage.error(err.message || '企微操作日志同步启动失败')
+  }
+}
+
 const handleReset = () => {
   syncAll.value = true
-  syncAdminOperLog.value = false
   form.feature_ids = []
 }
 
@@ -666,6 +752,17 @@ const checkStatus = async () => {
     const res: any = await syncAPI.status()
     if (res.code === 0) {
       syncStatus.value = res.data
+    }
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+const checkAdminOperStatus = async () => {
+  try {
+    const res = await adminOperLogAPI.syncStatus()
+    if (res.code === 0 && res.data) {
+      adminOperStatus.value = res.data
     }
   } catch (err) {
     console.error(err)

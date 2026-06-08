@@ -7,6 +7,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"wwlocal-wework/internal/model"
+	"wwlocal-wework/internal/service"
 )
 
 func newListQueryContext(target string) (echo.Context, *httptest.ResponseRecorder) {
@@ -74,12 +75,8 @@ func (f *fakeAdminOperLogService) Query(operType, operUserID string, startTime, 
 	return []model.AdminOperLog{}, 0, nil
 }
 
-func (f *fakeAdminOperLogService) SyncLogs(startTime, endTime int64) (int, error) {
-	return 0, nil
-}
-
-func (f *fakeAdminOperLogService) SyncIncremental() (int, error) {
-	return 0, nil
+func (f *fakeAdminOperLogService) StartSync(startTime, endTime int64) bool {
+	return true
 }
 
 func (f *fakeAdminOperLogService) GetStats(startTime, endTime int64) (map[string]interface{}, error) {
@@ -98,8 +95,8 @@ func (f *fakeAdminOperLogService) Cleanup(beforeDays int) (int64, error) {
 	return 0, nil
 }
 
-func (f *fakeAdminOperLogService) GetStatus() (bool, int64, string, error) {
-	return false, 0, "", nil
+func (f *fakeAdminOperLogService) GetStatus() (service.AdminOperLogSyncStatus, error) {
+	return service.AdminOperLogSyncStatus{}, nil
 }
 
 func TestAdminOperLogListValidatesQueryParams(t *testing.T) {

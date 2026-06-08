@@ -120,9 +120,9 @@ const loadFeatures = async () => {
 
 const loadAdminOperLogStats = async () => {
   try {
-    const res = await adminOperLogAPI.syncStatus() as unknown as ApiResponse<{ running: boolean }>
+    const res = await adminOperLogAPI.syncStatus() as unknown as ApiResponse<AdminOperLogStats>
     if (res.code === 0 && res.data) {
-      adminOperLogStats.value.running = res.data.running
+      adminOperLogStats.value = res.data
       if (adminOperLogStats.value.running) {
         startPolling()
       }
@@ -208,10 +208,10 @@ const handleSyncAdminOperLog = async () => {
 
   adminSyncLoading.value = true
   try {
-    const res = await adminOperLogAPI.sync({}) as unknown as ApiResponse<{ synced: number; message: string }>
+    const res = await adminOperLogAPI.sync({}) as unknown as ApiResponse<{ running: boolean; message: string }>
     if (res.code === 0) {
       ElMessage.success('同步任务已启动')
-      adminOperLogStats.value.running = true
+      await loadAdminOperLogStats()
       startPolling()
     } else {
       ElMessage.error(res.msg || '同步启动失败')

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"wwlocal-wework/config"
@@ -15,6 +16,18 @@ type AdminOperLogService struct {
 	weworkSvc    *WeWorkService
 	adminLogRepo *repository.AdminOperLogRepository
 	cfg          *config.WeWorkConfig
+	mu           sync.Mutex
+	status       AdminOperLogSyncStatus
+}
+
+type AdminOperLogSyncStatus struct {
+	Running   bool   `json:"running"`
+	Synced    int    `json:"synced"`
+	Total     int64  `json:"total"`
+	LastTime  string `json:"last_time"`
+	LastError string `json:"last_error,omitempty"`
+	StartedAt string `json:"started_at,omitempty"`
+	EndedAt   string `json:"ended_at,omitempty"`
 }
 
 func NewAdminOperLogService(weworkSvc *WeWorkService, adminLogRepo *repository.AdminOperLogRepository, cfg *config.WeWorkConfig) *AdminOperLogService {
@@ -23,6 +36,45 @@ func NewAdminOperLogService(weworkSvc *WeWorkService, adminLogRepo *repository.A
 		adminLogRepo: adminLogRepo,
 		cfg:          cfg,
 	}
+}
+
+func (s *AdminOperLogService) StartSync(startTime, endTime int64) bool {
+	s.mu.Lock()
+	if s.status.Running {
+		s.mu.Unlock()
+		return false
+	}
+	s.status.Running = true
+	s.status.Synced = 0
+	s.status.LastError = ""
+	s.status.StartedAt = time.Now().Format(time.RFC3339)
+	s.status.EndedAt = ""
+	s.mu.Unlock()
+
+	go func() {
+		var count int
+		var err error
+		if startTime > 0 && endTime > 0 {
+			count, err = s.SyncLogs(startTime, endTime)
+		} else {
+			count, err = s.SyncIncremental()
+		}
+
+		s.mu.Lock()
+		s.status.Running = false
+		s.status.Synced = count
+		s.status.EndedAt = time.Now().Format(time.RFC3339)
+		if err != nil {
+			s.status.LastError = err.Error()
+		}
+		s.mu.Unlock()
+
+		if err != nil {
+			slog.Error("admin oper log sync failed", "error", err)
+		}
+	}()
+
+	return true
 }
 
 func (s *AdminOperLogService) SyncLogs(startTime, endTime int64) (int, error) {
@@ -104,9 +156,9 @@ func (s *AdminOperLogService) fetchLogsFromAPI(token string, startTime, endTime 
 	path := "/cgi-bin/corp/get_admin_oper_log"
 	reqBody := map[string]interface{}{
 		"start_time": startTime,
-		"end_time":  endTime,
-		"start":     start,
-		"limit":     limit,
+		"end_time":   endTime,
+		"start":      start,
+		"limit":      limit,
 	}
 
 	resp, err := s.weworkSvc.DoRequest("POST", path, reqBody, token)
@@ -115,10 +167,10 @@ func (s *AdminOperLogService) fetchLogsFromAPI(token string, startTime, endTime 
 	}
 
 	var result struct {
-		ErrCode    int                       `json:"errcode"`
-		ErrMsg     string                    `json:"errmsg"`
-		OperList   []model.AdminOperLogAPI   `json:"oper_list"`
-		NextStart  int                       `json:"next_start"`
+		ErrCode   int                     `json:"errcode"`
+		ErrMsg    string                  `json:"errmsg"`
+		OperList  []model.AdminOperLogAPI `json:"oper_list"`
+		NextStart int                     `json:"next_start"`
 	}
 
 	if err := json.Unmarshal(resp, &result); err != nil {
@@ -212,24 +264,27 @@ func (s *AdminOperLogService) Cleanup(beforeDays int) (int64, error) {
 	return s.adminLogRepo.DeleteBefore(beforeTime)
 }
 
-func (s *AdminOperLogService) GetStatus() (bool, int64, string, error) {
-	running := false
+func (s *AdminOperLogService) GetStatus() (AdminOperLogSyncStatus, error) {
+	s.mu.Lock()
+	status := s.status
+	s.mu.Unlock()
+
 	total, err := s.adminLogRepo.Count("", "", 0, 0)
 	if err != nil {
-		return false, 0, "", err
+		return status, err
 	}
+	status.Total = total
 
 	latestTime := s.adminLogRepo.GetLatestOperTime()
-	lastTime := ""
 	if latestTime > 0 {
 		loc, _ := time.LoadLocation("Asia/Shanghai")
 		if loc == nil {
 			loc = time.FixedZone("CST", 8*3600)
 		}
-		lastTime = time.Unix(latestTime, 0).In(loc).Format(time.RFC3339)
+		status.LastTime = time.Unix(latestTime, 0).In(loc).Format(time.RFC3339)
 	}
 
-	return running, total, lastTime, nil
+	return status, nil
 }
 
 // SyncAdminLogsTask 处理来自队列的任务

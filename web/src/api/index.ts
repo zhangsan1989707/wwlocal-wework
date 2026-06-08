@@ -415,14 +415,14 @@ export const adminOperLogAPI = {
       { params }
     ) as unknown as ApiResult<PagedResponse<AdminOperLog>>,
   sync: (data: AdminOperLogSync) =>
-    api.post<ApiResponse<{ synced: number; message: string }>>(
+    api.post<ApiResponse<{ running: boolean; message: string }>>(
       '/admin-oper-logs/sync',
       data
-    ) as unknown as ApiResult<{ synced: number; message: string }>,
+    ) as unknown as ApiResult<{ running: boolean; message: string }>,
   syncStatus: () =>
-    api.get<ApiResponse<{ running: boolean }>>(
+    api.get<ApiResponse<AdminOperLogStats>>(
       '/admin-oper-logs/sync/status'
-    ) as unknown as ApiResult<{ running: boolean }>,
+    ) as unknown as ApiResult<AdminOperLogStats>,
   getStats: (params?: { start_time?: number; end_time?: number }) =>
     api.get<ApiResponse<AdminOperLogStats>>('/admin-oper-logs/stats', {
       params,

@@ -267,8 +267,12 @@ export interface AdminOperLogSync {
 
 export interface AdminOperLogStats {
   running: boolean
+  synced?: number
   total: number
   last_time?: string
+  last_error?: string
+  started_at?: string
+  ended_at?: string
   by_type?: Record<string, number>
   by_user?: Record<string, number>
   daily?: Array<{ date: string; count: number }>
