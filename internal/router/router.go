@@ -6,6 +6,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"wwlocal-wework/internal/handler"
 	appmw "wwlocal-wework/internal/middleware"
+	"wwlocal-wework/internal/model"
 	"wwlocal-wework/internal/service"
 )
 
@@ -68,7 +69,9 @@ func (r *Router) Setup(e *echo.Echo) {
 	{
 		api.PUT("/auth/password", d.Auth.ChangePassword)
 
-		users := api.Group("/users")
+		superAdminOnly := appmw.RequireRole(model.RoleSuperAdmin)
+
+		users := api.Group("/users", superAdminOnly)
 		{
 			users.GET("", d.User.List)
 			users.POST("", d.User.Create)
@@ -85,12 +88,12 @@ func (r *Router) Setup(e *echo.Echo) {
 		adminOperLogs := api.Group("/admin-oper-logs")
 		{
 			adminOperLogs.GET("", d.AdminOperLog.List)
-			adminOperLogs.POST("/sync", d.AdminOperLog.Sync)
-			adminOperLogs.GET("/sync/status", d.AdminOperLog.Status)
+			adminOperLogs.POST("/sync", d.AdminOperLog.Sync, superAdminOnly)
+			adminOperLogs.GET("/sync/status", d.AdminOperLog.Status, superAdminOnly)
 			adminOperLogs.GET("/stats", d.AdminOperLog.GetStats)
 			adminOperLogs.GET("/types", d.AdminOperLog.GetOperTypes)
 			adminOperLogs.GET("/users", d.AdminOperLog.GetOperUsers)
-			adminOperLogs.DELETE("/cleanup", d.AdminOperLog.Cleanup)
+			adminOperLogs.DELETE("/cleanup", d.AdminOperLog.Cleanup, superAdminOnly)
 		}
 
 		logs := api.Group("/logs")
@@ -101,12 +104,12 @@ func (r *Router) Setup(e *echo.Echo) {
 			logs.GET("/features", d.Log.GetFeatures)
 			logs.GET("/time-range", d.Log.GetTimeRange)
 			logs.GET("/field-paths", d.Log.GetFieldPaths)
-			logs.POST("/sync", d.Sync.Sync)
-			logs.POST("/sync/cancel", d.Sync.Cancel)
-			logs.GET("/sync/status", d.Sync.Status)
+			logs.POST("/sync", d.Sync.Sync, superAdminOnly)
+			logs.POST("/sync/cancel", d.Sync.Cancel, superAdminOnly)
+			logs.GET("/sync/status", d.Sync.Status, superAdminOnly)
 		}
 
-		keys := api.Group("/keys")
+		keys := api.Group("/keys", superAdminOnly)
 		{
 			keys.GET("", d.Key.List)
 			keys.POST("", d.Key.Add)
@@ -114,7 +117,7 @@ func (r *Router) Setup(e *echo.Echo) {
 			keys.GET("/test", d.Key.Test)
 		}
 
-		scheduler := api.Group("/scheduler")
+		scheduler := api.Group("/scheduler", superAdminOnly)
 		{
 			scheduler.POST("/start", d.Scheduler.Start)
 			scheduler.POST("/stop", d.Scheduler.Stop)
@@ -123,7 +126,7 @@ func (r *Router) Setup(e *echo.Echo) {
 			scheduler.PUT("/interval", d.Scheduler.SetInterval)
 		}
 
-		syncHistory := api.Group("/sync-history")
+		syncHistory := api.Group("/sync-history", superAdminOnly)
 		{
 			syncHistory.GET("", d.SyncHistory.List)
 		}
@@ -131,7 +134,7 @@ func (r *Router) Setup(e *echo.Echo) {
 		syncFeatures := api.Group("/sync-features")
 		{
 			syncFeatures.GET("", d.SyncFeature.List)
-			syncFeatures.PUT("", d.SyncFeature.Update)
+			syncFeatures.PUT("", d.SyncFeature.Update, superAdminOnly)
 		}
 
 		contacts := api.Group("/contacts")
@@ -140,10 +143,10 @@ func (r *Router) Setup(e *echo.Echo) {
 			contacts.GET("/departments/:id/members", d.Contact.GetDeptMembers)
 			contacts.GET("", d.Contact.List)
 			contacts.GET("/departments", d.Contact.GetDepartments)
-			contacts.POST("/sync", d.Contact.Sync)
-			contacts.POST("/sync/incremental", d.Contact.SyncIncremental)
-			contacts.POST("/sync/cancel", d.Contact.Cancel)
-			contacts.GET("/sync/status", d.Contact.Status)
+			contacts.POST("/sync", d.Contact.Sync, superAdminOnly)
+			contacts.POST("/sync/incremental", d.Contact.SyncIncremental, superAdminOnly)
+			contacts.POST("/sync/cancel", d.Contact.Cancel, superAdminOnly)
+			contacts.GET("/sync/status", d.Contact.Status, superAdminOnly)
 			contacts.POST("/names", d.Contact.GetNames)
 			contacts.GET("/:userId", d.Contact.GetContact)
 		}
@@ -173,18 +176,18 @@ func (r *Router) Setup(e *echo.Echo) {
 			dashboardV2.GET("/export/users", d.DashboardV2.ExportUserListCSV)
 		}
 
-		nightly := api.Group("/nightly")
+		nightly := api.Group("/nightly", superAdminOnly)
 		{
 			nightly.POST("/run", d.Nightly.Run)
 			nightly.GET("/status", d.Nightly.Status)
 		}
 
-		system := api.Group("/system")
+		system := api.Group("/system", superAdminOnly)
 		{
 			system.GET("/status", d.System.GetStatus)
 		}
 
-		tasks := api.Group("/tasks")
+		tasks := api.Group("/tasks", superAdminOnly)
 		{
 			tasks.POST("", d.Task.SubmitTask)
 			tasks.GET("", d.Task.ListTasks)

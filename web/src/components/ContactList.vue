@@ -1,6 +1,6 @@
 <template>
   <div class="contact-list">
-    <el-card class="sync-card">
+    <el-card v-if="isSuperAdmin" class="sync-card">
       <template #header>
         <div class="card-header">
           <span class="card-title">通讯录同步</span>
@@ -174,12 +174,15 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
 import { contactAPI } from '../api'
 import type { ApiResponse, Contact, ContactSyncStatus, Department, DeptMember, PaginatedResponse } from '../types/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 
 const router = useRouter()
+const authStore = useAuthStore()
+const isSuperAdmin = computed(() => authStore.role === 'super_admin')
 
 const contacts = ref<(Contact | DeptMember)[]>([])
 const total = ref(0)
@@ -250,8 +253,10 @@ watch(treeFilterText, (val) => {
 onMounted(async () => {
   await loadDeptTree()
   await loadContacts()
-  await checkSyncStatus()
-  if (syncStatus.value.running) startPolling()
+  if (isSuperAdmin.value) {
+    await checkSyncStatus()
+    if (syncStatus.value.running) startPolling()
+  }
 })
 
 onUnmounted(() => {

@@ -125,3 +125,17 @@ func CurrentRole(c echo.Context) string {
 	}
 	return ""
 }
+
+func RequireRole(role string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			if CurrentRole(c) != role {
+				return c.JSON(http.StatusForbidden, map[string]interface{}{
+					"code": http.StatusForbidden,
+					"msg":  "forbidden",
+				})
+			}
+			return next(c)
+		}
+	}
+}

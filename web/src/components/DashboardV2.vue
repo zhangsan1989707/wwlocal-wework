@@ -1,8 +1,11 @@
 <template>
   <div class="dashboard-v2">
-    <!-- Header: date picker + refresh -->
     <div class="dashboard-header">
       <div class="header-left">
+        <div>
+          <div class="page-title">运营总览</div>
+          <div class="page-subtitle">按授权范围查看组织使用情况</div>
+        </div>
         <span class="header-label">数据日期</span>
         <el-date-picker
           v-model="selectedDate"
@@ -20,10 +23,28 @@
       <el-button type="primary" :loading="loading" @click="refreshData">刷新</el-button>
     </div>
 
-    <el-alert v-if="!loading && noData" title="暂无数据" description="夜间预计算任务尚未运行，请等待凌晨1点自动执行或手动触发。" type="info" show-icon :closable="false" style="margin-bottom: 16px;" />
+    <el-alert v-if="!loading && noData" title="当前范围暂无运营数据" description="可能是所选日期尚未完成统计，或当前授权部门没有可统计数据。" type="info" show-icon :closable="false" style="margin-bottom: 16px;" />
 
-    <!-- Section 1: KPI Cards (top row) -->
-    <div class="kpi-row">
+    <div class="kpi-row kpi-row-primary">
+      <el-card shadow="hover" class="kpi-card">
+        <div class="kpi-value">{{ formatNum(overview?.active) }}</div>
+        <div class="kpi-label">活跃用户</div>
+      </el-card>
+      <el-card shadow="hover" class="kpi-card">
+        <div class="kpi-value" :class="rateActiveClass">{{ formatPermille(overview?.rate_active) }}</div>
+        <div class="kpi-label">活跃率</div>
+      </el-card>
+      <el-card shadow="hover" class="kpi-card">
+        <div class="kpi-value" :class="{ 'kpi-bad': (overview?.inactive || 0) > 0 }">{{ formatNum(overview?.inactive) }}</div>
+        <div class="kpi-label">未活跃用户</div>
+      </el-card>
+      <el-card shadow="hover" class="kpi-card">
+        <div class="kpi-value kpi-good">{{ formatPermille(overview?.rate_activation) }}</div>
+        <div class="kpi-label">激活率</div>
+      </el-card>
+    </div>
+
+    <div class="kpi-row kpi-row-secondary">
       <el-card shadow="hover" class="kpi-card">
         <div class="kpi-value">{{ formatNum(overview?.registered) }}</div>
         <div class="kpi-label">注册用户</div>
@@ -33,16 +54,8 @@
         <div class="kpi-label">激活用户</div>
       </el-card>
       <el-card shadow="hover" class="kpi-card">
-        <div class="kpi-value kpi-good">{{ formatPermille(overview?.rate_activation) }}</div>
-        <div class="kpi-label">激活率</div>
-      </el-card>
-      <el-card shadow="hover" class="kpi-card">
-        <div class="kpi-value">{{ formatNum(overview?.active) }}</div>
-        <div class="kpi-label">活跃用户</div>
-      </el-card>
-      <el-card shadow="hover" class="kpi-card">
-        <div class="kpi-value" :class="rateActiveClass">{{ formatPermille(overview?.rate_active) }}</div>
-        <div class="kpi-label">活跃率</div>
+        <div class="kpi-value">{{ formatNum(overview?.login_users) }}</div>
+        <div class="kpi-label">登录人数</div>
       </el-card>
       <el-card shadow="hover" class="kpi-card">
         <div class="kpi-value">{{ formatNum(overview?.msg_count) }}</div>
@@ -53,24 +66,12 @@
         <div class="kpi-label">发消息人数</div>
       </el-card>
       <el-card shadow="hover" class="kpi-card">
-        <div class="kpi-value">{{ formatNum(overview?.group_created) }}</div>
-        <div class="kpi-label">创建群聊数</div>
-      </el-card>
-    </div>
-
-    <!-- Section 2: KPI Cards (second row) -->
-    <div class="kpi-row">
-      <el-card shadow="hover" class="kpi-card">
-        <div class="kpi-value">{{ formatNum(overview?.group_active) }}</div>
-        <div class="kpi-label">活跃群聊数</div>
-      </el-card>
-      <el-card shadow="hover" class="kpi-card">
-        <div class="kpi-value kpi-good">{{ formatPermille(overview?.rate_group_active) }}</div>
-        <div class="kpi-label">群活跃率</div>
-      </el-card>
-      <el-card shadow="hover" class="kpi-card">
         <div class="kpi-value">{{ formatNum(overview?.app_access_user) }}</div>
         <div class="kpi-label">访问应用人数</div>
+      </el-card>
+      <el-card shadow="hover" class="kpi-card">
+        <div class="kpi-value">{{ formatNum(overview?.group_created) }}</div>
+        <div class="kpi-label">创建群聊数</div>
       </el-card>
       <el-card shadow="hover" class="kpi-card">
         <div class="kpi-value">{{ formatNum(overview?.devices?.total) }}</div>
@@ -148,8 +149,8 @@
         </el-table-column>
         <el-table-column label="活跃率" width="100" align="center" sortable sort-by="active_rate">
           <template #default="{ row }">
-            <span :class="row.active_rate >= 0.8 ? 'text-good' : row.active_rate >= 0.5 ? '' : 'text-bad'">
-              {{ (row.active_rate * 100).toFixed(1) }}%
+            <span :class="row.active_rate >= 80 ? 'text-good' : row.active_rate >= 50 ? '' : 'text-bad'">
+              {{ row.active_rate.toFixed(1) }}%
             </span>
           </template>
         </el-table-column>
@@ -175,7 +176,9 @@
             <span class="link-text">{{ row.name }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="mobile" label="手机号" width="140" />
+        <el-table-column label="手机号" width="140">
+          <template #default="{ row }">{{ maskMobile(row.mobile) }}</template>
+        </el-table-column>
         <el-table-column prop="user_id" label="用户ID" width="160" />
         <el-table-column prop="department" label="部门" min-width="150" />
       </el-table>
@@ -251,6 +254,11 @@ function formatNum(n?: number): string {
 function formatPermille(n?: number): string {
   if (n === undefined || n === null) return '-'
   return (n / 10).toFixed(1) + '%'
+}
+
+function maskMobile(mobile?: string): string {
+  if (!mobile) return '-'
+  return mobile.replace(/^(\d{3})\d{4}(\d+)/, '$1****$2')
 }
 
 const rateActiveClass = computed(() => {
@@ -473,7 +481,20 @@ onUnmounted(() => {
 .header-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
+}
+
+.page-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #303133;
+  line-height: 1.2;
+}
+
+.page-subtitle {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
 }
 
 .header-label {
@@ -489,11 +510,11 @@ onUnmounted(() => {
   margin-bottom: 16px;
 }
 
-.kpi-row:first-of-type {
+.kpi-row-primary {
   grid-template-columns: repeat(4, 1fr);
 }
 
-.kpi-row:nth-of-type(2) {
+.kpi-row-secondary {
   grid-template-columns: repeat(4, 1fr);
 }
 
@@ -511,6 +532,10 @@ onUnmounted(() => {
   font-weight: 600;
   color: #303133;
   line-height: 1.2;
+}
+
+.kpi-row-secondary .kpi-value {
+  font-size: 24px;
 }
 
 .kpi-value.kpi-good {
