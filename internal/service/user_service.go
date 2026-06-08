@@ -6,13 +6,28 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"wwlocal-wework/config"
 	"wwlocal-wework/internal/model"
-	"wwlocal-wework/internal/repository"
 )
 
 type UserService struct {
-	userRepo    *repository.UserRepository
-	contactRepo *repository.ContactRepository
+	userRepo    userRepository
+	contactRepo contactScopeRepository
 	authCfg     *config.AuthConfig
+}
+
+type userRepository interface {
+	Count() (int64, error)
+	Create(user *model.User) error
+	GetByUsername(username string) (*model.User, error)
+	GetByID(id int64) (*model.User, error)
+	List() ([]model.User, error)
+	Update(user *model.User) error
+	SetScopes(userID int64, deptIDs []int) error
+	GetScopes(userID int64) ([]int, error)
+}
+
+type contactScopeRepository interface {
+	ExpandDepartmentIDs(rootIDs []int) ([]int, error)
+	IsIdentifierInScope(identifier string, deptIDs []int, unrestricted bool) (bool, error)
 }
 
 type AuthUser struct {
@@ -37,7 +52,7 @@ type DataScope struct {
 	Unrestricted bool   `json:"unrestricted"`
 }
 
-func NewUserService(userRepo *repository.UserRepository, contactRepo *repository.ContactRepository, authCfg *config.AuthConfig) *UserService {
+func NewUserService(userRepo userRepository, contactRepo contactScopeRepository, authCfg *config.AuthConfig) *UserService {
 	return &UserService{userRepo: userRepo, contactRepo: contactRepo, authCfg: authCfg}
 }
 

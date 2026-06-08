@@ -17,7 +17,7 @@ import (
 
 type BehaviorQueryHandler struct {
 	behaviorSvc *service.BehaviorQueryService
-	userSvc     *service.UserService
+	userSvc     dataScopeChecker
 }
 
 func NewBehaviorQueryHandler(behaviorSvc *service.BehaviorQueryService, userSvc *service.UserService) *BehaviorQueryHandler {

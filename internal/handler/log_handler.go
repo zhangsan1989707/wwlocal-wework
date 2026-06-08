@@ -16,7 +16,11 @@ import (
 
 type LogHandler struct {
 	querySvc *service.QueryService
-	userSvc  *service.UserService
+	userSvc  dataScopeChecker
+}
+
+type dataScopeChecker interface {
+	IdentifierInDataScope(userID int64, identifier string) (*service.DataScope, bool, error)
 }
 
 func NewLogHandler(querySvc *service.QueryService, userSvc *service.UserService) *LogHandler {
