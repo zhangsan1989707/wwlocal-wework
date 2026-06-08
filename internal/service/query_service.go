@@ -240,12 +240,12 @@ func (s *QueryService) QueryByCursor(req *model.QueryRequest) (*model.CursorQuer
 			return nil, fmt.Errorf("query feature %d failed: %w", featureID, err)
 		}
 		total += count
-		
+
 		// 解析数据
 		for _, entry := range entries {
 			allData = append(allData, s.parseEntry(&entry))
 		}
-		
+
 		// 找到最小的 cursor 作为下一页的 cursor
 		if nextCursor > 0 && (minCursor == 0 || nextCursor < minCursor) {
 			minCursor = nextCursor
@@ -312,7 +312,7 @@ func (s *QueryService) ExportCSV(req *model.QueryRequest) ([]map[string]interfac
 	var allData []map[string]interface{}
 
 	for _, featureID := range req.FeatureIDs {
-		entries, _, err := s.logRepo.QueryAcrossMonths(featureID, req.StartTime, req.EndTime, req.Page, req.PageSize)
+		entries, _, err := s.logRepo.QueryAcrossMonthsWithConditions(featureID, req.StartTime, req.EndTime, req.Conditions, req.Mobile, req.Page, req.PageSize)
 		if err != nil {
 			return nil, fmt.Errorf("query feature %d failed: %w", featureID, err)
 		}

@@ -137,8 +137,8 @@ func main() {
 	healthHandler := handler.NewHealthHandler(db, cfg)
 	authHandler := handler.NewAuthHandler(&cfg.Auth, userSvc)
 	userHandler := handler.NewUserHandler(userSvc)
-	logHandler := handler.NewLogHandler(querySvc)
-	behaviorQueryHandler := handler.NewBehaviorQueryHandler(behaviorQuerySvc)
+	logHandler := handler.NewLogHandler(querySvc, userSvc)
+	behaviorQueryHandler := handler.NewBehaviorQueryHandler(behaviorQuerySvc, userSvc)
 	keyHandler := handler.NewKeyHandler(keySvc)
 	syncHandler := handler.NewSyncHandler(syncSvc)
 

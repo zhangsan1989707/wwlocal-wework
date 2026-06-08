@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"wwlocal-wework/internal/middleware"
 	"wwlocal-wework/internal/model"
 	"wwlocal-wework/internal/service"
 	"wwlocal-wework/pkg/response"
@@ -16,16 +17,21 @@ import (
 
 type BehaviorQueryHandler struct {
 	behaviorSvc *service.BehaviorQueryService
+	userSvc     *service.UserService
 }
 
-func NewBehaviorQueryHandler(behaviorSvc *service.BehaviorQueryService) *BehaviorQueryHandler {
-	return &BehaviorQueryHandler{behaviorSvc: behaviorSvc}
+func NewBehaviorQueryHandler(behaviorSvc *service.BehaviorQueryService, userSvc *service.UserService) *BehaviorQueryHandler {
+	return &BehaviorQueryHandler{behaviorSvc: behaviorSvc, userSvc: userSvc}
 }
 
 func (h *BehaviorQueryHandler) Query(c echo.Context) error {
 	var req model.BehaviorQueryRequest
 	if err := c.Bind(&req); err != nil {
 		return response.Error(c, 400, "invalid request body")
+	}
+
+	if err := h.checkQueryScope(c, &req); err != nil {
+		return err
 	}
 
 	result, err := h.behaviorSvc.Query(&req)
@@ -44,6 +50,9 @@ func (h *BehaviorQueryHandler) ExportCSV(c echo.Context) error {
 	var req model.BehaviorQueryRequest
 	if err := c.Bind(&req); err != nil {
 		return response.Error(c, 400, "invalid request body")
+	}
+	if err := h.checkQueryScope(c, &req); err != nil {
+		return err
 	}
 	result, err := h.behaviorSvc.Export(&req)
 	if err != nil {
@@ -73,6 +82,30 @@ func (h *BehaviorQueryHandler) ExportCSV(c echo.Context) error {
 		})
 	}
 	writer.Flush()
+	return nil
+}
+
+func (h *BehaviorQueryHandler) checkQueryScope(c echo.Context, req *model.BehaviorQueryRequest) error {
+	if h.userSvc == nil {
+		return nil
+	}
+	userID := middleware.CurrentUserID(c)
+	if userID <= 0 {
+		return response.Error(c, 401, "用户无效")
+	}
+	scope, ok, err := h.userSvc.IdentifierInDataScope(userID, req.OpenID)
+	if err != nil {
+		return response.Error(c, 500, "权限校验失败")
+	}
+	if scope.Unrestricted {
+		return nil
+	}
+	if strings.TrimSpace(req.OpenID) == "" {
+		return response.Error(c, 400, "openid is required")
+	}
+	if !ok {
+		return response.Error(c, 403, "无权查询该成员行为")
+	}
 	return nil
 }
 

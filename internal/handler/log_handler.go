@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"wwlocal-wework/internal/middleware"
 	"wwlocal-wework/internal/model"
 	"wwlocal-wework/internal/service"
 	"wwlocal-wework/pkg/response"
@@ -15,10 +16,11 @@ import (
 
 type LogHandler struct {
 	querySvc *service.QueryService
+	userSvc  *service.UserService
 }
 
-func NewLogHandler(querySvc *service.QueryService) *LogHandler {
-	return &LogHandler{querySvc: querySvc}
+func NewLogHandler(querySvc *service.QueryService, userSvc *service.UserService) *LogHandler {
+	return &LogHandler{querySvc: querySvc, userSvc: userSvc}
 }
 
 func (h *LogHandler) Query(c echo.Context) error {
@@ -33,6 +35,10 @@ func (h *LogHandler) Query(c echo.Context) error {
 
 	if req.StartTime <= 0 || req.EndTime <= 0 {
 		return response.Error(c, 400, "start_time and end_time are required")
+	}
+
+	if err := h.checkQueryScope(c, &req); err != nil {
+		return err
 	}
 
 	result, err := h.querySvc.Query(&req)
@@ -85,6 +91,10 @@ func (h *LogHandler) QueryByCursor(c echo.Context) error {
 		return response.Error(c, 400, "start_time and end_time are required")
 	}
 
+	if err := h.checkQueryScope(c, &req); err != nil {
+		return err
+	}
+
 	result, err := h.querySvc.QueryByCursor(&req)
 	if err != nil {
 		return response.Error(c, 500, "查询失败")
@@ -105,6 +115,10 @@ func (h *LogHandler) ExportCSV(c echo.Context) error {
 
 	if req.StartTime <= 0 || req.EndTime <= 0 {
 		return response.Error(c, 400, "start_time and end_time are required")
+	}
+
+	if err := h.checkQueryScope(c, &req); err != nil {
+		return err
 	}
 
 	data, err := h.querySvc.ExportCSV(&req)
@@ -147,6 +161,30 @@ func (h *LogHandler) ExportCSV(c echo.Context) error {
 	}
 
 	writer.Flush()
+	return nil
+}
+
+func (h *LogHandler) checkQueryScope(c echo.Context, req *model.QueryRequest) error {
+	if h.userSvc == nil {
+		return nil
+	}
+	userID := middleware.CurrentUserID(c)
+	if userID <= 0 {
+		return response.Error(c, 401, "用户无效")
+	}
+	scope, ok, err := h.userSvc.IdentifierInDataScope(userID, req.Mobile)
+	if err != nil {
+		return response.Error(c, 500, "权限校验失败")
+	}
+	if scope.Unrestricted {
+		return nil
+	}
+	if req.Mobile == "" {
+		return response.Error(c, 403, "部门管理员查询需指定本部门成员手机号或 UserID")
+	}
+	if !ok {
+		return response.Error(c, 403, "无权查询该成员日志")
+	}
 	return nil
 }
 

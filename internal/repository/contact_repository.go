@@ -236,6 +236,29 @@ func (r *ContactRepository) GetScopedContactCount(deptIDs []int, unrestricted bo
 	return count, err
 }
 
+func (r *ContactRepository) IsIdentifierInScope(identifier string, deptIDs []int, unrestricted bool) (bool, error) {
+	identifier = strings.TrimSpace(identifier)
+	if identifier == "" {
+		return false, nil
+	}
+	if unrestricted {
+		return true, nil
+	}
+	if len(deptIDs) == 0 {
+		return false, nil
+	}
+
+	var count int64
+	err := r.DB.Raw(`
+		SELECT COUNT(DISTINCT c.user_id)
+		FROM contacts c
+		INNER JOIN contact_departments cd ON c.user_id = cd.user_id
+		WHERE cd.department IN ?
+		  AND (c.user_id = ? OR c.mobile = ?)
+	`, deptIDs, identifier, identifier).Scan(&count).Error
+	return count > 0, err
+}
+
 func (r *ContactRepository) MarkSyncedAt(userIDs []string) error {
 	if len(userIDs) == 0 {
 		return nil

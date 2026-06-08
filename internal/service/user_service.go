@@ -196,3 +196,12 @@ func (s *UserService) ResolveDataScope(userID int64) (*DataScope, error) {
 	scope.DeptIDs = deptIDs
 	return scope, nil
 }
+
+func (s *UserService) IdentifierInDataScope(userID int64, identifier string) (*DataScope, bool, error) {
+	scope, err := s.ResolveDataScope(userID)
+	if err != nil {
+		return nil, false, err
+	}
+	ok, err := s.contactRepo.IsIdentifierInScope(identifier, scope.DeptIDs, scope.Unrestricted)
+	return scope, ok, err
+}
