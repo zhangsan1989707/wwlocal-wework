@@ -1,7 +1,9 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -11,6 +13,9 @@ import (
 	"wwlocal-wework/internal/model"
 	"wwlocal-wework/internal/repository"
 )
+
+var ErrQueryTimeout = errors.New("query timeout")
+var ErrQueryCanceled = errors.New("query canceled")
 
 type QueryService struct {
 	logRepo         *repository.LogRepository
@@ -26,6 +31,10 @@ func NewQueryService(logRepo *repository.LogRepository, contactRepo *repository.
 }
 
 func (s *QueryService) Query(req *model.QueryRequest) (*model.QueryResult, error) {
+	return s.QueryContext(context.Background(), req)
+}
+
+func (s *QueryService) QueryContext(ctx context.Context, req *model.QueryRequest) (*model.QueryResult, error) {
 	if req.Page <= 0 {
 		req.Page = 1
 	}
@@ -59,16 +68,22 @@ func (s *QueryService) Query(req *model.QueryRequest) (*model.QueryResult, error
 	var total int64
 
 	for _, featureID := range req.FeatureIDs {
+		if err := queryContextError(ctx); err != nil {
+			return nil, err
+		}
 		var entries []model.LogEntry
 		var count int64
 		var err error
 
 		if hasConditions {
-			entries, count, err = s.logRepo.QueryAcrossMonthsWithConditions(featureID, req.StartTime, req.EndTime, req.Conditions, req.Mobile, 1, perPage)
+			entries, count, err = s.logRepo.QueryAcrossMonthsWithConditionsContext(ctx, featureID, req.StartTime, req.EndTime, req.Conditions, req.Mobile, 1, perPage)
 		} else {
-			entries, count, err = s.logRepo.QueryAcrossMonths(featureID, req.StartTime, req.EndTime, 1, perPage)
+			entries, count, err = s.logRepo.QueryAcrossMonthsContext(ctx, featureID, req.StartTime, req.EndTime, 1, perPage)
 		}
 		if err != nil {
+			if ctxErr := queryContextError(ctx); ctxErr != nil {
+				return nil, ctxErr
+			}
 			return nil, fmt.Errorf("query feature %d failed: %w", featureID, err)
 		}
 
@@ -205,6 +220,10 @@ func (s *QueryService) GetFieldPaths() []string {
 
 // QueryByCursor 使用游标查询，更高效的分页方式
 func (s *QueryService) QueryByCursor(req *model.QueryRequest) (*model.CursorQueryResult, error) {
+	return s.QueryByCursorContext(context.Background(), req)
+}
+
+func (s *QueryService) QueryByCursorContext(ctx context.Context, req *model.QueryRequest) (*model.CursorQueryResult, error) {
 	if req.PageSize <= 0 {
 		req.PageSize = 100
 	}
@@ -227,7 +246,11 @@ func (s *QueryService) QueryByCursor(req *model.QueryRequest) (*model.CursorQuer
 
 	// 使用游标查询每个 feature
 	for _, featureID := range req.FeatureIDs {
-		entries, count, nextCursor, err := s.logRepo.QueryByCursor(
+		if err := queryContextError(ctx); err != nil {
+			return nil, err
+		}
+		entries, count, nextCursor, err := s.logRepo.QueryByCursorContext(
+			ctx,
 			featureID,
 			req.StartTime,
 			req.EndTime,
@@ -237,6 +260,9 @@ func (s *QueryService) QueryByCursor(req *model.QueryRequest) (*model.CursorQuer
 			req.Mobile,
 		)
 		if err != nil {
+			if ctxErr := queryContextError(ctx); ctxErr != nil {
+				return nil, ctxErr
+			}
 			return nil, fmt.Errorf("query feature %d failed: %w", featureID, err)
 		}
 		total += count
@@ -290,6 +316,10 @@ func (s *QueryService) QueryByCursor(req *model.QueryRequest) (*model.CursorQuer
 }
 
 func (s *QueryService) ExportCSV(req *model.QueryRequest) ([]map[string]interface{}, error) {
+	return s.ExportCSVContext(context.Background(), req)
+}
+
+func (s *QueryService) ExportCSVContext(ctx context.Context, req *model.QueryRequest) ([]map[string]interface{}, error) {
 	if req.PageSize <= 0 {
 		req.PageSize = 50000
 	}
@@ -312,8 +342,14 @@ func (s *QueryService) ExportCSV(req *model.QueryRequest) ([]map[string]interfac
 	var allData []map[string]interface{}
 
 	for _, featureID := range req.FeatureIDs {
-		entries, _, err := s.logRepo.QueryAcrossMonthsWithConditions(featureID, req.StartTime, req.EndTime, req.Conditions, req.Mobile, req.Page, req.PageSize)
+		if err := queryContextError(ctx); err != nil {
+			return nil, err
+		}
+		entries, _, err := s.logRepo.QueryAcrossMonthsWithConditionsContext(ctx, featureID, req.StartTime, req.EndTime, req.Conditions, req.Mobile, req.Page, req.PageSize)
 		if err != nil {
+			if ctxErr := queryContextError(ctx); ctxErr != nil {
+				return nil, ctxErr
+			}
 			return nil, fmt.Errorf("query feature %d failed: %w", featureID, err)
 		}
 		for _, entry := range entries {
@@ -328,6 +364,19 @@ func (s *QueryService) ExportCSV(req *model.QueryRequest) ([]map[string]interfac
 	})
 
 	return allData, nil
+}
+
+func queryContextError(ctx context.Context) error {
+	switch err := ctx.Err(); {
+	case err == nil:
+		return nil
+	case errors.Is(err, context.DeadlineExceeded):
+		return ErrQueryTimeout
+	case errors.Is(err, context.Canceled):
+		return ErrQueryCanceled
+	default:
+		return err
+	}
 }
 
 func extractPaths(data map[string]interface{}, prefix string, result map[string]struct{}) {

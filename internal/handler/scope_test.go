@@ -115,6 +115,32 @@ func TestLogCheckQueryScopeHandlesScopeErrors(t *testing.T) {
 	}
 }
 
+func TestLogQueryErrorMapsTimeout(t *testing.T) {
+	c, rec := newScopeContext(1)
+	h := &LogHandler{}
+
+	err := h.queryError(c, service.ErrQueryTimeout, "查询失败")
+	if err != nil {
+		t.Fatalf("queryError returned error: %v", err)
+	}
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusGatewayTimeout)
+	}
+}
+
+func TestLogQueryErrorMapsCanceled(t *testing.T) {
+	c, rec := newScopeContext(1)
+	h := &LogHandler{}
+
+	err := h.queryError(c, service.ErrQueryCanceled, "查询失败")
+	if err != nil {
+		t.Fatalf("queryError returned error: %v", err)
+	}
+	if rec.Code != 499 {
+		t.Fatalf("status = %d, want 499", rec.Code)
+	}
+}
+
 func TestBehaviorCheckQueryScopeRejectsBlankOpenID(t *testing.T) {
 	c, rec := newScopeContext(2)
 	h := &BehaviorQueryHandler{userSvc: &fakeScopeChecker{scope: &service.DataScope{DeptIDs: []int{10}}}}

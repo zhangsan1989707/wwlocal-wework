@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -10,15 +11,23 @@ import (
 )
 
 func (r *LogRepository) QueryAcrossMonths(featureID int, startTime, endTime int64, page, pageSize int) ([]model.LogEntry, int64, error) {
-	return r.queryAcrossMonthsUnion(featureID, startTime, endTime, "", nil, page, pageSize)
+	return r.QueryAcrossMonthsContext(context.Background(), featureID, startTime, endTime, page, pageSize)
+}
+
+func (r *LogRepository) QueryAcrossMonthsContext(ctx context.Context, featureID int, startTime, endTime int64, page, pageSize int) ([]model.LogEntry, int64, error) {
+	return r.queryAcrossMonthsUnion(ctx, featureID, startTime, endTime, "", nil, page, pageSize)
 }
 
 func (r *LogRepository) QueryAcrossMonthsWithConditions(featureID int, startTime, endTime int64, conditions map[string]interface{}, mobile string, page, pageSize int) ([]model.LogEntry, int64, error) {
-	jsonWhere, jsonArgs := r.buildJSONConditions(conditions, mobile)
-	return r.queryAcrossMonthsUnion(featureID, startTime, endTime, jsonWhere, jsonArgs, page, pageSize)
+	return r.QueryAcrossMonthsWithConditionsContext(context.Background(), featureID, startTime, endTime, conditions, mobile, page, pageSize)
 }
 
-func (r *LogRepository) queryAcrossMonthsUnion(featureID int, startTime, endTime int64, extraWhere string, extraArgs []interface{}, page, pageSize int) ([]model.LogEntry, int64, error) {
+func (r *LogRepository) QueryAcrossMonthsWithConditionsContext(ctx context.Context, featureID int, startTime, endTime int64, conditions map[string]interface{}, mobile string, page, pageSize int) ([]model.LogEntry, int64, error) {
+	jsonWhere, jsonArgs := r.buildJSONConditions(conditions, mobile)
+	return r.queryAcrossMonthsUnion(ctx, featureID, startTime, endTime, jsonWhere, jsonArgs, page, pageSize)
+}
+
+func (r *LogRepository) queryAcrossMonthsUnion(ctx context.Context, featureID int, startTime, endTime int64, extraWhere string, extraArgs []interface{}, page, pageSize int) ([]model.LogEntry, int64, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -31,6 +40,9 @@ func (r *LogRepository) queryAcrossMonthsUnion(featureID int, startTime, endTime
 	var selects []string
 	var queryArgs []interface{}
 	for _, month := range months {
+		if err := ctx.Err(); err != nil {
+			return nil, 0, err
+		}
 		tableName := r.GetTableName(featureID, month)
 		if !r.TableExists(tableName) {
 			continue
@@ -43,7 +55,7 @@ func (r *LogRepository) queryAcrossMonthsUnion(featureID int, startTime, endTime
 		}
 
 		var count int64
-		if err := r.DB.Raw(fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", tableName, where), args...).Scan(&count).Error; err != nil {
+		if err := r.DB.WithContext(ctx).Raw(fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", tableName, where), args...).Scan(&count).Error; err != nil {
 			return nil, 0, fmt.Errorf("count table %s failed: %w", tableName, err)
 		}
 		total += count
@@ -73,18 +85,25 @@ func (r *LogRepository) queryAcrossMonthsUnion(featureID int, startTime, endTime
 	`, strings.Join(selects, " UNION ALL "))
 
 	var entries []model.LogEntry
-	if err := r.DB.Raw(querySQL, queryArgs...).Scan(&entries).Error; err != nil {
+	if err := r.DB.WithContext(ctx).Raw(querySQL, queryArgs...).Scan(&entries).Error; err != nil {
 		return nil, 0, fmt.Errorf("query feature %d across months failed: %w", featureID, err)
 	}
 	return entries, total, nil
 }
 
 func (r *LogRepository) QueryByCursor(featureID int, startTime, endTime int64, cursor int64, pageSize int, conditions map[string]interface{}, mobile string) ([]model.LogEntry, int64, int64, error) {
+	return r.QueryByCursorContext(context.Background(), featureID, startTime, endTime, cursor, pageSize, conditions, mobile)
+}
+
+func (r *LogRepository) QueryByCursorContext(ctx context.Context, featureID int, startTime, endTime int64, cursor int64, pageSize int, conditions map[string]interface{}, mobile string) ([]model.LogEntry, int64, int64, error) {
 	months := r.monthsBetween(startTime, endTime)
 	jsonWhere, jsonArgs := r.buildJSONConditions(conditions, mobile)
 
 	var total int64
 	for _, month := range months {
+		if err := ctx.Err(); err != nil {
+			return nil, 0, 0, err
+		}
 		tableName := r.GetTableName(featureID, month)
 		if !r.TableExists(tableName) {
 			continue
@@ -96,7 +115,7 @@ func (r *LogRepository) QueryByCursor(featureID int, startTime, endTime int64, c
 			args = append(args, jsonArgs...)
 		}
 		var count int64
-		if err := r.DB.Raw(fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", tableName, where), args...).Scan(&count).Error; err != nil {
+		if err := r.DB.WithContext(ctx).Raw(fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", tableName, where), args...).Scan(&count).Error; err != nil {
 			slog.Info(fmt.Sprintf("count table %s failed: %v", tableName, err))
 		}
 		total += count
@@ -110,6 +129,9 @@ func (r *LogRepository) QueryByCursor(featureID int, startTime, endTime int64, c
 	var allEntries []model.LogEntry
 	remaining := pageSize
 	for i := len(months) - 1; i >= 0 && remaining > 0; i-- {
+		if err := ctx.Err(); err != nil {
+			return nil, 0, 0, err
+		}
 		month := months[i]
 		tableName := r.GetTableName(featureID, month)
 		if !r.TableExists(tableName) {
@@ -134,7 +156,7 @@ func (r *LogRepository) QueryByCursor(featureID int, startTime, endTime int64, c
 
 		var entries []model.LogEntry
 		queryArgs := append(args, remaining)
-		if err := r.DB.Raw(querySQL, queryArgs...).Scan(&entries).Error; err != nil {
+		if err := r.DB.WithContext(ctx).Raw(querySQL, queryArgs...).Scan(&entries).Error; err != nil {
 			slog.Info(fmt.Sprintf("query table %s failed: %v", tableName, err))
 			continue
 		}

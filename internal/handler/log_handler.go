@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -13,6 +15,8 @@ import (
 	"wwlocal-wework/internal/service"
 	"wwlocal-wework/pkg/response"
 )
+
+const logQueryTimeout = 25 * time.Second
 
 type LogHandler struct {
 	querySvc *service.QueryService
@@ -45,9 +49,11 @@ func (h *LogHandler) Query(c echo.Context) error {
 		return err
 	}
 
-	result, err := h.querySvc.Query(&req)
+	ctx, cancel := context.WithTimeout(c.Request().Context(), logQueryTimeout)
+	defer cancel()
+	result, err := h.querySvc.QueryContext(ctx, &req)
 	if err != nil {
-		return response.Error(c, 500, "查询失败")
+		return h.queryError(c, err, "查询失败")
 	}
 
 	return response.Success(c, result)
@@ -99,9 +105,11 @@ func (h *LogHandler) QueryByCursor(c echo.Context) error {
 		return err
 	}
 
-	result, err := h.querySvc.QueryByCursor(&req)
+	ctx, cancel := context.WithTimeout(c.Request().Context(), logQueryTimeout)
+	defer cancel()
+	result, err := h.querySvc.QueryByCursorContext(ctx, &req)
 	if err != nil {
-		return response.Error(c, 500, "查询失败")
+		return h.queryError(c, err, "查询失败")
 	}
 
 	return response.Success(c, result)
@@ -125,9 +133,11 @@ func (h *LogHandler) ExportCSV(c echo.Context) error {
 		return err
 	}
 
-	data, err := h.querySvc.ExportCSV(&req)
+	ctx, cancel := context.WithTimeout(c.Request().Context(), logQueryTimeout)
+	defer cancel()
+	data, err := h.querySvc.ExportCSVContext(ctx, &req)
 	if err != nil {
-		return response.Error(c, 500, "导出失败")
+		return h.queryError(c, err, "导出失败")
 	}
 
 	filename := fmt.Sprintf("log_query_%s.csv", time.Now().Format("20060102_150405"))
@@ -166,6 +176,17 @@ func (h *LogHandler) ExportCSV(c echo.Context) error {
 
 	writer.Flush()
 	return nil
+}
+
+func (h *LogHandler) queryError(c echo.Context, err error, fallback string) error {
+	switch {
+	case errors.Is(err, service.ErrQueryTimeout):
+		return response.Error(c, http.StatusGatewayTimeout, "查询超时，请缩小时间范围或减少日志类型")
+	case errors.Is(err, service.ErrQueryCanceled):
+		return response.ErrorWithStatus(c, 499, 499, "查询已取消")
+	default:
+		return response.Error(c, http.StatusInternalServerError, fallback)
+	}
 }
 
 func (h *LogHandler) checkQueryScope(c echo.Context, req *model.QueryRequest) error {
