@@ -3,7 +3,6 @@ package repository
 import (
 	"fmt"
 	"log/slog"
-	"sort"
 	"strings"
 	"time"
 
@@ -11,84 +10,26 @@ import (
 )
 
 func (r *LogRepository) QueryAcrossMonths(featureID int, startTime, endTime int64, page, pageSize int) ([]model.LogEntry, int64, error) {
-	months := r.monthsBetween(startTime, endTime)
-
-	var total int64
-	type timeRef struct{ logTime int64 }
-	var allTimes []timeRef
-
-	for _, month := range months {
-		tableName := r.GetTableName(featureID, month)
-		if !r.TableExists(tableName) {
-			continue
-		}
-
-		var count int64
-		r.DB.Raw(fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE log_time >= ? AND log_time <= ?", tableName), startTime, endTime).Scan(&count)
-		total += count
-
-		var times []int64
-		r.DB.Raw(fmt.Sprintf("SELECT log_time FROM %s WHERE log_time >= ? AND log_time <= ? ORDER BY log_time DESC", tableName), startTime, endTime).Scan(&times)
-		for _, t := range times {
-			allTimes = append(allTimes, timeRef{logTime: t})
-		}
-	}
-
-	if total == 0 {
-		return []model.LogEntry{}, 0, nil
-	}
-
-	sort.Slice(allTimes, func(i, j int) bool { return allTimes[i].logTime > allTimes[j].logTime })
-	start := (page - 1) * pageSize
-	if start >= len(allTimes) {
-		return []model.LogEntry{}, total, nil
-	}
-	end := start + pageSize
-	if end > len(allTimes) {
-		end = len(allTimes)
-	}
-	pageMaxTime := allTimes[start].logTime
-	pageMinTime := allTimes[end-1].logTime
-
-	var allEntries []model.LogEntry
-	for _, month := range months {
-		tableName := r.GetTableName(featureID, month)
-		if !r.TableExists(tableName) {
-			continue
-		}
-		querySQL := fmt.Sprintf(`
-			SELECT id, feature_id, log_time, idc, enc_data, enc_key, raw_json, parsed_json, created_at
-			FROM %s WHERE log_time >= ? AND log_time <= ?
-			ORDER BY log_time DESC
-		`, tableName)
-		var entries []model.LogEntry
-		r.DB.Raw(querySQL, pageMinTime, pageMaxTime).Scan(&entries)
-		allEntries = append(allEntries, entries...)
-	}
-
-	sort.Slice(allEntries, func(i, j int) bool { return allEntries[i].LogTime > allEntries[j].LogTime })
-	globalIdx := 0
-	var result []model.LogEntry
-	for _, entry := range allEntries {
-		if globalIdx >= start && globalIdx < end {
-			result = append(result, entry)
-		}
-		globalIdx++
-	}
-	if len(result) > pageSize {
-		result = result[:pageSize]
-	}
-	return result, total, nil
+	return r.queryAcrossMonthsUnion(featureID, startTime, endTime, "", nil, page, pageSize)
 }
 
 func (r *LogRepository) QueryAcrossMonthsWithConditions(featureID int, startTime, endTime int64, conditions map[string]interface{}, mobile string, page, pageSize int) ([]model.LogEntry, int64, error) {
-	months := r.monthsBetween(startTime, endTime)
 	jsonWhere, jsonArgs := r.buildJSONConditions(conditions, mobile)
+	return r.queryAcrossMonthsUnion(featureID, startTime, endTime, jsonWhere, jsonArgs, page, pageSize)
+}
 
+func (r *LogRepository) queryAcrossMonthsUnion(featureID int, startTime, endTime int64, extraWhere string, extraArgs []interface{}, page, pageSize int) ([]model.LogEntry, int64, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 100
+	}
+
+	months := r.monthsBetween(startTime, endTime)
 	var total int64
-	type timeRef struct{ logTime int64 }
-	var allTimes []timeRef
-
+	var selects []string
+	var queryArgs []interface{}
 	for _, month := range months {
 		tableName := r.GetTableName(featureID, month)
 		if !r.TableExists(tableName) {
@@ -96,72 +37,46 @@ func (r *LogRepository) QueryAcrossMonthsWithConditions(featureID int, startTime
 		}
 		where := "log_time >= ? AND log_time <= ?"
 		args := []interface{}{startTime, endTime}
-		if jsonWhere != "" {
-			where += " AND " + jsonWhere
-			args = append(args, jsonArgs...)
+		if extraWhere != "" {
+			where += " AND " + extraWhere
+			args = append(args, extraArgs...)
 		}
 
 		var count int64
-		r.DB.Raw(fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", tableName, where), args...).Scan(&count)
+		if err := r.DB.Raw(fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", tableName, where), args...).Scan(&count).Error; err != nil {
+			return nil, 0, fmt.Errorf("count table %s failed: %w", tableName, err)
+		}
 		total += count
 
-		var times []int64
-		r.DB.Raw(fmt.Sprintf("SELECT log_time FROM %s WHERE %s ORDER BY log_time DESC", tableName, where), args...).Scan(&times)
-		for _, t := range times {
-			allTimes = append(allTimes, timeRef{logTime: t})
-		}
+		selects = append(selects, fmt.Sprintf(`
+			SELECT id, feature_id, log_time, idc, enc_data, enc_key, raw_json, parsed_json, created_at
+			FROM %s WHERE %s
+		`, tableName, where))
+		queryArgs = append(queryArgs, args...)
 	}
 
 	if total == 0 {
 		return []model.LogEntry{}, 0, nil
 	}
 
-	sort.Slice(allTimes, func(i, j int) bool { return allTimes[i].logTime > allTimes[j].logTime })
-	start := (page - 1) * pageSize
-	if start >= len(allTimes) {
+	if len(selects) == 0 {
 		return []model.LogEntry{}, total, nil
 	}
-	end := start + pageSize
-	if end > len(allTimes) {
-		end = len(allTimes)
-	}
-	pageMaxTime := allTimes[start].logTime
-	pageMinTime := allTimes[end-1].logTime
 
-	var allEntries []model.LogEntry
-	for _, month := range months {
-		tableName := r.GetTableName(featureID, month)
-		if !r.TableExists(tableName) {
-			continue
-		}
-		where := "log_time >= ? AND log_time <= ?"
-		args := []interface{}{pageMinTime, pageMaxTime}
-		if jsonWhere != "" {
-			where += " AND " + jsonWhere
-			args = append(args, jsonArgs...)
-		}
-		querySQL := fmt.Sprintf(`
-			SELECT id, feature_id, log_time, idc, enc_data, enc_key, raw_json, parsed_json, created_at
-			FROM %s WHERE %s ORDER BY log_time DESC
-		`, tableName, where)
-		var entries []model.LogEntry
-		r.DB.Raw(querySQL, args...).Scan(&entries)
-		allEntries = append(allEntries, entries...)
-	}
+	offset := (page - 1) * pageSize
+	queryArgs = append(queryArgs, pageSize, offset)
+	querySQL := fmt.Sprintf(`
+		SELECT id, feature_id, log_time, idc, enc_data, enc_key, raw_json, parsed_json, created_at
+		FROM (%s) AS merged
+		ORDER BY log_time DESC, id DESC
+		LIMIT ? OFFSET ?
+	`, strings.Join(selects, " UNION ALL "))
 
-	sort.Slice(allEntries, func(i, j int) bool { return allEntries[i].LogTime > allEntries[j].LogTime })
-	globalIdx := 0
-	var result []model.LogEntry
-	for _, entry := range allEntries {
-		if globalIdx >= start && globalIdx < end {
-			result = append(result, entry)
-		}
-		globalIdx++
+	var entries []model.LogEntry
+	if err := r.DB.Raw(querySQL, queryArgs...).Scan(&entries).Error; err != nil {
+		return nil, 0, fmt.Errorf("query feature %d across months failed: %w", featureID, err)
 	}
-	if len(result) > pageSize {
-		result = result[:pageSize]
-	}
-	return result, total, nil
+	return entries, total, nil
 }
 
 func (r *LogRepository) QueryByCursor(featureID int, startTime, endTime int64, cursor int64, pageSize int, conditions map[string]interface{}, mobile string) ([]model.LogEntry, int64, int64, error) {

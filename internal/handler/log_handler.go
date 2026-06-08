@@ -153,8 +153,26 @@ func (h *LogHandler) ExportCSV(c echo.Context) error {
 func getInt64(row map[string]interface{}, key string) int64 {
 	if v, ok := row[key]; ok {
 		switch val := v.(type) {
+		case int:
+			return int64(val)
+		case int8:
+			return int64(val)
+		case int16:
+			return int64(val)
+		case int32:
+			return int64(val)
 		case int64:
 			return val
+		case uint:
+			return int64(val)
+		case uint8:
+			return int64(val)
+		case uint16:
+			return int64(val)
+		case uint32:
+			return int64(val)
+		case uint64:
+			return int64(val)
 		case float64:
 			return int64(val)
 		}
