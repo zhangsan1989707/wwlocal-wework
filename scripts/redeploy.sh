@@ -56,7 +56,7 @@ fi
 echo ""
 echo "[3/3] 等待服务启动..."
 for i in $(seq 1 30); do
-    if curl -sf http://localhost:3010/health > /dev/null 2>&1; then
+    if curl -sf http://localhost:19010/health > /dev/null 2>&1; then
         break
     fi
     sleep 1
@@ -70,5 +70,5 @@ echo ""
 docker-compose ps
 echo ""
 echo "健康检查:"
-curl -sf http://localhost:3010/health 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "  后端未就绪，请稍后访问"
+curl -sf http://localhost:19010/health 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "  后端未就绪，请稍后访问"
 echo ""

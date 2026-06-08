@@ -19,5 +19,5 @@ echo "================================"
 echo ""
 docker-compose ps
 echo ""
-curl -sf http://localhost:3010/health 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "后端启动中..."
+curl -sf http://localhost:19010/health 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "后端启动中..."
 echo ""

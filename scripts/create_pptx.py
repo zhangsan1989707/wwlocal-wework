@@ -82,7 +82,7 @@ def main():
     add_content_slide(prs, "系统架构", [
         "技术栈：Go 1.21 + Vue 3 + Element Plus + MySQL 8.0 + Docker",
         "三容器编排：MySQL + 后端 (Echo) + 前端 (Nginx)",
-        "端口映射：MySQL 3307，后端 3010，前端 5173",
+        "端口映射：MySQL 13307，后端 19010，前端 18073",
         "Nginx 反向代理 /api/ 路径到后端",
         "支持 Vue SPA 路由，proxy_read_timeout 300s 适应长同步"
     ])
@@ -206,9 +206,9 @@ def main():
     # 18. 部署架构
     add_content_slide(prs, "部署架构", [
         "Docker Compose 三容器编排",
-        "MySQL：内部端口3306，映射到宿主机3307",
-        "后端 Go Echo：内部端口8080，映射到宿主机3010",
-        "前端 Nginx：内部端口80，映射到宿主机5173",
+        "MySQL：内部端口3306，映射到宿主机13307",
+        "后端 Go Echo：内部端口8080，映射到宿主机19010",
+        "前端 Nginx：内部端口80，映射到宿主机18073",
         "后端 depends_on MySQL（condition: service_healthy）",
         "前端 depends_on 后端"
     ])
@@ -218,7 +218,7 @@ def main():
         "1. git clone 源码",
         "2. cp .env.example .env，编辑配置",
         "3. docker-compose up -d --build",
-        "4. 验证健康状态：curl http://localhost:3010/health",
+        "4. 验证健康状态：curl http://localhost:19010/health",
         "5. 上传 RSA 密钥并激活",
         "6. 同步通讯录（首次全量同步）",
         "7. 配置数据类型并执行首次同步",

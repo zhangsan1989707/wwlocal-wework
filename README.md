@@ -49,7 +49,7 @@ cp .env.example .env
 docker-compose up -d --build
 ```
 
-前端开发服务器默认运行在 `http://localhost:5173`，后端 API 在 `http://localhost:3010`。
+前端开发服务器默认运行在 `http://localhost:18073`，后端 API 在 `http://localhost:19010`。
 
 ### 生产部署
 
@@ -59,9 +59,9 @@ docker-compose up -d --build
 
 | 服务 | 端口 |
 |------|------|
-| MySQL | 3307 |
-| 后端 API | 3010 |
-| 前端 (dev) | 5173 |
+| MySQL | 13307 |
+| 后端 API | 19010 |
+| 前端 | 18073 |
 
 ## 目录结构
 

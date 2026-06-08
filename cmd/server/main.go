@@ -209,7 +209,7 @@ func main() {
 
 	allowedOrigins := cfg.Server.AllowedOrigins
 	if len(allowedOrigins) == 0 {
-		allowedOrigins = []string{"http://localhost:5173", "http://127.0.0.1:5173"}
+		allowedOrigins = []string{"http://localhost:18073", "http://127.0.0.1:18073"}
 	}
 	metricsIPs := []string{"127.0.0.1", "::1"}
 

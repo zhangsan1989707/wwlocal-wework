@@ -19,7 +19,7 @@ go mod tidy                  # 依赖更新
 ```bash
 cd web
 npm install                  # 安装依赖
-npm run dev                  # 开发模式 (端口 5173)
+npm run dev                  # 开发模式 (端口 18073)
 npm run build                # 生产构建 (含类型检查)
 ```
 
@@ -31,7 +31,7 @@ docker-compose logs backend    # 查看后端日志
 docker-compose down            # 停止服务
 ```
 
-端口映射: MySQL `3307`, 后端 `3010`, 前端 `5173`
+端口映射: MySQL `13307`, 后端 `19010`, 前端 `18073`
 
 ## 架构
 
@@ -83,7 +83,7 @@ pkg/
 - 无路由库，`App.vue` 中通过 `v-if` 切换三个视图组件
 - 无状态管理，各组件独立用 `ref`/`reactive` 管理状态
 - Element Plus 组件通过 `unplugin-auto-import` 自动导入
-- Axios 实例在 `src/api/index.ts`，`baseURL: '/api/v1'`，dev 时代理到 `localhost:8080`
+- Axios 实例在 `src/api/index.ts`，`baseURL: '/api/v1'`，dev 时代理到 `localhost:19010`
 
 ### API 路由
 
