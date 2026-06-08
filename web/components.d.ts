@@ -12,6 +12,7 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     AdminOperLog: typeof import('./src/components/AdminOperLog.vue')['default']
+    BehaviorTimeline: typeof import('./src/components/BehaviorTimeline.vue')['default']
     ContactList: typeof import('./src/components/ContactList.vue')['default']
     Dashboard: typeof import('./src/components/Dashboard.vue')['default']
     DashboardV2: typeof import('./src/components/DashboardV2.vue')['default']

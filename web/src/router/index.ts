@@ -29,6 +29,11 @@ const router = createRouter({
       component: () => import('../components/LogQuery.vue'),
     },
     {
+      path: '/behavior',
+      name: 'Behavior',
+      component: () => import('../components/BehaviorTimeline.vue'),
+    },
+    {
       path: '/contacts',
       name: 'Contacts',
       component: () => import('../components/ContactList.vue'),

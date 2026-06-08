@@ -128,6 +128,7 @@ func main() {
 	decryptSvc := service.NewDecryptService(keyRepo)
 	syncSvc := service.NewSyncService(weworkSvc, decryptSvc, logRepo, keyRepo, syncStateRepo, syncHistoryRepo, syncFeatureRepo, cfg)
 	querySvc := service.NewQueryService(logRepo, contactRepo, weworkSvc, decryptSvc, syncFeatureRepo, cfg)
+	behaviorQuerySvc := service.NewBehaviorQueryService(logRepo, syncFeatureRepo, cfg)
 	keySvc := service.NewKeyService(keyRepo)
 
 	// 启动时校验 sync_state 与实际数据是否一致
@@ -137,6 +138,7 @@ func main() {
 	authHandler := handler.NewAuthHandler(&cfg.Auth, userSvc)
 	userHandler := handler.NewUserHandler(userSvc)
 	logHandler := handler.NewLogHandler(querySvc)
+	behaviorQueryHandler := handler.NewBehaviorQueryHandler(behaviorQuerySvc)
 	keyHandler := handler.NewKeyHandler(keySvc)
 	syncHandler := handler.NewSyncHandler(syncSvc)
 
@@ -215,6 +217,7 @@ func main() {
 		Health:       healthHandler,
 		Auth:         authHandler,
 		Log:          logHandler,
+		Behavior:     behaviorQueryHandler,
 		Key:          keyHandler,
 		Sync:         syncHandler,
 		Scheduler:    schedulerHandler,

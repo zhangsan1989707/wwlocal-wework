@@ -64,6 +64,13 @@ func (r *LogRepository) CreateTableIfNotExists(featureID int, month time.Time) e
 	if cached {
 		return nil
 	}
+	schemaColumns := ""
+	if schema, ok := logSchemas[featureID]; ok {
+		for _, col := range schema.Columns {
+			schemaColumns += fmt.Sprintf(",\n\t\t\t%s", col.SQL)
+		}
+	}
+
 	err := r.DB.Exec(fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
 			id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -75,16 +82,17 @@ func (r *LogRepository) CreateTableIfNotExists(featureID int, month time.Time) e
 			raw_json TEXT,
 			parsed_json JSON,
 			enc_data_hash CHAR(32),
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP%s,
 			INDEX idx_log_time (log_time),
 			INDEX idx_feature_logtime (feature_id, log_time),
 			UNIQUE KEY uk_dedup (feature_id, log_time, enc_data_hash)
 		)
-	`, tableName)).Error
+	`, tableName, schemaColumns)).Error
 	if err != nil {
 		return err
 	}
 	r.MigrateLogTable(tableName)
+	r.MigrateStructuredColumns(featureID, tableName)
 	r.tableMu.Lock()
 	r.tableCreated[tableName] = true
 	r.tableMu.Unlock()
@@ -102,6 +110,86 @@ func (r *LogRepository) MigrateLogTable(tableName string) {
 	r.DB.Exec(fmt.Sprintf("ALTER TABLE %s ADD INDEX idx_root_openid (root_openid)", tableName))
 }
 
+func (r *LogRepository) MigrateStructuredColumns(featureID int, tableName string) {
+	schema, ok := logSchemas[featureID]
+	if !ok {
+		return
+	}
+	for _, col := range schema.Columns {
+		if r.IsGeneratedColumn(tableName, col.Name) {
+			r.DB.Exec(fmt.Sprintf("ALTER TABLE %s DROP INDEX idx_%s", tableName, col.Name))
+			r.DB.Exec(fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", tableName, col.Name))
+		}
+		r.DB.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s", tableName, col.SQL))
+		if col.Index {
+			r.DB.Exec(fmt.Sprintf("ALTER TABLE %s ADD INDEX idx_%s (%s)", tableName, col.Name, col.Name))
+		}
+	}
+}
+
+func (r *LogRepository) IsGeneratedColumn(tableName, columnName string) bool {
+	var extra string
+	err := r.DB.Raw(`
+		SELECT extra
+		FROM information_schema.columns
+		WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?
+	`, tableName, columnName).Scan(&extra).Error
+	if err != nil {
+		return false
+	}
+	return strings.Contains(strings.ToUpper(extra), "GENERATED")
+}
+
+func insertColumnsForFeature(featureID int) []string {
+	columns := []string{"feature_id", "log_time", "idc", "enc_data", "enc_key", "raw_json", "parsed_json", "enc_data_hash"}
+	if schema, ok := logSchemas[featureID]; ok {
+		for _, col := range schema.Columns {
+			columns = append(columns, col.Name)
+		}
+	}
+	return columns
+}
+
+func insertValuesForEntry(featureID int, entry model.LogEntry) []interface{} {
+	values := []interface{}{
+		entry.FeatureID,
+		entry.LogTime,
+		entry.IDC,
+		entry.EncData,
+		entry.EncKey,
+		entry.RawJSON,
+		entry.ParsedJSON,
+		encDataHash(entry.EncData),
+	}
+	structured := mapStructuredFields(featureID, entry.ParsedJSON)
+	if schema, ok := logSchemas[featureID]; ok {
+		for _, col := range schema.Columns {
+			if structured == nil {
+				values = append(values, nil)
+			} else {
+				values = append(values, structured[col.Name])
+			}
+		}
+	}
+	return values
+}
+
+func quotedColumnList(columns []string) string {
+	quoted := make([]string, len(columns))
+	for i, col := range columns {
+		quoted[i] = "`" + col + "`"
+	}
+	return strings.Join(quoted, ", ")
+}
+
+func placeholders(count int) string {
+	parts := make([]string, count)
+	for i := range parts {
+		parts[i] = "?"
+	}
+	return strings.Join(parts, ", ")
+}
+
 func (r *LogRepository) Save(featureID int, entry *model.LogEntry) error {
 	month := time.Unix(entry.LogTime, 0)
 	if err := r.CreateTableIfNotExists(featureID, month); err != nil {
@@ -109,11 +197,13 @@ func (r *LogRepository) Save(featureID int, entry *model.LogEntry) error {
 	}
 
 	tableName := r.GetTableName(featureID, month)
-	hash := encDataHash(entry.EncData)
-	return r.DB.Exec(fmt.Sprintf(`
-		INSERT IGNORE INTO %s (feature_id, log_time, idc, enc_data, enc_key, raw_json, parsed_json, enc_data_hash)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, tableName), entry.FeatureID, entry.LogTime, entry.IDC, entry.EncData, entry.EncKey, entry.RawJSON, entry.ParsedJSON, hash).Error
+	columns := insertColumnsForFeature(featureID)
+	return r.DB.Exec(fmt.Sprintf(
+		"INSERT IGNORE INTO %s (%s) VALUES (%s)",
+		tableName,
+		quotedColumnList(columns),
+		placeholders(len(columns)),
+	), insertValuesForEntry(featureID, *entry)...).Error
 }
 
 func (r *LogRepository) BatchSave(featureID int, entries []model.LogEntry) error {
@@ -142,15 +232,16 @@ func (r *LogRepository) BatchSave(featureID int, entries []model.LogEntry) error
 			}
 			batch := group[i:end]
 
-			sql := fmt.Sprintf("INSERT IGNORE INTO %s (feature_id, log_time, idc, enc_data, enc_key, raw_json, parsed_json, enc_data_hash) VALUES ", tableName)
+			columns := insertColumnsForFeature(featureID)
+			rowPlaceholder := "(" + placeholders(len(columns)) + ")"
+			sql := fmt.Sprintf("INSERT IGNORE INTO %s (%s) VALUES ", tableName, quotedColumnList(columns))
 			var args []interface{}
 			for j, entry := range batch {
-				hash := encDataHash(entry.EncData)
 				if j > 0 {
 					sql += ","
 				}
-				sql += "(?, ?, ?, ?, ?, ?, ?, ?)"
-				args = append(args, entry.FeatureID, entry.LogTime, entry.IDC, entry.EncData, entry.EncKey, entry.RawJSON, entry.ParsedJSON, hash)
+				sql += rowPlaceholder
+				args = append(args, insertValuesForEntry(featureID, entry)...)
 			}
 			if err := tx.Exec(sql, args...).Error; err != nil {
 				tx.Rollback()
@@ -192,15 +283,16 @@ func (r *LogRepository) BatchSaveWithTx(tx *gorm.DB, featureID int, entries []mo
 			}
 			batch := group[i:end]
 
-			sql := fmt.Sprintf("INSERT IGNORE INTO %s (feature_id, log_time, idc, enc_data, enc_key, raw_json, parsed_json, enc_data_hash) VALUES ", tableName)
+			columns := insertColumnsForFeature(featureID)
+			rowPlaceholder := "(" + placeholders(len(columns)) + ")"
+			sql := fmt.Sprintf("INSERT IGNORE INTO %s (%s) VALUES ", tableName, quotedColumnList(columns))
 			var args []interface{}
 			for j, entry := range batch {
-				hash := encDataHash(entry.EncData)
 				if j > 0 {
 					sql += ","
 				}
-				sql += "(?, ?, ?, ?, ?, ?, ?, ?)"
-				args = append(args, entry.FeatureID, entry.LogTime, entry.IDC, entry.EncData, entry.EncKey, entry.RawJSON, entry.ParsedJSON, hash)
+				sql += rowPlaceholder
+				args = append(args, insertValuesForEntry(featureID, entry)...)
 			}
 			if err := tx.Exec(sql, args...).Error; err != nil {
 				return nil, 0, err

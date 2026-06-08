@@ -6,6 +6,8 @@ import type {
   HealthCheckResponse,
   LogQueryParams,
   LogQueryResponse,
+  BehaviorQueryParams,
+  BehaviorQueryResponse,
   SyncParams,
   SyncStatus,
   PaginatedResponse,
@@ -244,6 +246,8 @@ export const healthAPI = {
 export const logAPI = {
   query: (data: LogQueryParams) =>
     api.post<ApiResponse<LogQueryResponse>>('/logs/query', data) as unknown as ApiResult<LogQueryResponse>,
+  behaviorQuery: (data: BehaviorQueryParams) =>
+    api.post<ApiResponse<BehaviorQueryResponse>>('/logs/behavior-query', data) as unknown as ApiResult<BehaviorQueryResponse>,
   queryByCursor: (data: LogQueryParams & { cursor?: string }) =>
     api.post<ApiResponse<LogQueryResponse>>('/logs/query/cursor', data) as unknown as ApiResult<LogQueryResponse>,
   getFeatures: () =>

@@ -15,6 +15,7 @@ type RouterDeps struct {
 	Health       *handler.HealthHandler
 	Auth         *handler.AuthHandler
 	Log          *handler.LogHandler
+	Behavior     *handler.BehaviorQueryHandler
 	Key          *handler.KeyHandler
 	Sync         *handler.SyncHandler
 	Scheduler    *handler.SchedulerHandler
@@ -100,6 +101,7 @@ func (r *Router) Setup(e *echo.Echo) {
 		{
 			logs.POST("/query", d.Log.Query)
 			logs.POST("/query/cursor", d.Log.QueryByCursor)
+			logs.POST("/behavior-query", d.Behavior.Query)
 			logs.POST("/export", d.Log.ExportCSV)
 			logs.GET("/features", d.Log.GetFeatures)
 			logs.GET("/time-range", d.Log.GetTimeRange)

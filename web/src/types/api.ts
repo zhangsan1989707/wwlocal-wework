@@ -44,6 +44,37 @@ export interface LogQueryResponse {
   cursor?: string
 }
 
+export interface BehaviorQueryParams {
+  openid: string
+  feature_ids: number[]
+  start_time: number
+  end_time: number
+  page?: number
+  page_size?: number
+}
+
+export interface MatchedField {
+  field: string
+  label: string
+  value: string
+}
+
+export interface BehaviorRecord {
+  feature_id: number
+  feature_name: string
+  log_time: number
+  log_date: string
+  matched_fields: MatchedField[]
+  data: Record<string, unknown>
+}
+
+export interface BehaviorQueryResponse {
+  data: BehaviorRecord[]
+  total: number
+  page: number
+  page_size: number
+}
+
 export interface LogEntry {
   id: number
   feature_id: number

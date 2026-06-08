@@ -41,6 +41,10 @@
               <el-icon><Document /></el-icon>
               <span>日志审计</span>
             </el-menu-item>
+            <el-menu-item index="behavior" title="行为查询">
+              <el-icon><Search /></el-icon>
+              <span>行为查询</span>
+            </el-menu-item>
             <el-menu-item index="contacts" title="通讯录">
               <el-icon><User /></el-icon>
               <span>通讯录</span>
@@ -106,7 +110,7 @@ import { authAPI } from './api'
 import Login from './components/Login.vue'
 import {
   DataLine, Document, Refresh, User, Setting, Key, Monitor,
-  DArrowLeft, DArrowRight,
+  DArrowLeft, DArrowRight, Search,
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
