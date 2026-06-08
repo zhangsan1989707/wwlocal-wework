@@ -6,7 +6,69 @@ import (
 	"testing"
 
 	"wwlocal-wework/internal/model"
+	"wwlocal-wework/internal/repository"
 )
+
+type fakeDashboardV2StatsRepo struct {
+	distinctErrByFeature map[int]error
+	logRowsErrByFeature  map[int]error
+	deviceErr            error
+}
+
+func (f *fakeDashboardV2StatsRepo) CountDistinctUsersFromDailyStats(featureIDs []int, startDate, endDate string, deptIDs []int, unrestricted bool) (int64, error) {
+	if len(featureIDs) > 0 && f.distinctErrByFeature != nil {
+		if err := f.distinctErrByFeature[featureIDs[0]]; err != nil {
+			return 0, err
+		}
+	}
+	return 1, nil
+}
+
+func (f *fakeDashboardV2StatsRepo) CountLogRowsScoped(featureIDs []int, startDate, endDate, userField string, deptIDs []int, unrestricted bool) (int64, error) {
+	if len(featureIDs) > 0 && f.logRowsErrByFeature != nil {
+		if err := f.logRowsErrByFeature[featureIDs[0]]; err != nil {
+			return 0, err
+		}
+	}
+	return 1, nil
+}
+
+func (f *fakeDashboardV2StatsRepo) GetPeopleTrend(featureIDs []int, startDate, endDate, granularity string, deptIDs []int, unrestricted bool) ([]repository.AggregatedStat, error) {
+	return nil, nil
+}
+
+func (f *fakeDashboardV2StatsRepo) GetEventTrendScoped(featureIDs []int, startDate, endDate, granularity, userField string, deptIDs []int, unrestricted bool) ([]repository.AggregatedStat, error) {
+	return nil, nil
+}
+
+func (f *fakeDashboardV2StatsRepo) GetDeviceStatsScoped(statDate string, deptIDs []int, unrestricted bool) (map[int]int64, error) {
+	if f.deviceErr != nil {
+		return nil, f.deviceErr
+	}
+	return map[int]int64{}, nil
+}
+
+func (f *fakeDashboardV2StatsRepo) GetScopedUserList(statDate, listType string, activeFeatureIDs []int, deptIDs []int, unrestricted bool, limit, offset int) ([]model.DashboardDailyUserList, int64, error) {
+	return nil, 0, nil
+}
+
+func (f *fakeDashboardV2StatsRepo) GetLatestDate() (string, error) {
+	return "2026-06-08", nil
+}
+
+type fakeDashboardV2ContactRepo struct{}
+
+func (f *fakeDashboardV2ContactRepo) GetScopedContactCount(deptIDs []int, unrestricted bool) (int64, error) {
+	return 10, nil
+}
+
+func (f *fakeDashboardV2ContactRepo) GetAllDepartments() ([]model.Department, error) {
+	return nil, nil
+}
+
+func (f *fakeDashboardV2ContactRepo) GetDeptMemberCounts() ([]repository.DeptMemberCount, error) {
+	return nil, nil
+}
 
 func TestDashboardV2ValidateDashboardDate(t *testing.T) {
 	got, err := validateDashboardDate("2026-06-08")
@@ -99,5 +161,42 @@ func TestDashboardV2DevicePayloadShape(t *testing.T) {
 		"percentage": float64(2) / float64(3) * 100,
 	}) {
 		t.Fatalf("first item = %#v", items[0])
+	}
+}
+
+func TestDashboardV2OverviewReturnsGroupCreatedError(t *testing.T) {
+	svc := &DashboardV2Service{
+		statsRepo: &fakeDashboardV2StatsRepo{logRowsErrByFeature: map[int]error{
+			90000038: errors.New("group query failed"),
+		}},
+		contactRepo: &fakeDashboardV2ContactRepo{},
+	}
+
+	if _, err := svc.GetOverview("2026-06-08", &DataScope{Unrestricted: true}); err == nil {
+		t.Fatalf("GetOverview error = nil, want group query error")
+	}
+}
+
+func TestDashboardV2OverviewReturnsAppAccessError(t *testing.T) {
+	svc := &DashboardV2Service{
+		statsRepo: &fakeDashboardV2StatsRepo{distinctErrByFeature: map[int]error{
+			90000033: errors.New("app access query failed"),
+		}},
+		contactRepo: &fakeDashboardV2ContactRepo{},
+	}
+
+	if _, err := svc.GetOverview("2026-06-08", &DataScope{Unrestricted: true}); err == nil {
+		t.Fatalf("GetOverview error = nil, want app access query error")
+	}
+}
+
+func TestDashboardV2OverviewReturnsDeviceError(t *testing.T) {
+	svc := &DashboardV2Service{
+		statsRepo:   &fakeDashboardV2StatsRepo{deviceErr: errors.New("device query failed")},
+		contactRepo: &fakeDashboardV2ContactRepo{},
+	}
+
+	if _, err := svc.GetOverview("2026-06-08", &DataScope{Unrestricted: true}); err == nil {
+		t.Fatalf("GetOverview error = nil, want device query error")
 	}
 }

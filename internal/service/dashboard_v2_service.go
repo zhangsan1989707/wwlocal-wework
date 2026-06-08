@@ -12,12 +12,28 @@ import (
 )
 
 type DashboardV2Service struct {
-	statsRepo   *repository.DashboardStatsRepository
-	contactRepo *repository.ContactRepository
+	statsRepo   dashboardV2StatsRepository
+	contactRepo dashboardV2ContactRepository
 	cfg         *config.Config
 }
 
 var ErrDashboardInvalidParam = errors.New("invalid dashboard parameter")
+
+type dashboardV2StatsRepository interface {
+	CountDistinctUsersFromDailyStats(featureIDs []int, startDate, endDate string, deptIDs []int, unrestricted bool) (int64, error)
+	CountLogRowsScoped(featureIDs []int, startDate, endDate, userField string, deptIDs []int, unrestricted bool) (int64, error)
+	GetPeopleTrend(featureIDs []int, startDate, endDate, granularity string, deptIDs []int, unrestricted bool) ([]repository.AggregatedStat, error)
+	GetEventTrendScoped(featureIDs []int, startDate, endDate, granularity, userField string, deptIDs []int, unrestricted bool) ([]repository.AggregatedStat, error)
+	GetDeviceStatsScoped(statDate string, deptIDs []int, unrestricted bool) (map[int]int64, error)
+	GetScopedUserList(statDate, listType string, activeFeatureIDs []int, deptIDs []int, unrestricted bool, limit, offset int) ([]model.DashboardDailyUserList, int64, error)
+	GetLatestDate() (string, error)
+}
+
+type dashboardV2ContactRepository interface {
+	GetScopedContactCount(deptIDs []int, unrestricted bool) (int64, error)
+	GetAllDepartments() ([]model.Department, error)
+	GetDeptMemberCounts() ([]repository.DeptMemberCount, error)
+}
 
 func NewDashboardV2Service(statsRepo *repository.DashboardStatsRepository, contactRepo *repository.ContactRepository, cfg *config.Config) *DashboardV2Service {
 	return &DashboardV2Service{statsRepo: statsRepo, contactRepo: contactRepo, cfg: cfg}
@@ -159,10 +175,22 @@ func (s *DashboardV2Service) GetOverview(date string, scope *DataScope) (map[str
 	if err != nil {
 		return nil, fmt.Errorf("查询消息发送人数失败: %w", err)
 	}
-	groupCreated, _ := s.statsRepo.CountLogRowsScoped([]int{90000038}, startDate, endDate, "root_openid", scope.DeptIDs, scope.Unrestricted)
-	appAccessUser, _ := s.statsRepo.CountDistinctUsersFromDailyStats([]int{90000033}, startDate, endDate, scope.DeptIDs, scope.Unrestricted)
-	appAccessCount, _ := s.statsRepo.CountLogRowsScoped([]int{90000033}, startDate, endDate, "login_openid", scope.DeptIDs, scope.Unrestricted)
-	devices, _ := s.GetDeviceStats(date, scope)
+	groupCreated, err := s.statsRepo.CountLogRowsScoped([]int{90000038}, startDate, endDate, "root_openid", scope.DeptIDs, scope.Unrestricted)
+	if err != nil {
+		return nil, fmt.Errorf("查询创建群数失败: %w", err)
+	}
+	appAccessUser, err := s.statsRepo.CountDistinctUsersFromDailyStats([]int{90000033}, startDate, endDate, scope.DeptIDs, scope.Unrestricted)
+	if err != nil {
+		return nil, fmt.Errorf("查询应用访问人数失败: %w", err)
+	}
+	appAccessCount, err := s.statsRepo.CountLogRowsScoped([]int{90000033}, startDate, endDate, "login_openid", scope.DeptIDs, scope.Unrestricted)
+	if err != nil {
+		return nil, fmt.Errorf("查询应用访问次数失败: %w", err)
+	}
+	devices, err := s.GetDeviceStats(date, scope)
+	if err != nil {
+		return nil, fmt.Errorf("查询设备统计失败: %w", err)
+	}
 
 	var rateActivation int64
 	var rateActive int64
