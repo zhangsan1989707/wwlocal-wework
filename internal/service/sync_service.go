@@ -406,6 +406,18 @@ func (s *SyncService) SyncMultipleFeatures(featureIDs []int, startTime, endTime 
 }
 
 func (s *SyncService) syncFeatures(featureIDs []int, startTime, endTime int64) map[int]int {
+	// 当未指定时间范围时，默认拉取最近 30 天
+	if startTime <= 0 && endTime <= 0 {
+		loc, _ := time.LoadLocation("Asia/Shanghai")
+		if loc == nil {
+			loc = time.FixedZone("CST", 8*3600)
+		}
+		now := time.Now().In(loc)
+		startTime = now.AddDate(0, 0, -30).Unix()
+		endTime = now.Unix()
+		slog.Info(fmt.Sprintf("syncFeatures: no time range specified, using last 30 days (start=%d, end=%d)", startTime, endTime))
+	}
+
 	s.mu.Lock()
 	s.status.Total = len(featureIDs)
 	s.mu.Unlock()
