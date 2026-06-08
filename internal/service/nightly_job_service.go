@@ -188,7 +188,16 @@ func (s *NightlyJobService) runForDate(statDate string) {
 
 	// 1. 增量同步日志
 	slog.Info("nightly job: step 1/3 - incremental log sync")
-	s.syncSvc.SyncAllFeaturesIncremental()
+	syncResults := s.syncSvc.SyncAllFeaturesIncremental()
+	var failedFeatures []int
+	for fid, count := range syncResults {
+		if count < 0 {
+			failedFeatures = append(failedFeatures, fid)
+		}
+	}
+	if len(failedFeatures) > 0 {
+		slog.Warn(fmt.Sprintf("nightly job: %d features failed sync: %v, stats may be incomplete", len(failedFeatures), failedFeatures))
+	}
 
 	// 2. 增量同步通讯录
 	slog.Info("nightly job: step 2/3 - incremental contact sync")
@@ -445,7 +454,7 @@ func (s *NightlyJobService) buildInactiveUserList(statDate string) ([]model.Dash
 			  AND uds.stat_date = ?
 			  AND uds.feature_id IN (?,?,?, ?,?,?)
 		  )
-		LIMIT 10000`
+		LIMIT 50000`
 
 	type row struct {
 		Mobile     string

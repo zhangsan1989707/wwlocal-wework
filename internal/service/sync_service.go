@@ -186,10 +186,8 @@ func (s *SyncService) syncFeatureDay(tx *gorm.DB, featureID int, startTime, endT
 						if e.ParsedJSON != "" {
 							var parsed map[string]interface{}
 							if json.Unmarshal([]byte(e.ParsedJSON), &parsed) == nil {
-								if lu, ok := parsed["login_user"].(map[string]interface{}); ok {
-									if openid, ok := lu["openid"].(string); ok && openid != "" {
-										savedMobiles[openid] = true
-									}
+								if openid := extractMobile(parsed); openid != "" {
+									savedMobiles[openid] = true
 								}
 							}
 						}
@@ -665,4 +663,25 @@ func (s *SyncService) SyncFeaturesTask(task *model.SyncTask) (map[string]interfa
 	return map[string]interface{}{
 		"results": results,
 	}, nil
+}
+
+// extractMobile 从 parsed JSON 中提取用户标识（openid），尝试多个常见路径
+func extractMobile(parsed map[string]interface{}) string {
+	// 路径1: login_user.openid（登录/唤醒/访问应用等）
+	if lu, ok := parsed["login_user"].(map[string]interface{}); ok {
+		if openid, ok := lu["openid"].(string); ok && openid != "" {
+			return openid
+		}
+	}
+	// 路径2: sender.openid（单聊/群聊消息）
+	if sender, ok := parsed["sender"].(map[string]interface{}); ok {
+		if openid, ok := sender["openid"].(string); ok && openid != "" {
+			return openid
+		}
+	}
+	// 路径3: 根级 openid
+	if openid, ok := parsed["openid"].(string); ok && openid != "" {
+		return openid
+	}
+	return ""
 }

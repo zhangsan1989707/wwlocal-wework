@@ -262,6 +262,7 @@ func (r *ContactRepository) GetDeptMemberCounts() ([]DeptMemberCount, error) {
 		SELECT d.id AS dept_id, COUNT(cd.user_id) AS count
 		FROM departments d
 		LEFT JOIN contact_departments cd ON d.id = cd.department
+		INNER JOIN contacts c ON cd.user_id = c.user_id AND c.status = 1
 		GROUP BY d.id
 	`).Scan(&results).Error
 	return results, err
@@ -276,18 +277,25 @@ func (r *ContactRepository) GetMemberCountByDepartmentIDs(deptIDs []int) (map[in
 		return counts, nil
 	}
 
+	placeholders := make([]string, len(deptIDs))
+	args := make([]interface{}, len(deptIDs))
+	for i, id := range deptIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
 	var results []struct {
 		DeptID int
 		Count  int64
 	}
-	err := r.DB.Raw(`
-		SELECT dept_id, COUNT(*) AS count
-		FROM contacts, JSON_TABLE(
-			department,
-			'$[*]' COLUMNS(dept_id INT PATH '$')
-		) AS jt
-		GROUP BY dept_id
-	`).Scan(&results).Error
+	sql := fmt.Sprintf(`
+		SELECT cd.department AS dept_id, COUNT(cd.user_id) AS count
+		FROM contact_departments cd
+		INNER JOIN contacts c ON cd.user_id = c.user_id
+		WHERE cd.department IN (%s) AND c.status = 1
+		GROUP BY cd.department
+	`, strings.Join(placeholders, ","))
+	err := r.DB.Raw(sql, args...).Scan(&results).Error
 	if err != nil {
 		return nil, err
 	}

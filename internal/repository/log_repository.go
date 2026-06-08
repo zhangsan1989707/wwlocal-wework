@@ -38,6 +38,24 @@ func encDataHash(encData string) string {
 	return hex.EncodeToString(h[:])
 }
 
+// extractMobileFromParsed 从 parsed JSON 中提取用户标识，尝试多个常见路径
+func extractMobileFromParsed(parsed map[string]interface{}) string {
+	if lu, ok := parsed["login_user"].(map[string]interface{}); ok {
+		if openid, ok := lu["openid"].(string); ok && openid != "" {
+			return openid
+		}
+	}
+	if sender, ok := parsed["sender"].(map[string]interface{}); ok {
+		if openid, ok := sender["openid"].(string); ok && openid != "" {
+			return openid
+		}
+	}
+	if openid, ok := parsed["openid"].(string); ok && openid != "" {
+		return openid
+	}
+	return ""
+}
+
 func (r *LogRepository) CreateTableIfNotExists(featureID int, month time.Time) error {
 	tableName := r.GetTableName(featureID, month)
 	r.tableMu.RLock()
@@ -193,10 +211,8 @@ func (r *LogRepository) BatchSaveWithTx(tx *gorm.DB, featureID int, entries []mo
 				if e.ParsedJSON != "" {
 					var parsed map[string]interface{}
 					if json.Unmarshal([]byte(e.ParsedJSON), &parsed) == nil {
-						if lu, ok := parsed["login_user"].(map[string]interface{}); ok {
-							if openid, ok := lu["openid"].(string); ok && openid != "" {
-								savedMobiles[openid] = true
-							}
+						if openid := extractMobileFromParsed(parsed); openid != "" {
+							savedMobiles[openid] = true
 						}
 					}
 				}
