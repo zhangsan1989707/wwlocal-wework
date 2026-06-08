@@ -5,12 +5,24 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"wwlocal-wework/internal/model"
 	"wwlocal-wework/internal/service"
 	"wwlocal-wework/pkg/response"
 )
 
 type AdminOperLogHandler struct {
-	svc *service.AdminOperLogService
+	svc adminOperLogService
+}
+
+type adminOperLogService interface {
+	Query(operType, operUserID string, startTime, endTime int64, page, pageSize int) ([]model.AdminOperLog, int64, error)
+	SyncLogs(startTime, endTime int64) (int, error)
+	SyncIncremental() (int, error)
+	GetStats(startTime, endTime int64) (map[string]interface{}, error)
+	GetOperTypes() ([]string, error)
+	GetOperUsers() ([]string, error)
+	Cleanup(beforeDays int) (int64, error)
+	GetStatus() (bool, int64, string, error)
 }
 
 func NewAdminOperLogHandler(svc *service.AdminOperLogService) *AdminOperLogHandler {
@@ -18,18 +30,22 @@ func NewAdminOperLogHandler(svc *service.AdminOperLogService) *AdminOperLogHandl
 }
 
 func (h *AdminOperLogHandler) List(c echo.Context) error {
-	page, _ := strconv.Atoi(c.QueryParam("page"))
-	pageSize, _ := strconv.Atoi(c.QueryParam("page_size"))
+	page, pageSize, err := parsePagination(c)
+	if err != nil {
+		return response.Error(c, 400, err.Error())
+	}
 	operType := c.QueryParam("oper_type")
 	operUserID := c.QueryParam("oper_userid")
-	startTime, _ := strconv.ParseInt(c.QueryParam("start_time"), 10, 64)
-	endTime, _ := strconv.ParseInt(c.QueryParam("end_time"), 10, 64)
-
-	if page <= 0 {
-		page = 1
+	startTime, err := parseOptionalInt64Query(c, "start_time")
+	if err != nil {
+		return response.Error(c, 400, err.Error())
 	}
-	if pageSize <= 0 {
-		pageSize = 20
+	endTime, err := parseOptionalInt64Query(c, "end_time")
+	if err != nil {
+		return response.Error(c, 400, err.Error())
+	}
+	if startTime > 0 && endTime > 0 && startTime > endTime {
+		return response.Error(c, 400, "start_time must be less than end_time")
 	}
 
 	logs, total, err := h.svc.Query(operType, operUserID, startTime, endTime, page, pageSize)
@@ -38,9 +54,9 @@ func (h *AdminOperLogHandler) List(c echo.Context) error {
 	}
 
 	return response.Success(c, map[string]interface{}{
-		"data":  logs,
-		"total": total,
-		"page":  page,
+		"data":      logs,
+		"total":     total,
+		"page":      page,
 		"page_size": pageSize,
 	})
 }
@@ -73,7 +89,7 @@ func (h *AdminOperLogHandler) Sync(c echo.Context) error {
 	}
 
 	return response.Success(c, map[string]interface{}{
-		"synced": count,
+		"synced":  count,
 		"message": "sync completed",
 	})
 }

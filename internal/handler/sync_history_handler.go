@@ -1,15 +1,18 @@
 package handler
 
 import (
-	"strconv"
-
 	"github.com/labstack/echo/v4"
+	"wwlocal-wework/internal/model"
 	"wwlocal-wework/internal/repository"
 	"wwlocal-wework/pkg/response"
 )
 
 type SyncHistoryHandler struct {
-	repo *repository.SyncHistoryRepository
+	repo syncHistoryLister
+}
+
+type syncHistoryLister interface {
+	List(syncType string, page, pageSize int) ([]model.SyncHistory, int64, error)
 }
 
 func NewSyncHistoryHandler(repo *repository.SyncHistoryRepository) *SyncHistoryHandler {
@@ -17,16 +20,9 @@ func NewSyncHistoryHandler(repo *repository.SyncHistoryRepository) *SyncHistoryH
 }
 
 func (h *SyncHistoryHandler) List(c echo.Context) error {
-	page, _ := strconv.Atoi(c.QueryParam("page"))
-	if page <= 0 {
-		page = 1
-	}
-	pageSize, _ := strconv.Atoi(c.QueryParam("page_size"))
-	if pageSize <= 0 {
-		pageSize = 20
-	}
-	if pageSize > 100 {
-		pageSize = 100
+	page, pageSize, err := parsePagination(c)
+	if err != nil {
+		return response.Error(c, 400, err.Error())
 	}
 	syncType := c.QueryParam("sync_type")
 
