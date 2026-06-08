@@ -262,22 +262,46 @@ func (r *ContactRepository) GetContactsByDepartmentID(deptID int, page, pageSize
 }
 
 func (r *ContactRepository) GetNamesByUserIDs(userIDs []string) (map[string]string, error) {
-	if len(userIDs) == 0 {
+	ids := uniqueStrings(userIDs)
+	if len(ids) == 0 {
 		return nil, nil
 	}
 	type result struct {
 		UserID string
+		Mobile string
 		Name   string
 	}
 	var rows []result
-	if err := r.DB.Model(&model.Contact{}).Select("user_id, name").Where("user_id IN ?", userIDs).Find(&rows).Error; err != nil {
+	if err := r.DB.Model(&model.Contact{}).Select("user_id, mobile, name").Where("user_id IN ? OR mobile IN ?", ids, ids).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	m := make(map[string]string, len(rows))
-	for _, r := range rows {
-		m[r.UserID] = r.Name
+	for _, row := range rows {
+		if row.Name == "" {
+			continue
+		}
+		if row.UserID != "" {
+			m[row.UserID] = row.Name
+		}
+		if row.Mobile != "" {
+			m[row.Mobile] = row.Name
+		}
 	}
 	return m, nil
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
 }
 
 func (r *ContactRepository) GetContactByUserID(userID string) (*model.Contact, error) {

@@ -22,6 +22,14 @@ func TestExpandDepartmentIDsFromListIncludesChildren(t *testing.T) {
 	}
 }
 
+func TestUniqueStringsTrimsAndDeduplicates(t *testing.T) {
+	got := uniqueStrings([]string{" u1 ", "", "u2", "u1", "  "})
+	want := []string{"u1", "u2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
 func TestExpandDepartmentIDsFromListDeduplicates(t *testing.T) {
 	depts := []model.Department{
 		{ID: 1, ParentID: 0},

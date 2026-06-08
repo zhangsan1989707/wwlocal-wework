@@ -57,6 +57,7 @@ export interface MatchedField {
   field: string
   label: string
   value: string
+  display_value?: string
 }
 
 export interface BehaviorRecord {

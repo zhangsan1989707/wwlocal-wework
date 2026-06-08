@@ -68,7 +68,7 @@ func (h *BehaviorQueryHandler) ExportCSV(c echo.Context) error {
 			fmt.Sprintf("%d", row.FeatureID),
 			row.FeatureName,
 			formatMatchedFields(row.MatchedFields),
-			formatBehaviorSummary(row.Data),
+			formatBehaviorSummary(row.Data, row.MatchedFields),
 			formatBehaviorData(row.Data),
 		})
 	}
@@ -79,12 +79,16 @@ func (h *BehaviorQueryHandler) ExportCSV(c echo.Context) error {
 func formatMatchedFields(fields []model.MatchedField) string {
 	parts := make([]string, 0, len(fields))
 	for _, field := range fields {
-		parts = append(parts, fmt.Sprintf("%s:%s", field.Label, field.Field))
+		value := field.DisplayValue
+		if value == "" {
+			value = field.Value
+		}
+		parts = append(parts, fmt.Sprintf("%s:%s=%s", field.Label, field.Field, value))
 	}
 	return strings.Join(parts, " | ")
 }
 
-func formatBehaviorSummary(data map[string]interface{}) string {
+func formatBehaviorSummary(data map[string]interface{}, fields []model.MatchedField) string {
 	keys := []string{"msgid", "msg_type", "chatid", "name", "deviceid", "cli_ip", "access_ip"}
 	var parts []string
 	for _, key := range keys {
@@ -93,6 +97,13 @@ func formatBehaviorSummary(data map[string]interface{}) string {
 			continue
 		}
 		parts = append(parts, fmt.Sprintf("%s: %v", key, value))
+	}
+	for _, field := range fields {
+		value := field.DisplayValue
+		if value == "" {
+			value = field.Value
+		}
+		parts = append(parts, fmt.Sprintf("%s: %s", field.Label, value))
 	}
 	if len(parts) > 0 {
 		return strings.Join(parts, " | ")

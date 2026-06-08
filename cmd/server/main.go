@@ -128,7 +128,7 @@ func main() {
 	decryptSvc := service.NewDecryptService(keyRepo)
 	syncSvc := service.NewSyncService(weworkSvc, decryptSvc, logRepo, keyRepo, syncStateRepo, syncHistoryRepo, syncFeatureRepo, cfg)
 	querySvc := service.NewQueryService(logRepo, contactRepo, weworkSvc, decryptSvc, syncFeatureRepo, cfg)
-	behaviorQuerySvc := service.NewBehaviorQueryService(logRepo, syncFeatureRepo, cfg)
+	behaviorQuerySvc := service.NewBehaviorQueryService(logRepo, syncFeatureRepo, contactRepo, cfg)
 	keySvc := service.NewKeyService(keyRepo)
 
 	// 启动时校验 sync_state 与实际数据是否一致

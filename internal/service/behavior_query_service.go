@@ -12,11 +12,12 @@ import (
 type BehaviorQueryService struct {
 	logRepo         *repository.LogRepository
 	syncFeatureRepo *repository.SyncFeatureRepository
+	contactRepo     *repository.ContactRepository
 	cfg             *config.Config
 }
 
-func NewBehaviorQueryService(logRepo *repository.LogRepository, syncFeatureRepo *repository.SyncFeatureRepository, cfg *config.Config) *BehaviorQueryService {
-	return &BehaviorQueryService{logRepo: logRepo, syncFeatureRepo: syncFeatureRepo, cfg: cfg}
+func NewBehaviorQueryService(logRepo *repository.LogRepository, syncFeatureRepo *repository.SyncFeatureRepository, contactRepo *repository.ContactRepository, cfg *config.Config) *BehaviorQueryService {
+	return &BehaviorQueryService{logRepo: logRepo, syncFeatureRepo: syncFeatureRepo, contactRepo: contactRepo, cfg: cfg}
 }
 
 func (s *BehaviorQueryService) Query(req *model.BehaviorQueryRequest) (*model.BehaviorQueryResult, error) {
@@ -80,6 +81,7 @@ func (s *BehaviorQueryService) query(req *model.BehaviorQueryRequest, featureIDs
 	for i := range rows {
 		rows[i].FeatureName = s.GetFeatureName(rows[i].FeatureID)
 	}
+	s.attachContactNames(rows)
 	for i := range summaries {
 		summaries[i].FeatureName = s.GetFeatureName(summaries[i].FeatureID)
 	}
@@ -97,4 +99,30 @@ func (s *BehaviorQueryService) GetFeatureName(featureID int) string {
 		return name
 	}
 	return fmt.Sprintf("未知(%d)", featureID)
+}
+
+func (s *BehaviorQueryService) attachContactNames(rows []model.BehaviorRecord) {
+	if s.contactRepo == nil || len(rows) == 0 {
+		return
+	}
+	ids := make([]string, 0)
+	for _, row := range rows {
+		for _, field := range row.MatchedFields {
+			if field.Value != "" {
+				ids = append(ids, field.Value)
+			}
+		}
+	}
+	names, err := s.contactRepo.GetNamesByUserIDs(ids)
+	if err != nil || len(names) == 0 {
+		return
+	}
+	for i := range rows {
+		for j := range rows[i].MatchedFields {
+			value := rows[i].MatchedFields[j].Value
+			if name := names[value]; name != "" {
+				rows[i].MatchedFields[j].DisplayValue = fmt.Sprintf("%s(%s)", value, name)
+			}
+		}
+	}
 }

@@ -10,9 +10,10 @@ type BehaviorQueryRequest struct {
 }
 
 type MatchedField struct {
-	Field string `json:"field"`
-	Label string `json:"label"`
-	Value string `json:"value"`
+	Field        string `json:"field"`
+	Label        string `json:"label"`
+	Value        string `json:"value"`
+	DisplayValue string `json:"display_value,omitempty"`
 }
 
 type BehaviorRecord struct {

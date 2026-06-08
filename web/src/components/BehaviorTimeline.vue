@@ -139,7 +139,7 @@
                 type="success"
                 effect="light"
               >
-                {{ field.label }}: {{ field.field }}
+                {{ field.label }}: {{ field.display_value || field.value || field.field }}
               </el-tag>
             </div>
           </template>
@@ -173,7 +173,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh, Download } from '@element-plus/icons-vue'
-import { logAPI, syncFeatureAPI } from '../api'
+import { logAPI, syncFeatureAPI, contactAPI } from '../api'
 import type { BehaviorFeatureSummary, BehaviorRecord, SyncFeature } from '../types/api'
 
 interface FeatureItem {
@@ -197,6 +197,7 @@ const featureSummaries = ref<BehaviorFeatureSummary[]>([])
 const total = ref(0)
 const loading = ref(false)
 const exporting = ref(false)
+const contactNames = ref<Record<string, string>>({})
 
 const timeShortcuts = [
   { label: '最近1天', hours: 24 },
@@ -242,6 +243,7 @@ const handleQuery = async () => {
       records.value = res.data.data
       featureSummaries.value = res.data.features || []
       total.value = res.data.total
+      await fetchContactNames(records.value)
     } else {
       ElMessage.error(res.msg || '查询失败')
     }
@@ -320,6 +322,55 @@ const formatJSON = (data: Record<string, unknown>) => {
   return JSON.stringify(data, null, 2)
 }
 
+const extractContactIds = (data: BehaviorRecord[]) => {
+  const ids = new Set<string>()
+  const walk = (value: unknown) => {
+    if (Array.isArray(value)) {
+      value.forEach(walk)
+      return
+    }
+    if (value && typeof value === 'object') {
+      const obj = value as Record<string, unknown>
+      for (const key of ['openid', 'userid', 'user_id', 'sender_openid', 'receiver_openid']) {
+        const item = obj[key]
+        if (typeof item === 'string' && item.trim()) {
+          ids.add(item.trim())
+        }
+      }
+      Object.values(obj).forEach(walk)
+    }
+  }
+
+  for (const row of data) {
+    row.matched_fields.forEach((field) => {
+      if (field.value) ids.add(field.value)
+    })
+    walk(row.data)
+  }
+  return Array.from(ids).slice(0, 200)
+}
+
+const fetchContactNames = async (data: BehaviorRecord[]) => {
+  const ids = extractContactIds(data).filter((id) => !contactNames.value[id])
+  if (ids.length === 0) return
+  try {
+    const res = await contactAPI.getNames(ids)
+    if (res.code === 0 && res.data) {
+      contactNames.value = { ...contactNames.value, ...res.data }
+    }
+  } catch {
+    // ignore contact name misses
+  }
+}
+
+const formatContactValue = (value: unknown) => {
+  if (typeof value !== 'string' || value === '') {
+    return value
+  }
+  const name = contactNames.value[value]
+  return name ? `${value}(${name})` : value
+}
+
 const formatSummary = (row: BehaviorRecord) => {
   const data = row.data
   const keys = ['msgid', 'msg_type', 'chatid', 'name', 'deviceid', 'cli_ip', 'access_ip']
@@ -329,6 +380,9 @@ const formatSummary = (row: BehaviorRecord) => {
     if (value !== undefined && value !== null && value !== '') {
       parts.push(`${key}: ${String(value)}`)
     }
+  }
+  for (const field of row.matched_fields) {
+    parts.push(`${field.label}: ${field.display_value || formatContactValue(field.value)}`)
   }
   if (parts.length > 0) return parts.join(' | ')
   const text = JSON.stringify(data)
