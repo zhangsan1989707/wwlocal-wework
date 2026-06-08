@@ -15,17 +15,9 @@
         </div>
       </el-header>
       <el-container class="main-container">
-        <el-aside :width="isCollapsed ? '64px' : '200px'">
-          <div class="collapse-btn" @click="isCollapsed = !isCollapsed">
-            <el-icon :size="16">
-              <DArrowLeft v-if="!isCollapsed" />
-              <DArrowRight v-else />
-            </el-icon>
-          </div>
+        <el-aside width="200px">
           <el-menu
             :default-active="activeMenu"
-            :collapse="isCollapsed"
-            :collapse-transition="false"
             :default-openeds="defaultOpeneds"
             unique-opened
             class="el-menu-vertical"
@@ -130,13 +122,12 @@ import { authAPI } from './api'
 import Login from './components/Login.vue'
 import {
   DataLine, Document, Refresh, User, Setting, Key, Monitor,
-  DArrowLeft, DArrowRight, Search,
+  Search,
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
-const isCollapsed = ref(false)
 
 const activeMenu = computed(() => {
   const path = route.path.slice(1) || 'dashboard'
@@ -295,34 +286,10 @@ html, body, #app {
   top: 0;
 }
 
-.collapse-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 40px;
-  cursor: pointer;
-  color: #909399;
-  border-bottom: 1px solid #e8e8e8;
-  transition: color 0.2s, background-color 0.2s;
-}
-
-.collapse-btn:hover {
-  color: #2b6cb0;
-  background-color: #ecf5ff;
-}
-
 .el-menu-vertical {
   border-right: none;
-  height: calc(100% - 40px);
+  height: 100%;
   overflow-y: auto;
-}
-
-.el-menu--collapse .el-menu-item span {
-  display: none;
-}
-
-.el-menu--collapse .el-menu-item {
-  position: relative;
 }
 
 .main-content {
