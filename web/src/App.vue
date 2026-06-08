@@ -65,6 +65,10 @@
               <el-icon><Monitor /></el-icon>
               <span>系统状态</span>
             </el-menu-item>
+            <el-menu-item v-if="authStore.role === 'super_admin'" index="users" title="用户权限">
+              <el-icon><User /></el-icon>
+              <span>用户权限</span>
+            </el-menu-item>
           </el-menu>
         </el-aside>
         <el-main class="main-content">

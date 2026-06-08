@@ -39,17 +39,17 @@ func (r *ContactRepository) BatchUpsertContacts(contacts []model.Contact) error 
 		if err := r.DB.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "user_id"}},
 			DoUpdates: clause.Assignments(map[string]interface{}{
-				"name":        gorm.Expr("VALUES(name)"),
-				"mobile":      gorm.Expr("VALUES(mobile)"),
-				"gender":      gorm.Expr("VALUES(gender)"),
-				"email":       gorm.Expr("VALUES(email)"),
-				"position":    gorm.Expr("VALUES(position)"),
-				"department":  gorm.Expr("VALUES(department)"),
-				"positions":   gorm.Expr("VALUES(positions)"),
-				"avatar":      gorm.Expr("VALUES(avatar)"),
-				"status":      gorm.Expr("VALUES(status)"),
-				"raw_json":    gorm.Expr("VALUES(raw_json)"),
-				"synced_at":   gorm.Expr("VALUES(synced_at)"),
+				"name":       gorm.Expr("VALUES(name)"),
+				"mobile":     gorm.Expr("VALUES(mobile)"),
+				"gender":     gorm.Expr("VALUES(gender)"),
+				"email":      gorm.Expr("VALUES(email)"),
+				"position":   gorm.Expr("VALUES(position)"),
+				"department": gorm.Expr("VALUES(department)"),
+				"positions":  gorm.Expr("VALUES(positions)"),
+				"avatar":     gorm.Expr("VALUES(avatar)"),
+				"status":     gorm.Expr("VALUES(status)"),
+				"raw_json":   gorm.Expr("VALUES(raw_json)"),
+				"synced_at":  gorm.Expr("VALUES(synced_at)"),
 			}),
 		}).CreateInBatches(batch, 100).Error; err != nil {
 			return err
@@ -175,6 +175,65 @@ func (r *ContactRepository) GetAllDepartments() ([]model.Department, error) {
 		return nil, err
 	}
 	return depts, nil
+}
+
+func (r *ContactRepository) ExpandDepartmentIDs(rootIDs []int) ([]int, error) {
+	if len(rootIDs) == 0 {
+		return []int{}, nil
+	}
+	depts, err := r.GetAllDepartments()
+	if err != nil {
+		return nil, err
+	}
+	return ExpandDepartmentIDsFromList(depts, rootIDs), nil
+}
+
+func ExpandDepartmentIDsFromList(depts []model.Department, rootIDs []int) []int {
+	children := make(map[int][]int, len(depts))
+	for _, d := range depts {
+		children[d.ParentID] = append(children[d.ParentID], d.ID)
+	}
+	seen := make(map[int]bool)
+	var walk func(int)
+	walk = func(id int) {
+		if id <= 0 || seen[id] {
+			return
+		}
+		seen[id] = true
+		for _, child := range children[id] {
+			walk(child)
+		}
+	}
+	for _, id := range rootIDs {
+		walk(id)
+	}
+	result := make([]int, 0, len(seen))
+	for id := range seen {
+		result = append(result, id)
+	}
+	sort.Ints(result)
+	return result
+}
+
+func (r *ContactRepository) GetScopedContactCount(deptIDs []int, unrestricted bool) (int64, error) {
+	var count int64
+	if unrestricted {
+		err := r.DB.Model(&model.Contact{}).
+			Where("status = 1 AND mobile IS NOT NULL AND mobile != ''").
+			Count(&count).Error
+		return count, err
+	}
+	if len(deptIDs) == 0 {
+		return 0, nil
+	}
+	err := r.DB.Raw(`
+		SELECT COUNT(DISTINCT c.mobile)
+		FROM contacts c
+		INNER JOIN contact_departments cd ON c.user_id = cd.user_id
+		WHERE c.status = 1 AND c.mobile IS NOT NULL AND c.mobile != ''
+		  AND cd.department IN ?
+	`, deptIDs).Scan(&count).Error
+	return count, err
 }
 
 func (r *ContactRepository) MarkSyncedAt(userIDs []string) error {

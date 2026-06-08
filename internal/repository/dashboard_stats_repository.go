@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -135,6 +136,190 @@ type AggregatedStat struct {
 	Value  int64  `json:"value"`
 }
 
+func groupPeriodExpr(dateColumn, granularity string) (string, string) {
+	switch granularity {
+	case "week":
+		return fmt.Sprintf("DATE_FORMAT(%s, '%%x-W%%v')", dateColumn), fmt.Sprintf("MIN(%s)", dateColumn)
+	case "month":
+		return fmt.Sprintf("DATE_FORMAT(%s, '%%Y-%%m')", dateColumn), fmt.Sprintf("MIN(%s)", dateColumn)
+	case "quarter":
+		return fmt.Sprintf("CONCAT(YEAR(%s), '-Q', QUARTER(%s))", dateColumn, dateColumn), fmt.Sprintf("MIN(%s)", dateColumn)
+	default:
+		return dateColumn, dateColumn
+	}
+}
+
+func deptScopeClause(alias string, deptIDs []int, unrestricted bool) (string, []interface{}) {
+	if unrestricted {
+		return "", nil
+	}
+	if len(deptIDs) == 0 {
+		return " AND 1 = 0", nil
+	}
+	return fmt.Sprintf(" AND EXISTS (SELECT 1 FROM contact_departments cd_scope WHERE cd_scope.user_id = %s.user_id AND cd_scope.department IN ?)", alias), []interface{}{deptIDs}
+}
+
+func (r *DashboardStatsRepository) CountDistinctUsersFromDailyStats(featureIDs []int, startDate, endDate string, deptIDs []int, unrestricted bool) (int64, error) {
+	if len(featureIDs) == 0 {
+		return 0, nil
+	}
+	scopeSQL, scopeArgs := deptScopeClause("c", deptIDs, unrestricted)
+	sql := fmt.Sprintf(`
+		SELECT COUNT(DISTINCT uds.mobile)
+		FROM user_daily_stats uds
+		INNER JOIN contacts c ON c.mobile = uds.mobile AND c.status = 1
+		WHERE uds.feature_id IN ? AND uds.stat_date >= ? AND uds.stat_date <= ? %s
+	`, scopeSQL)
+	args := []interface{}{featureIDs, startDate, endDate}
+	args = append(args, scopeArgs...)
+	var count int64
+	err := r.DB.Raw(sql, args...).Scan(&count).Error
+	return count, err
+}
+
+func (r *DashboardStatsRepository) CountLogRows(featureIDs []int, startDate, endDate string) (int64, error) {
+	return r.CountLogRowsScoped(featureIDs, startDate, endDate, "", nil, true)
+}
+
+func (r *DashboardStatsRepository) CountLogRowsScoped(featureIDs []int, startDate, endDate, userField string, deptIDs []int, unrestricted bool) (int64, error) {
+	var total int64
+	start, err := time.Parse("2006-01-02", startDate)
+	if err != nil {
+		return 0, err
+	}
+	end, err := time.Parse("2006-01-02", endDate)
+	if err != nil {
+		return 0, err
+	}
+	for month := time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, start.Location()); !month.After(end); month = month.AddDate(0, 1, 0) {
+		for _, fid := range featureIDs {
+			tableName := fmt.Sprintf("log_%d_%s", fid, month.Format("200601"))
+			var exists int
+			r.DB.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?", tableName).Scan(&exists)
+			if exists == 0 {
+				continue
+			}
+			var count int64
+			scopeSQL := ""
+			args := []interface{}{startDate, endDate}
+			if !unrestricted {
+				if len(deptIDs) == 0 {
+					scopeSQL = " AND 1 = 0"
+				} else if userField != "" {
+					scopeSQL = fmt.Sprintf(`
+						AND EXISTS (
+							SELECT 1 FROM contacts c
+							INNER JOIN contact_departments cd_scope ON cd_scope.user_id = c.user_id
+							WHERE c.status = 1 AND c.mobile = %s.%s AND cd_scope.department IN ?
+						)
+					`, tableName, userField)
+					args = append(args, deptIDs)
+				}
+			}
+			sql := fmt.Sprintf(`
+				SELECT COUNT(*) FROM %s
+				WHERE DATE(FROM_UNIXTIME(log_time)) >= ? AND DATE(FROM_UNIXTIME(log_time)) <= ? %s
+			`, tableName, scopeSQL)
+			if err := r.DB.Raw(sql, args...).Scan(&count).Error; err != nil {
+				return 0, err
+			}
+			total += count
+		}
+	}
+	return total, nil
+}
+
+func (r *DashboardStatsRepository) GetPeopleTrend(featureIDs []int, startDate, endDate, granularity string, deptIDs []int, unrestricted bool) ([]AggregatedStat, error) {
+	if len(featureIDs) == 0 {
+		return nil, nil
+	}
+	groupExpr, orderExpr := groupPeriodExpr("uds.stat_date", granularity)
+	scopeSQL, scopeArgs := deptScopeClause("c", deptIDs, unrestricted)
+	sql := fmt.Sprintf(`
+		SELECT %s AS period, COUNT(DISTINCT uds.mobile) AS value
+		FROM user_daily_stats uds
+		INNER JOIN contacts c ON c.mobile = uds.mobile AND c.status = 1
+		WHERE uds.feature_id IN ? AND uds.stat_date >= ? AND uds.stat_date <= ? %s
+		GROUP BY %s
+		ORDER BY %s
+	`, groupExpr, scopeSQL, groupExpr, orderExpr)
+	args := []interface{}{featureIDs, startDate, endDate}
+	args = append(args, scopeArgs...)
+	var results []AggregatedStat
+	if err := r.DB.Raw(sql, args...).Scan(&results).Error; err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
+func (r *DashboardStatsRepository) GetEventTrend(featureIDs []int, startDate, endDate, granularity string) ([]AggregatedStat, error) {
+	return r.GetEventTrendScoped(featureIDs, startDate, endDate, granularity, "", nil, true)
+}
+
+func (r *DashboardStatsRepository) GetEventTrendScoped(featureIDs []int, startDate, endDate, granularity, userField string, deptIDs []int, unrestricted bool) ([]AggregatedStat, error) {
+	start, err := time.Parse("2006-01-02", startDate)
+	if err != nil {
+		return nil, err
+	}
+	end, err := time.Parse("2006-01-02", endDate)
+	if err != nil {
+		return nil, err
+	}
+	values := make(map[string]int64)
+	for month := time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, start.Location()); !month.After(end); month = month.AddDate(0, 1, 0) {
+		for _, fid := range featureIDs {
+			tableName := fmt.Sprintf("log_%d_%s", fid, month.Format("200601"))
+			var exists int
+			r.DB.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?", tableName).Scan(&exists)
+			if exists == 0 {
+				continue
+			}
+			dateExpr := "DATE(FROM_UNIXTIME(log_time))"
+			groupExpr, orderExpr := groupPeriodExpr(dateExpr, granularity)
+			scopeSQL := ""
+			args := []interface{}{startDate, endDate}
+			if !unrestricted {
+				if len(deptIDs) == 0 {
+					scopeSQL = " AND 1 = 0"
+				} else if userField != "" {
+					scopeSQL = fmt.Sprintf(`
+						AND EXISTS (
+							SELECT 1 FROM contacts c
+							INNER JOIN contact_departments cd_scope ON cd_scope.user_id = c.user_id
+							WHERE c.status = 1 AND c.mobile = %s.%s AND cd_scope.department IN ?
+						)
+					`, tableName, userField)
+					args = append(args, deptIDs)
+				}
+			}
+			sql := fmt.Sprintf(`
+				SELECT %s AS period, COUNT(*) AS value
+				FROM %s
+				WHERE %s >= ? AND %s <= ? %s
+				GROUP BY %s
+				ORDER BY %s
+			`, groupExpr, tableName, dateExpr, dateExpr, scopeSQL, groupExpr, orderExpr)
+			var rows []AggregatedStat
+			if err := r.DB.Raw(sql, args...).Scan(&rows).Error; err != nil {
+				return nil, err
+			}
+			for _, row := range rows {
+				values[row.Period] += row.Value
+			}
+		}
+	}
+	periods := make([]string, 0, len(values))
+	for p := range values {
+		periods = append(periods, p)
+	}
+	sort.Strings(periods)
+	results := make([]AggregatedStat, 0, len(periods))
+	for _, p := range periods {
+		results = append(results, AggregatedStat{Period: p, Value: values[p]})
+	}
+	return results, nil
+}
+
 // UpsertUserList 插入或更新用户明细
 func (r *DashboardStatsRepository) UpsertUserList(users []model.DashboardDailyUserList) error {
 	if len(users) == 0 {
@@ -183,6 +368,64 @@ func (r *DashboardStatsRepository) ExportUserList(statDate, listType string) ([]
 	err := r.DB.Where("stat_date = ? AND list_type = ?", statDate, listType).
 		Order("name ASC").Find(&users).Error
 	return users, err
+}
+
+func (r *DashboardStatsRepository) GetScopedUserList(statDate, listType string, activeFeatureIDs []int, deptIDs []int, unrestricted bool, limit, offset int) ([]model.DashboardDailyUserList, int64, error) {
+	scopeSQL, scopeArgs := deptScopeClause("c", deptIDs, unrestricted)
+	activeSQL := "EXISTS"
+	if listType == model.ListTypeInactive || listType == model.ListTypeNoLogin {
+		activeSQL = "NOT EXISTS"
+	}
+	baseSQL := fmt.Sprintf(`
+		FROM contacts c
+		WHERE c.status = 1
+		  AND c.mobile IS NOT NULL AND c.mobile != ''
+		  %s
+		  AND %s (
+			SELECT 1 FROM user_daily_stats uds
+			WHERE uds.mobile = c.mobile
+			  AND uds.stat_date = ?
+			  AND uds.feature_id IN ?
+		  )
+	`, scopeSQL, activeSQL)
+
+	args := make([]interface{}, 0, len(scopeArgs)+2)
+	args = append(args, scopeArgs...)
+	args = append(args, statDate, activeFeatureIDs)
+
+	var total int64
+	if err := r.DB.Raw("SELECT COUNT(*) "+baseSQL, args...).Scan(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	dataArgs := append([]interface{}{}, args...)
+	dataArgs = append(dataArgs, limit, offset)
+	var rows []struct {
+		Mobile     string
+		UserID     string
+		Name       string
+		Department string
+	}
+	if err := r.DB.Raw(`
+		SELECT c.mobile, c.user_id, c.name, c.department
+		`+baseSQL+`
+		ORDER BY c.name ASC
+		LIMIT ? OFFSET ?
+	`, dataArgs...).Scan(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	users := make([]model.DashboardDailyUserList, 0, len(rows))
+	for _, row := range rows {
+		users = append(users, model.DashboardDailyUserList{
+			StatDate:   statDate,
+			ListType:   listType,
+			Mobile:     row.Mobile,
+			UserID:     row.UserID,
+			Name:       row.Name,
+			Department: row.Department,
+		})
+	}
+	return users, total, nil
 }
 
 // DeleteByDate 删除指定日期的预计算数据
@@ -322,6 +565,63 @@ func (r *DashboardStatsRepository) GetDeviceStats(statDate string) (map[int]int6
 		Cnt     int64
 	}
 	if err := r.DB.Raw(sql, statDate).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	result := make(map[int]int64)
+	for _, row := range rows {
+		result[row.Devtype] = row.Cnt
+	}
+	return result, nil
+}
+
+func (r *DashboardStatsRepository) GetDeviceStatsScoped(statDate string, deptIDs []int, unrestricted bool) (map[int]int64, error) {
+	t, err := time.Parse("2006-01-02", statDate)
+	if err != nil {
+		return nil, err
+	}
+	tableName := fmt.Sprintf("log_90000054_%s", t.Format("200601"))
+
+	var exists int
+	r.DB.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?", tableName).Scan(&exists)
+	if exists == 0 {
+		return map[int]int64{}, nil
+	}
+
+	scopeSQL := ""
+	args := []interface{}{statDate}
+	if !unrestricted {
+		if len(deptIDs) == 0 {
+			scopeSQL = "AND 1 = 0"
+		} else {
+			scopeSQL = fmt.Sprintf(`
+				AND EXISTS (
+					SELECT 1 FROM contacts c
+					INNER JOIN contact_departments cd_scope ON cd_scope.user_id = c.user_id
+					WHERE c.status = 1 AND c.mobile = %s.login_openid AND cd_scope.department IN ?
+				)
+			`, tableName)
+			args = append(args, deptIDs)
+		}
+	}
+
+	sql := fmt.Sprintf(`
+		SELECT
+			CAST(JSON_UNQUOTE(JSON_EXTRACT(parsed_json, '$.devtype')) AS UNSIGNED) AS devtype,
+			COUNT(DISTINCT login_openid) AS cnt
+		FROM %s
+		WHERE DATE(FROM_UNIXTIME(log_time)) = ?
+			AND parsed_json IS NOT NULL
+			AND JSON_EXTRACT(parsed_json, '$.devtype') IS NOT NULL
+			%s
+		GROUP BY devtype
+	`, tableName, scopeSQL)
+
+	var rows []struct {
+		Devtype int
+		Cnt     int64
+	}
+	if err := r.DB.Raw(sql, args...).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 

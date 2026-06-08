@@ -11,14 +11,18 @@ import (
 )
 
 type JWTClaims struct {
+	UserID    int64  `json:"user_id"`
 	Username  string `json:"username"`
+	Role      string `json:"role"`
 	TokenType string `json:"token_type,omitempty"`
 	jwt.StandardClaims
 }
 
-func GenerateToken(username, secret string, duration time.Duration) (string, error) {
+func GenerateToken(userID int64, username, role, secret string, duration time.Duration) (string, error) {
 	claims := &JWTClaims{
+		UserID:    userID,
 		Username:  username,
+		Role:      role,
 		TokenType: "access",
 		StandardClaims: jwt.StandardClaims{
 			ExpiresAt: time.Now().Add(duration).Unix(),
@@ -29,9 +33,11 @@ func GenerateToken(username, secret string, duration time.Duration) (string, err
 	return token.SignedString([]byte(secret))
 }
 
-func GenerateRefreshToken(username, secret string, duration time.Duration) (string, error) {
+func GenerateRefreshToken(userID int64, username, role, secret string, duration time.Duration) (string, error) {
 	claims := &JWTClaims{
+		UserID:    userID,
 		Username:  username,
+		Role:      role,
 		TokenType: "refresh",
 		StandardClaims: jwt.StandardClaims{
 			ExpiresAt: time.Now().Add(duration).Unix(),
@@ -99,7 +105,23 @@ func JWTAuth(secret string) echo.MiddlewareFunc {
 				})
 			}
 			c.Set("username", claims.Username)
+			c.Set("user_id", claims.UserID)
+			c.Set("role", claims.Role)
 			return next(c)
 		}
 	}
+}
+
+func CurrentUserID(c echo.Context) int64 {
+	if v, ok := c.Get("user_id").(int64); ok {
+		return v
+	}
+	return 0
+}
+
+func CurrentRole(c echo.Context) string {
+	if v, ok := c.Get("role").(string); ok {
+		return v
+	}
+	return ""
 }

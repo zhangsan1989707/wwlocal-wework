@@ -13,6 +13,9 @@
           style="width: 160px;"
           @change="refreshData"
         />
+        <el-tag v-if="overview?.scope" size="small" type="info">
+          {{ overview.scope.role === 'super_admin' ? '全量数据' : `授权部门 ${overview.scope.dept_ids.length} 个` }}
+        </el-tag>
       </div>
       <el-button type="primary" :loading="loading" @click="refreshData">刷新</el-button>
     </div>
@@ -82,7 +85,8 @@
           <span class="card-title">趋势分析</span>
           <div class="chart-controls">
             <el-select v-model="trendMetric" style="width: 150px;" @change="fetchTrend">
-              <el-option label="活跃用户" value="active_users" />
+              <el-option label="活跃用户" value="active" />
+              <el-option label="使用人数" value="usage_users" />
               <el-option label="发消息数" value="msg_count" />
               <el-option label="发消息人数" value="msg_sender" />
               <el-option label="登录人数" value="login_users" />
@@ -92,7 +96,9 @@
               <el-radio-button value="day">日</el-radio-button>
               <el-radio-button value="week">周</el-radio-button>
               <el-radio-button value="month">月</el-radio-button>
+              <el-radio-button value="quarter">季</el-radio-button>
             </el-radio-group>
+            <el-button size="small" @click="exportTrendCSV">导出</el-button>
           </div>
         </div>
       </template>
@@ -102,7 +108,10 @@
     <!-- Section 4: Device Distribution -->
     <el-card shadow="never" class="section-card">
       <template #header>
-        <span class="card-title">设备分布</span>
+        <div class="card-header">
+          <span class="card-title">设备分布</span>
+          <el-button size="small" @click="exportDevicesCSV">导出 CSV</el-button>
+        </div>
       </template>
       <div class="device-section">
         <div ref="deviceChartRef" class="device-chart" v-loading="loading"></div>
@@ -119,7 +128,10 @@
     <!-- Section 5: Department Stats Table -->
     <el-card shadow="never" class="section-card">
       <template #header>
-        <span class="card-title">部门统计</span>
+        <div class="card-header">
+          <span class="card-title">部门统计</span>
+          <el-button size="small" @click="exportDepartmentsCSV">导出 CSV</el-button>
+        </div>
       </template>
       <el-table :data="departments" stripe v-loading="deptLoading" style="width: 100%">
         <el-table-column prop="dept_name" label="部门名称" min-width="150" />
@@ -155,7 +167,7 @@
       <el-tabs v-model="userListType" @tab-change="onUserTabChange">
         <el-tab-pane label="未活跃用户" name="inactive" />
         <el-tab-pane label="活跃用户" name="active" />
-        <el-tab-pane label="未登录用户" name="not_login" />
+        <el-tab-pane label="未登录用户" name="no_login" />
       </el-tabs>
       <el-table :data="users" stripe v-loading="userLoading" style="width: 100%" @row-click="handleUserClick" highlight-current-row>
         <el-table-column prop="name" label="姓名" width="120">
@@ -203,7 +215,7 @@ const deptLoading = ref(false)
 
 // Trend
 const trendLoading = ref(false)
-const trendMetric = ref('active_users')
+const trendMetric = ref('active')
 const trendGranularity = ref('day')
 const trendChartRef = ref<HTMLElement>()
 let trendChart: echarts.ECharts | undefined
@@ -392,16 +404,41 @@ function exportUsersCSV() {
     date: selectedDate.value,
     list_type: userListType.value,
   }).then((res: unknown) => {
-    const blob = new Blob([res as BlobPart], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `users_${userListType.value}_${selectedDate.value}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadBlob(res, `users_${userListType.value}_${selectedDate.value}.csv`)
   }).catch(() => {
     ElMessage.error('导出失败')
   })
+}
+
+function downloadBlob(res: unknown, filename: string) {
+  const blob = new Blob([res as BlobPart], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function exportTrendCSV() {
+  dashboardV2Api.exportTrend({
+    metric_type: trendMetric.value,
+    granularity: trendGranularity.value,
+  }).then((res: unknown) => {
+    downloadBlob(res, `trend_${trendMetric.value}_${trendGranularity.value}.csv`)
+  }).catch(() => ElMessage.error('导出失败'))
+}
+
+function exportDepartmentsCSV() {
+  dashboardV2Api.exportDepartments(selectedDate.value).then((res: unknown) => {
+    downloadBlob(res, `departments_${selectedDate.value}.csv`)
+  }).catch(() => ElMessage.error('导出失败'))
+}
+
+function exportDevicesCSV() {
+  dashboardV2Api.exportDevices(selectedDate.value).then((res: unknown) => {
+    downloadBlob(res, `devices_${selectedDate.value}.csv`)
+  }).catch(() => ElMessage.error('导出失败'))
 }
 
 // --- Lifecycle ---

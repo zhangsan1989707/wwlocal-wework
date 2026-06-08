@@ -30,17 +30,20 @@ func main() {
 
 	cfg, err := config.Load("config.yaml")
 	if err != nil {
-		slog.Error(fmt.Sprintf("load config failed: %v", err)); os.Exit(1)
+		slog.Error(fmt.Sprintf("load config failed: %v", err))
+		os.Exit(1)
 	}
 
 	db, err := gorm.Open(mysql.Open(cfg.Database.DSN()), &gorm.Config{})
 	if err != nil {
-		slog.Error(fmt.Sprintf("connect database failed: %v", err)); os.Exit(1)
+		slog.Error(fmt.Sprintf("connect database failed: %v", err))
+		os.Exit(1)
 	}
 
 	sqlDB, err := db.DB()
 	if err != nil {
-		slog.Error(fmt.Sprintf("get sql.DB failed: %v", err)); os.Exit(1)
+		slog.Error(fmt.Sprintf("get sql.DB failed: %v", err))
+		os.Exit(1)
 	}
 	maxOpen := cfg.Database.MaxOpenConns
 	if maxOpen <= 0 {
@@ -60,12 +63,14 @@ func main() {
 
 	settingRepo := repository.NewSettingRepository(db)
 	if err := settingRepo.AutoMigrate(); err != nil {
-		slog.Error(fmt.Sprintf("migrate setting repository failed: %v", err)); os.Exit(1)
+		slog.Error(fmt.Sprintf("migrate setting repository failed: %v", err))
+		os.Exit(1)
 	}
 
 	keyRepo := repository.NewKeyRepository(db, cfg.Keys.StoragePath, cfg.Keys.EncryptKey)
 	if err := keyRepo.AutoMigrate(); err != nil {
-		slog.Error(fmt.Sprintf("migrate key repository failed: %v", err)); os.Exit(1)
+		slog.Error(fmt.Sprintf("migrate key repository failed: %v", err))
+		os.Exit(1)
 	}
 	checkKeyPermissions(cfg.Keys.StoragePath)
 
@@ -73,17 +78,31 @@ func main() {
 
 	syncStateRepo := repository.NewSyncStateRepository(db)
 	if err := syncStateRepo.AutoMigrate(); err != nil {
-		slog.Error(fmt.Sprintf("migrate sync state repository failed: %v", err)); os.Exit(1)
+		slog.Error(fmt.Sprintf("migrate sync state repository failed: %v", err))
+		os.Exit(1)
 	}
 
 	contactRepo := repository.NewContactRepository(db)
 	if err := contactRepo.AutoMigrate(); err != nil {
-		slog.Error(fmt.Sprintf("migrate contact repository failed: %v", err)); os.Exit(1)
+		slog.Error(fmt.Sprintf("migrate contact repository failed: %v", err))
+		os.Exit(1)
+	}
+
+	userRepo := repository.NewUserRepository(db)
+	if err := userRepo.AutoMigrate(); err != nil {
+		slog.Error(fmt.Sprintf("migrate user repository failed: %v", err))
+		os.Exit(1)
+	}
+	userSvc := service.NewUserService(userRepo, contactRepo, &cfg.Auth)
+	if err := userSvc.EnsureInitialAdmin(); err != nil {
+		slog.Error(fmt.Sprintf("init admin user failed: %v", err))
+		os.Exit(1)
 	}
 
 	syncFeatureRepo := repository.NewSyncFeatureRepository(db)
 	if err := syncFeatureRepo.AutoMigrate(); err != nil {
-		slog.Error(fmt.Sprintf("migrate sync feature repository failed: %v", err)); os.Exit(1)
+		slog.Error(fmt.Sprintf("migrate sync feature repository failed: %v", err))
+		os.Exit(1)
 	}
 	// 从 config.yaml 初始化 feature 列表到数据库
 	var initFeatures []model.SyncFeature
@@ -95,12 +114,14 @@ func main() {
 		})
 	}
 	if err := syncFeatureRepo.BatchUpsert(initFeatures); err != nil {
-		slog.Error(fmt.Sprintf("init sync features failed: %v", err)); os.Exit(1)
+		slog.Error(fmt.Sprintf("init sync features failed: %v", err))
+		os.Exit(1)
 	}
 
 	syncHistoryRepo := repository.NewSyncHistoryRepository(db)
 	if err := syncHistoryRepo.AutoMigrate(); err != nil {
-		slog.Error(fmt.Sprintf("migrate sync history repository failed: %v", err)); os.Exit(1)
+		slog.Error(fmt.Sprintf("migrate sync history repository failed: %v", err))
+		os.Exit(1)
 	}
 
 	weworkSvc := service.NewWeWorkService(&cfg.WeWork)
@@ -113,7 +134,8 @@ func main() {
 	syncSvc.VerifySyncState()
 
 	healthHandler := handler.NewHealthHandler(db, cfg)
-	authHandler := handler.NewAuthHandler(&cfg.Auth, settingRepo)
+	authHandler := handler.NewAuthHandler(&cfg.Auth, userSvc)
+	userHandler := handler.NewUserHandler(userSvc)
 	logHandler := handler.NewLogHandler(querySvc)
 	keyHandler := handler.NewKeyHandler(keySvc)
 	syncHandler := handler.NewSyncHandler(syncSvc)
@@ -124,14 +146,16 @@ func main() {
 
 	operationLogRepo := repository.NewOperationLogRepository(db)
 	if err := operationLogRepo.AutoMigrate(); err != nil {
-		slog.Error(fmt.Sprintf("migrate operation log repository failed: %v", err)); os.Exit(1)
+		slog.Error(fmt.Sprintf("migrate operation log repository failed: %v", err))
+		os.Exit(1)
 	}
 	operationLogSvc := service.NewOperationLogService(operationLogRepo)
 	operationLogHandler := handler.NewOperationLogHandler(operationLogSvc)
 
 	adminOperLogRepo := repository.NewAdminOperLogRepository(db)
 	if err := adminOperLogRepo.AutoMigrate(); err != nil {
-		slog.Error(fmt.Sprintf("migrate admin oper log repository failed: %v", err)); os.Exit(1)
+		slog.Error(fmt.Sprintf("migrate admin oper log repository failed: %v", err))
+		os.Exit(1)
 	}
 	adminOperLogSvc := service.NewAdminOperLogService(weworkSvc, adminOperLogRepo, &cfg.WeWork)
 	adminOperLogHandler := handler.NewAdminOperLogHandler(adminOperLogSvc)
@@ -150,10 +174,11 @@ func main() {
 
 	dashboardStatsRepo := repository.NewDashboardStatsRepository(db)
 	if err := dashboardStatsRepo.AutoMigrate(); err != nil {
-		slog.Error(fmt.Sprintf("migrate dashboard stats repository failed: %v", err)); os.Exit(1)
+		slog.Error(fmt.Sprintf("migrate dashboard stats repository failed: %v", err))
+		os.Exit(1)
 	}
 	dashboardV2Svc := service.NewDashboardV2Service(dashboardStatsRepo, contactRepo, cfg)
-	dashboardV2Handler := handler.NewDashboardV2Handler(dashboardV2Svc)
+	dashboardV2Handler := handler.NewDashboardV2Handler(dashboardV2Svc, userSvc)
 	nightlySvc := service.NewNightlyJobService(syncSvc, contactSyncSvc, dashboardStatsRepo, contactRepo, logRepo, cfg)
 	nightlyHandler := handler.NewNightlyHandler(nightlySvc)
 	syncHistoryHandler := handler.NewSyncHistoryHandler(syncHistoryRepo)
@@ -203,6 +228,7 @@ func main() {
 		SyncFeature:  syncFeatureHandler,
 		System:       systemHandler,
 		Task:         taskHandler,
+		User:         userHandler,
 		OperationSvc: operationLogSvc,
 		JWTSecret:    cfg.Auth.JWTSecret,
 		RateLimiter:  rateLimiter,
@@ -218,7 +244,8 @@ func main() {
 
 	go func() {
 		if err := e.Start(addr); err != nil && err != http.ErrServerClosed {
-			slog.Error(fmt.Sprintf("start server failed: %v", err)); os.Exit(1)
+			slog.Error(fmt.Sprintf("start server failed: %v", err))
+			os.Exit(1)
 		}
 	}()
 

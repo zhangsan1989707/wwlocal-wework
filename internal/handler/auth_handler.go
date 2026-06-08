@@ -2,48 +2,26 @@ package handler
 
 import (
 	"fmt"
-	"log/slog"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
 
 	"github.com/labstack/echo/v4"
-	"golang.org/x/crypto/bcrypt"
 	"wwlocal-wework/config"
 	"wwlocal-wework/internal/middleware"
-	"wwlocal-wework/internal/repository"
+	"wwlocal-wework/internal/service"
 	"wwlocal-wework/pkg/response"
 )
 
-const passwordHashKey = "auth_password_hash"
-
 type AuthHandler struct {
-	cfg          *config.AuthConfig
-	mu           sync.Mutex
-	passwordHash []byte
-	settingRepo  *repository.SettingRepository
-	limiter      *loginLimiter
+	cfg     *config.AuthConfig
+	userSvc *service.UserService
+	limiter *loginLimiter
 }
 
-func NewAuthHandler(cfg *config.AuthConfig, settingRepo *repository.SettingRepository) *AuthHandler {
-	var hash []byte
-
-	// 优先从数据库加载已修改的密码哈希
-	if settingRepo != nil {
-		if stored, err := settingRepo.Get(passwordHashKey); err == nil && stored != "" {
-			hash = []byte(stored)
-			slog.Info("loaded password hash from database")
-		}
-	}
-
-	// 数据库没有则使用环境变量
-	if hash == nil {
-		hash, _ = bcrypt.GenerateFromPassword([]byte(cfg.Password), bcrypt.DefaultCost)
-		slog.Info("using password hash from environment config")
-	}
-
-	return &AuthHandler{cfg: cfg, passwordHash: hash, settingRepo: settingRepo, limiter: newLoginLimiter()}
+func NewAuthHandler(cfg *config.AuthConfig, userSvc *service.UserService) *AuthHandler {
+	return &AuthHandler{cfg: cfg, userSvc: userSvc, limiter: newLoginLimiter()}
 }
 
 func (h *AuthHandler) Stop() {
@@ -66,21 +44,21 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		return response.Error(c, 400, "invalid request body")
 	}
 
-	h.mu.Lock()
-	hash := h.passwordHash
-	h.mu.Unlock()
-	if req.Username != h.cfg.Username || bcrypt.CompareHashAndPassword(hash, []byte(req.Password)) != nil {
+	user, err := h.userSvc.Authenticate(req.Username, req.Password)
+	if err != nil {
 		h.limiter.RecordFailure(ip)
 		return response.Error(c, 401, "invalid username or password")
 	}
 
-	c.Set("username", req.Username)
-	token, err := middleware.GenerateToken(req.Username, h.cfg.JWTSecret, 2*time.Hour)
+	c.Set("username", user.Username)
+	c.Set("user_id", user.ID)
+	c.Set("role", user.Role)
+	token, err := middleware.GenerateToken(user.ID, user.Username, user.Role, h.cfg.JWTSecret, 2*time.Hour)
 	if err != nil {
 		return response.Error(c, 500, "generate token failed")
 	}
 
-	refreshToken, err := middleware.GenerateRefreshToken(req.Username, h.cfg.JWTSecret, 7*24*time.Hour)
+	refreshToken, err := middleware.GenerateRefreshToken(user.ID, user.Username, user.Role, h.cfg.JWTSecret, 7*24*time.Hour)
 	if err != nil {
 		return response.Error(c, 500, "generate refresh token failed")
 	}
@@ -88,7 +66,8 @@ func (h *AuthHandler) Login(c echo.Context) error {
 	return response.Success(c, map[string]interface{}{
 		"token":         token,
 		"refresh_token": refreshToken,
-		"username":      req.Username,
+		"username":      user.Username,
+		"role":          user.Role,
 	})
 }
 
@@ -113,7 +92,7 @@ func (h *AuthHandler) RefreshToken(c echo.Context) error {
 	}
 
 	// 生成新的 access token
-	token, err := middleware.GenerateToken(claims.Username, h.cfg.JWTSecret, 2*time.Hour)
+	token, err := middleware.GenerateToken(claims.UserID, claims.Username, claims.Role, h.cfg.JWTSecret, 2*time.Hour)
 	if err != nil {
 		return response.Error(c, 500, "generate token failed")
 	}
@@ -178,41 +157,22 @@ func (h *AuthHandler) ChangePassword(c echo.Context) error {
 		return response.Error(c, 400, "新密码不能与旧密码相同")
 	}
 
-	// 校验旧密码
-	h.mu.Lock()
-	hash := h.passwordHash
-	h.mu.Unlock()
-	if bcrypt.CompareHashAndPassword(hash, []byte(req.OldPassword)) != nil {
-		return response.Error(c, 401, "旧密码不正确")
+	userID := middleware.CurrentUserID(c)
+	if userID <= 0 {
+		return response.Error(c, 401, "invalid token")
 	}
-
-	// 生成新密码哈希
-	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return response.Error(c, 500, "密码加密失败")
+	if err := h.userSvc.ChangePassword(userID, req.OldPassword, req.NewPassword); err != nil {
+		return response.Error(c, 401, err.Error())
 	}
-
-	// 持久化到数据库
-	if h.settingRepo != nil {
-		if err := h.settingRepo.Set(passwordHashKey, string(newHash)); err != nil {
-			return response.Error(c, 500, "保存密码失败")
-		}
-	}
-
-	// 更新内存
-	h.mu.Lock()
-	h.passwordHash = newHash
-	h.mu.Unlock()
-	slog.Info("password changed successfully")
 
 	return response.Success(c, map[string]string{"message": "密码修改成功"})
 }
 
 // loginLimiter 简单的基于 IP 的登录限流：1 分钟内最多 5 次失败
 type loginLimiter struct {
-	mu        sync.Mutex
-	attempts  map[string]*attemptEntry
-	stopCh    chan struct{}
+	mu       sync.Mutex
+	attempts map[string]*attemptEntry
+	stopCh   chan struct{}
 }
 
 type attemptEntry struct {

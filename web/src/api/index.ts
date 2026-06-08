@@ -39,6 +39,7 @@ import type {
   DashboardV2Trend,
   DashboardV2DeptStat,
   DashboardV2UserItem,
+  AdminUser,
 } from '../types/api'
 
 const api = axios.create({
@@ -49,6 +50,7 @@ const api = axios.create({
 const TOKEN_KEY = 'auth_token'
 const REFRESH_TOKEN_KEY = 'auth_refresh_token'
 const USERNAME_KEY = 'auth_username'
+const ROLE_KEY = 'auth_role'
 
 function getStoredToken(): string | null {
   try {
@@ -87,6 +89,7 @@ function removeStoredToken(): void {
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(REFRESH_TOKEN_KEY)
     localStorage.removeItem(USERNAME_KEY)
+    localStorage.removeItem(ROLE_KEY)
   } catch {
     console.error('Failed to remove stored token')
   }
@@ -105,6 +108,22 @@ function setStoredUsername(username: string): void {
     localStorage.setItem(USERNAME_KEY, username)
   } catch {
     console.error('Failed to store username')
+  }
+}
+
+function getStoredRole(): string | null {
+  try {
+    return localStorage.getItem(ROLE_KEY)
+  } catch {
+    return null
+  }
+}
+
+function setStoredRole(role: string): void {
+  try {
+    localStorage.setItem(ROLE_KEY, role)
+  } catch {
+    console.error('Failed to store role')
   }
 }
 
@@ -194,6 +213,7 @@ export const authAPI = {
           setStoredRefreshToken(res.data.refresh_token)
         }
         setStoredUsername(res.data.username)
+        setStoredRole(res.data.role)
       }
       return res
     }),
@@ -201,8 +221,20 @@ export const authAPI = {
     api.put<ApiResponse<{ message: string }>>('/auth/password', data) as unknown as ApiResult<{ message: string }>,
   getToken: () => getStoredToken(),
   getUsername: () => getStoredUsername(),
+  getRole: () => getStoredRole(),
   logout: () => removeStoredToken(),
   isAuthenticated: () => !!getStoredToken(),
+}
+
+export const userAPI = {
+  list: () =>
+    api.get<ApiResponse<AdminUser[]>>('/users') as unknown as ApiResult<AdminUser[]>,
+  create: (data: { username: string; password: string; role: string; enabled?: boolean; dept_ids: number[] }) =>
+    api.post<ApiResponse<AdminUser>>('/users', data) as unknown as ApiResult<AdminUser>,
+  update: (id: number, data: { role: string; enabled: boolean; dept_ids: number[] }) =>
+    api.put<ApiResponse<AdminUser>>(`/users/${id}`, data) as unknown as ApiResult<AdminUser>,
+  resetPassword: (id: number, password: string) =>
+    api.put<ApiResponse<{ message: string }>>(`/users/${id}/password`, { password }) as unknown as ApiResult<{ message: string }>,
 }
 
 export const healthAPI = {
@@ -304,6 +336,12 @@ export const dashboardV2Api = {
     api.get<ApiResponse<{ total: number; users: DashboardV2UserItem[] }>>('/dashboard/v2/users', { params }) as unknown as ApiResult<{ total: number; users: DashboardV2UserItem[] }>,
   exportOverview: (date?: string) =>
     api.get('/dashboard/v2/export/overview', { params: { date }, responseType: 'blob' }),
+  exportTrend: (params: { metric_types?: string; metric_type?: string; start_date?: string; end_date?: string; granularity?: string }) =>
+    api.get('/dashboard/v2/export/trend', { params, responseType: 'blob' }),
+  exportDepartments: (date?: string) =>
+    api.get('/dashboard/v2/export/departments', { params: { date }, responseType: 'blob' }),
+  exportDevices: (date?: string) =>
+    api.get('/dashboard/v2/export/devices', { params: { date }, responseType: 'blob' }),
   exportUsers: (params: { date?: string; list_type?: string }) =>
     api.get('/dashboard/v2/export/users', { params, responseType: 'blob' }),
 }

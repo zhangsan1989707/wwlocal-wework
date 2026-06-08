@@ -49,7 +49,7 @@ const handleLogin = async () => {
   try {
     const res = await authAPI.login({ username: form.username, password: form.password })
     if (res.code === 0 && res.data?.username) {
-      authStore.login(res.data.username)
+      authStore.login(res.data.username, res.data.role)
       ElMessage.success('登录成功')
       const redirect = (route.query.redirect as string) || '/dashboard'
       router.push(redirect)

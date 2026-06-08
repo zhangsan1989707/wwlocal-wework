@@ -3,7 +3,6 @@ package service
 import (
 	"fmt"
 	"sort"
-	"strconv"
 	"time"
 
 	"wwlocal-wework/config"
@@ -64,103 +63,133 @@ func defaultGranularity(g string) string {
 	return g
 }
 
-// GetOverview 获取指定日期的总览数据
-func (s *DashboardV2Service) GetOverview(date string) (map[string]interface{}, error) {
+func dayRangeFromDate(date string) (string, string) {
 	date = defaultYesterday(date)
+	return date, date
+}
 
-	stats, err := s.statsRepo.GetMetricTypeStats(date)
+// GetOverview 获取指定日期的总览数据
+func (s *DashboardV2Service) GetOverview(date string, scope *DataScope) (map[string]interface{}, error) {
+	startDate, endDate := dayRangeFromDate(date)
+	date = startDate
+	if scope == nil {
+		scope = &DataScope{Unrestricted: true}
+	}
+
+	registered, err := s.contactRepo.GetScopedContactCount(scope.DeptIDs, scope.Unrestricted)
 	if err != nil {
-		return nil, fmt.Errorf("查询看板指标失败: %w", err)
+		return nil, fmt.Errorf("查询注册人数失败: %w", err)
 	}
+	activated, err := s.statsRepo.CountDistinctUsersFromDailyStats([]int{90000048}, startDate, endDate, scope.DeptIDs, scope.Unrestricted)
+	if err != nil {
+		return nil, fmt.Errorf("查询激活人数失败: %w", err)
+	}
+	loginUsers, err := s.statsRepo.CountDistinctUsersFromDailyStats([]int{90000031}, startDate, endDate, scope.DeptIDs, scope.Unrestricted)
+	if err != nil {
+		return nil, fmt.Errorf("查询登录人数失败: %w", err)
+	}
+	usageUsers, err := s.statsRepo.CountDistinctUsersFromDailyStats(activeFeatureIDs, startDate, endDate, scope.DeptIDs, scope.Unrestricted)
+	if err != nil {
+		return nil, fmt.Errorf("查询使用人数失败: %w", err)
+	}
+	msgCount, err := s.statsRepo.CountLogRowsScoped(msgFeatureIDs, startDate, endDate, "sender_openid", scope.DeptIDs, scope.Unrestricted)
+	if err != nil {
+		return nil, fmt.Errorf("查询消息数失败: %w", err)
+	}
+	msgSender, err := s.statsRepo.CountDistinctUsersFromDailyStats(msgFeatureIDs, startDate, endDate, scope.DeptIDs, scope.Unrestricted)
+	if err != nil {
+		return nil, fmt.Errorf("查询消息发送人数失败: %w", err)
+	}
+	groupCreated, _ := s.statsRepo.CountLogRowsScoped([]int{90000038}, startDate, endDate, "root_openid", scope.DeptIDs, scope.Unrestricted)
+	appAccessUser, _ := s.statsRepo.CountDistinctUsersFromDailyStats([]int{90000033}, startDate, endDate, scope.DeptIDs, scope.Unrestricted)
+	appAccessCount, _ := s.statsRepo.CountLogRowsScoped([]int{90000033}, startDate, endDate, "login_openid", scope.DeptIDs, scope.Unrestricted)
+	devices, _ := s.GetDeviceStats(date, scope)
 
-	get := func(metricType string) int64 {
-		if m, ok := stats[metricType]; ok {
-			if v, ok := m["*"]; ok {
-				return v
-			}
-		}
-		return 0
+	var rateActivation int64
+	var rateActive int64
+	if registered > 0 {
+		rateActivation = activated * 1000 / registered
+		rateActive = usageUsers * 1000 / registered
 	}
-
-	// 设备数据
-	deviceMetrics := []struct {
-		metricType string
-		name       string
-	}{
-		{model.MetricDeviceAndroid, model.DeviceTypeName[model.MetricDeviceAndroid]},
-		{model.MetricDeviceIOS, model.DeviceTypeName[model.MetricDeviceIOS]},
-		{model.MetricDeviceIPad, model.DeviceTypeName[model.MetricDeviceIPad]},
-		{model.MetricDeviceWindows, model.DeviceTypeName[model.MetricDeviceWindows]},
-		{model.MetricDeviceMacOS, model.DeviceTypeName[model.MetricDeviceMacOS]},
-		{model.MetricDeviceLinux, model.DeviceTypeName[model.MetricDeviceLinux]},
-	}
-	deviceStats := make(map[string]int64)
-	for _, d := range deviceMetrics {
-		deviceStats[d.name] = get(d.metricType)
+	inactive := registered - usageUsers
+	if inactive < 0 {
+		inactive = 0
 	}
 
 	return map[string]interface{}{
-		"date":             date,
-		"registered":       get(model.MetricUserRegistered),
-		"activated":        get(model.MetricUserActivated),
-		"not_activated":    get(model.MetricUserNotActivated),
-		"active":           get(model.MetricUserActive),
-		"inactive":         get(model.MetricUserInactive),
-		"rate_activation":  get(model.MetricRateActivation),
-		"rate_active":      get(model.MetricRateActive),
-		"msg_count":        get(model.MetricMsgCount),
-		"msg_sender":       get(model.MetricMsgSender),
-		"group_created":    get(model.MetricGroupCreated),
-		"group_active":     get(model.MetricGroupActive),
-		"rate_group_active": get(model.MetricRateGroupActive),
-		"app_access_user":  get(model.MetricAppAccessUser),
-		"app_access_count": get(model.MetricAppAccessCount),
-		"device_total":     get(model.MetricDeviceTotal),
-		"device_stats":     deviceStats,
+		"date":              date,
+		"registered":        registered,
+		"activated":         activated,
+		"not_activated":     registered - activated,
+		"login_users":       loginUsers,
+		"usage_users":       usageUsers,
+		"active":            usageUsers,
+		"inactive":          inactive,
+		"rate_activation":   rateActivation,
+		"rate_active":       rateActive,
+		"msg_count":         msgCount,
+		"msg_sender":        msgSender,
+		"group_created":     groupCreated,
+		"group_active":      int64(0),
+		"rate_group_active": int64(0),
+		"app_access_user":   appAccessUser,
+		"app_access_count":  appAccessCount,
+		"devices":           devices,
+		"scope": map[string]interface{}{
+			"role":     scope.Role,
+			"dept_ids": scope.DeptIDs,
+		},
 	}, nil
 }
 
 // GetTrend 获取单指标趋势
-func (s *DashboardV2Service) GetTrend(metricType, startDate, endDate, granularity, dimensionKey string) (map[string]interface{}, error) {
+func (s *DashboardV2Service) GetTrend(metricType, startDate, endDate, granularity, dimensionKey string, scope *DataScope) (map[string]interface{}, error) {
 	if metricType == "" {
 		return nil, fmt.Errorf("metric_type 不能为空")
 	}
 	granularity = defaultGranularity(granularity)
 	startDate, endDate = resolveDateRange(startDate, endDate, granularity)
+	if scope == nil {
+		scope = &DataScope{Unrestricted: true}
+	}
 
-	results, err := s.statsRepo.GetStatsWithAggregation(metricType, startDate, endDate, granularity, dimensionKey)
+	results, err := s.metricTrend(metricType, startDate, endDate, granularity, scope)
 	if err != nil {
 		return nil, fmt.Errorf("查询趋势数据失败: %w", err)
 	}
 
-	dates := make([]string, 0, len(results))
+	periods := make([]string, 0, len(results))
 	values := make([]int64, 0, len(results))
 	for _, r := range results {
-		dates = append(dates, r.Period)
+		periods = append(periods, r.Period)
 		values = append(values, r.Value)
 	}
 
 	return map[string]interface{}{
-		"metric_type": metricType,
 		"granularity": granularity,
-		"dates":       dates,
-		"values":      values,
+		"periods":     periods,
+		"series": map[string][]int64{
+			metricType: values,
+		},
 	}, nil
 }
 
 // GetMultiTrend 获取多指标趋势（用于趋势图）
-func (s *DashboardV2Service) GetMultiTrend(metricTypes []string, startDate, endDate, granularity string) (map[string]interface{}, error) {
+func (s *DashboardV2Service) GetMultiTrend(metricTypes []string, startDate, endDate, granularity string, scope *DataScope) (map[string]interface{}, error) {
 	if len(metricTypes) == 0 {
 		return nil, fmt.Errorf("metric_types 不能为空")
 	}
 	granularity = defaultGranularity(granularity)
 	startDate, endDate = resolveDateRange(startDate, endDate, granularity)
+	if scope == nil {
+		scope = &DataScope{Unrestricted: true}
+	}
 
 	// 收集所有指标的结果，合并日期轴
 	allResults := make(map[string]map[string]int64, len(metricTypes))
 	dateSet := make(map[string]bool)
 	for _, mt := range metricTypes {
-		results, err := s.statsRepo.GetStatsWithAggregation(mt, startDate, endDate, granularity, "")
+		results, err := s.metricTrend(mt, startDate, endDate, granularity, scope)
 		if err != nil {
 			return nil, fmt.Errorf("查询指标 %s 趋势失败: %w", mt, err)
 		}
@@ -191,20 +220,38 @@ func (s *DashboardV2Service) GetMultiTrend(metricTypes []string, startDate, endD
 
 	return map[string]interface{}{
 		"granularity": granularity,
-		"dates":       dates,
+		"periods":     dates,
 		"series":      seriesMap,
 	}, nil
 }
 
-// GetDepartmentStats 获取部门维度统计
-func (s *DashboardV2Service) GetDepartmentStats(date string) (map[string]interface{}, error) {
-	date = defaultYesterday(date)
-
-	stats, err := s.statsRepo.GetMetricTypeStats(date)
-	if err != nil {
-		return nil, fmt.Errorf("查询部门指标失败: %w", err)
+func (s *DashboardV2Service) metricTrend(metricType, startDate, endDate, granularity string, scope *DataScope) ([]repository.AggregatedStat, error) {
+	switch metricType {
+	case "login_users":
+		return s.statsRepo.GetPeopleTrend([]int{90000031}, startDate, endDate, granularity, scope.DeptIDs, scope.Unrestricted)
+	case "usage_users", "active", model.MetricUserActive:
+		return s.statsRepo.GetPeopleTrend(activeFeatureIDs, startDate, endDate, granularity, scope.DeptIDs, scope.Unrestricted)
+	case "app_access_user":
+		return s.statsRepo.GetPeopleTrend([]int{90000033}, startDate, endDate, granularity, scope.DeptIDs, scope.Unrestricted)
+	case model.MetricMsgSender:
+		return s.statsRepo.GetPeopleTrend(msgFeatureIDs, startDate, endDate, granularity, scope.DeptIDs, scope.Unrestricted)
+	case model.MetricMsgCount:
+		return s.statsRepo.GetEventTrendScoped(msgFeatureIDs, startDate, endDate, granularity, "sender_openid", scope.DeptIDs, scope.Unrestricted)
+	case model.MetricAppAccessCount:
+		return s.statsRepo.GetEventTrendScoped([]int{90000033}, startDate, endDate, granularity, "login_openid", scope.DeptIDs, scope.Unrestricted)
+	case model.MetricGroupCreated:
+		return s.statsRepo.GetEventTrendScoped([]int{90000038}, startDate, endDate, granularity, "root_openid", scope.DeptIDs, scope.Unrestricted)
+	default:
+		return s.statsRepo.GetPeopleTrend(activeFeatureIDs, startDate, endDate, granularity, scope.DeptIDs, scope.Unrestricted)
 	}
+}
 
+// GetDepartmentStats 获取部门维度统计
+func (s *DashboardV2Service) GetDepartmentStats(date string, scope *DataScope) ([]map[string]interface{}, error) {
+	startDate, endDate := dayRangeFromDate(date)
+	if scope == nil {
+		scope = &DataScope{Unrestricted: true}
+	}
 	depts, err := s.contactRepo.GetAllDepartments()
 	if err != nil {
 		return nil, fmt.Errorf("查询部门列表失败: %w", err)
@@ -217,124 +264,107 @@ func (s *DashboardV2Service) GetDepartmentStats(date string) (map[string]interfa
 	for _, dc := range deptCounts {
 		deptCountMap[dc.DeptID] = dc.Count
 	}
-
-	// 从 stats 中提取部门维度数据（dimension_key != "*"）
-	activeByDept := make(map[string]int64)
-	inactiveByDept := make(map[string]int64)
-	if m, ok := stats[model.MetricUserActive]; ok {
-		for dk, v := range m {
-			if dk != "*" {
-				activeByDept[dk] = v
-			}
+	allowed := make(map[int]bool)
+	if !scope.Unrestricted {
+		for _, id := range scope.DeptIDs {
+			allowed[id] = true
 		}
 	}
-	if m, ok := stats[model.MetricUserInactive]; ok {
-		for dk, v := range m {
-			if dk != "*" {
-				inactiveByDept[dk] = v
-			}
-		}
-	}
-
-	type deptStat struct {
-		DeptID      int     `json:"dept_id"`
-		DeptName    string  `json:"dept_name"`
-		Total       int64   `json:"total_contacts"`
-		Active      int64   `json:"active"`
-		Inactive    int64   `json:"inactive"`
-		ActiveRate  float64 `json:"active_rate"`
-	}
-	result := make([]deptStat, 0, len(depts))
+	result := make([]map[string]interface{}, 0, len(depts))
 	for _, d := range depts {
+		if !scope.Unrestricted && !allowed[d.ID] {
+			continue
+		}
 		total := deptCountMap[d.ID]
 		if total == 0 {
 			continue
 		}
-		key := strconv.Itoa(d.ID)
-		active := activeByDept[key]
-		inactive := inactiveByDept[key]
+		active, err := s.statsRepo.CountDistinctUsersFromDailyStats(activeFeatureIDs, startDate, endDate, []int{d.ID}, false)
+		if err != nil {
+			return nil, err
+		}
+		inactive := total - active
+		if inactive < 0 {
+			inactive = 0
+		}
 		var rate float64
 		if total > 0 {
 			rate = float64(active) / float64(total) * 100
 		}
-		result = append(result, deptStat{
-			DeptID:     d.ID,
-			DeptName:   d.Name,
-			Total:      total,
-			Active:     active,
-			Inactive:   inactive,
-			ActiveRate: rate,
+		result = append(result, map[string]interface{}{
+			"dept_id":        d.ID,
+			"dept_name":      d.Name,
+			"total_contacts": total,
+			"active":         active,
+			"inactive":       inactive,
+			"active_rate":    rate,
 		})
 	}
-
-	return map[string]interface{}{
-		"date":        date,
-		"departments": result,
-	}, nil
+	return result, nil
 }
 
 // GetDeviceStats 获取设备类型统计
-func (s *DashboardV2Service) GetDeviceStats(date string) (map[string]interface{}, error) {
+func (s *DashboardV2Service) GetDeviceStats(date string, scope *DataScope) (map[string]interface{}, error) {
 	date = defaultYesterday(date)
 
-	stats, err := s.statsRepo.GetMetricTypeStats(date)
+	deviceStats, err := s.statsRepo.GetDeviceStatsScoped(date, scope.DeptIDs, scope.Unrestricted)
 	if err != nil {
 		return nil, fmt.Errorf("查询设备指标失败: %w", err)
 	}
-
-	get := func(metricType string) int64 {
-		if m, ok := stats[metricType]; ok {
-			if v, ok := m["*"]; ok {
-				return v
-			}
-		}
-		return 0
-	}
-
-	total := get(model.MetricDeviceTotal)
 	deviceTypes := []struct {
+		devtype    int
 		metricType string
 		name       string
 	}{
-		{model.MetricDeviceAndroid, model.DeviceTypeName[model.MetricDeviceAndroid]},
-		{model.MetricDeviceIOS, model.DeviceTypeName[model.MetricDeviceIOS]},
-		{model.MetricDeviceIPad, model.DeviceTypeName[model.MetricDeviceIPad]},
-		{model.MetricDeviceWindows, model.DeviceTypeName[model.MetricDeviceWindows]},
-		{model.MetricDeviceMacOS, model.DeviceTypeName[model.MetricDeviceMacOS]},
-		{model.MetricDeviceLinux, model.DeviceTypeName[model.MetricDeviceLinux]},
+		{131073, model.MetricDeviceAndroid, model.DeviceTypeName[model.MetricDeviceAndroid]},
+		{131074, model.MetricDeviceIOS, model.DeviceTypeName[model.MetricDeviceIOS]},
+		{131075, model.MetricDeviceIPad, model.DeviceTypeName[model.MetricDeviceIPad]},
+		{65537, model.MetricDeviceWindows, model.DeviceTypeName[model.MetricDeviceWindows]},
+		{65538, model.MetricDeviceMacOS, model.DeviceTypeName[model.MetricDeviceMacOS]},
+		{65540, model.MetricDeviceLinux, model.DeviceTypeName[model.MetricDeviceLinux]},
 	}
 
-	type deviceItem struct {
-		Name       string  `json:"name"`
-		Count      int64   `json:"count"`
-		Percentage float64 `json:"percentage"`
+	var total int64
+	for _, count := range deviceStats {
+		total += count
 	}
-	items := make([]deviceItem, 0, len(deviceTypes))
+	items := make([]map[string]interface{}, 0, len(deviceTypes))
 	for _, dt := range deviceTypes {
-		count := get(dt.metricType)
+		count := deviceStats[dt.devtype]
 		var pct float64
 		if total > 0 {
 			pct = float64(count) / float64(total) * 100
 		}
-		items = append(items, deviceItem{
-			Name:       dt.name,
-			Count:      count,
-			Percentage: pct,
+		items = append(items, map[string]interface{}{
+			"type":       dt.metricType,
+			"name":       dt.name,
+			"count":      count,
+			"percentage": pct,
 		})
 	}
 
 	return map[string]interface{}{
-		"date":   date,
-		"total":  total,
-		"devices": items,
+		"date":  date,
+		"total": total,
+		"types": items,
 	}, nil
 }
 
 // GetUserList 获取用户明细列表（分页）
-func (s *DashboardV2Service) GetUserList(date, listType string, page, pageSize int) (map[string]interface{}, error) {
+func (s *DashboardV2Service) GetUserList(date, listType string, page, pageSize int, scope *DataScope) (map[string]interface{}, error) {
 	date = defaultYesterday(date)
 	if listType == "" {
 		listType = model.ListTypeInactive
+	}
+	if listType == "not_login" {
+		listType = model.ListTypeNoLogin
+	}
+	if scope == nil {
+		scope = &DataScope{Unrestricted: true}
+	}
+	listFeatureIDs := activeFeatureIDs
+	if listType == model.ListTypeNoLogin {
+		listFeatureIDs = []int{90000031}
 	}
 	if page < 1 {
 		page = 1
@@ -344,7 +374,7 @@ func (s *DashboardV2Service) GetUserList(date, listType string, page, pageSize i
 	}
 	offset := (page - 1) * pageSize
 
-	users, total, err := s.statsRepo.GetUserList(date, listType, pageSize, offset)
+	users, total, err := s.statsRepo.GetScopedUserList(date, listType, listFeatureIDs, scope.DeptIDs, scope.Unrestricted, pageSize, offset)
 	if err != nil {
 		return nil, fmt.Errorf("查询用户列表失败: %w", err)
 	}
@@ -374,13 +404,23 @@ func (s *DashboardV2Service) GetUserList(date, listType string, page, pageSize i
 }
 
 // ExportUserListCSV 导出用户明细 CSV
-func (s *DashboardV2Service) ExportUserListCSV(date, listType string) ([][]string, error) {
+func (s *DashboardV2Service) ExportUserListCSV(date, listType string, scope *DataScope) ([][]string, error) {
 	date = defaultYesterday(date)
 	if listType == "" {
 		listType = model.ListTypeInactive
 	}
+	if listType == "not_login" {
+		listType = model.ListTypeNoLogin
+	}
+	if scope == nil {
+		scope = &DataScope{Unrestricted: true}
+	}
+	listFeatureIDs := activeFeatureIDs
+	if listType == model.ListTypeNoLogin {
+		listFeatureIDs = []int{90000031}
+	}
 
-	users, err := s.statsRepo.ExportUserList(date, listType)
+	users, _, err := s.statsRepo.GetScopedUserList(date, listType, listFeatureIDs, scope.DeptIDs, scope.Unrestricted, 100000, 0)
 	if err != nil {
 		return nil, fmt.Errorf("导出用户列表失败: %w", err)
 	}
@@ -394,8 +434,8 @@ func (s *DashboardV2Service) ExportUserListCSV(date, listType string) ([][]strin
 }
 
 // ExportOverviewCSV 导出总览指标 CSV
-func (s *DashboardV2Service) ExportOverviewCSV(date string) ([][]string, error) {
-	overview, err := s.GetOverview(date)
+func (s *DashboardV2Service) ExportOverviewCSV(date string, scope *DataScope) ([][]string, error) {
+	overview, err := s.GetOverview(date, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -417,13 +457,7 @@ func (s *DashboardV2Service) ExportOverviewCSV(date string) ([][]string, error) 
 		{"群活跃率", fmt.Sprintf("%v", overview["rate_group_active"])},
 		{"应用访问人数", fmt.Sprintf("%v", overview["app_access_user"])},
 		{"应用访问次数", fmt.Sprintf("%v", overview["app_access_count"])},
-		{"设备总数", fmt.Sprintf("%v", overview["device_total"])},
-	}
-
-	if ds, ok := overview["device_stats"].(map[string]int64); ok {
-		for name, count := range ds {
-			rows = append(rows, []string{name, strconv.FormatInt(count, 10)})
-		}
+		{"设备总数", fmt.Sprintf("%v", overview["devices"].(map[string]interface{})["total"])},
 	}
 
 	return rows, nil

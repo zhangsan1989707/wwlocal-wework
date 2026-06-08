@@ -13,6 +13,7 @@ export interface LoginResponse {
   token: string
   refresh_token: string
   username: string
+  role: 'super_admin' | 'dept_admin'
 }
 
 export interface HealthCheckResponse {
@@ -403,6 +404,8 @@ export interface DashboardV2Overview {
   registered: number
   activated: number
   not_activated: number
+  login_users: number
+  usage_users: number
   active: number
   inactive: number
   rate_activation: number  // permille
@@ -417,6 +420,10 @@ export interface DashboardV2Overview {
   devices: {
     total: number
     types: Array<{ type: string; name: string; count: number; percentage: number }>
+  }
+  scope?: {
+    role: string
+    dept_ids: number[]
   }
 }
 
@@ -441,4 +448,12 @@ export interface DashboardV2UserItem {
   name: string
   department: string
   extra?: Record<string, unknown>
+}
+
+export interface AdminUser {
+  id: number
+  username: string
+  role: 'super_admin' | 'dept_admin'
+  enabled: boolean
+  dept_ids: number[]
 }

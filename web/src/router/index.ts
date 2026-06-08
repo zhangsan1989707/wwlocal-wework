@@ -53,6 +53,11 @@ const router = createRouter({
       name: 'System',
       component: () => import('../components/SystemStatus.vue'),
     },
+    {
+      path: '/users',
+      name: 'Users',
+      component: () => import('../components/UserManagement.vue'),
+    },
   ],
 })
 

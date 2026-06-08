@@ -65,6 +65,7 @@ declare module 'vue' {
     RouterView: typeof import('vue-router')['RouterView']
     SystemStatus: typeof import('./src/components/SystemStatus.vue')['default']
     TrendChart: typeof import('./src/components/TrendChart.vue')['default']
+    UserManagement: typeof import('./src/components/UserManagement.vue')['default']
   }
   export interface GlobalDirectives {
     vLoading: typeof import('element-plus/es')['ElLoadingDirective']

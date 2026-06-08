@@ -11,27 +11,28 @@ import (
 
 // RouterDeps 路由依赖集合，避免 NewRouter 参数过多
 type RouterDeps struct {
-	Health        *handler.HealthHandler
-	Auth          *handler.AuthHandler
-	Log           *handler.LogHandler
-	Key           *handler.KeyHandler
-	Sync          *handler.SyncHandler
-	Scheduler     *handler.SchedulerHandler
-	Contact       *handler.ContactHandler
-	OperationLog  *handler.OperationLogHandler
-	AdminOperLog  *handler.AdminOperLogHandler
-	Dashboard     *handler.DashboardHandler
-	DashboardV2   *handler.DashboardV2Handler
-	Nightly       *handler.NightlyHandler
-	SyncHistory   *handler.SyncHistoryHandler
-	SyncFeature   *handler.SyncFeatureHandler
-	System        *handler.SystemHandler
-	Task          *handler.TaskHandler
-	OperationSvc  *service.OperationLogService
-	JWTSecret     string
-	RateLimiter   *appmw.RateLimiter
-	Origins       []string
-	MetricsIPs    []string
+	Health       *handler.HealthHandler
+	Auth         *handler.AuthHandler
+	Log          *handler.LogHandler
+	Key          *handler.KeyHandler
+	Sync         *handler.SyncHandler
+	Scheduler    *handler.SchedulerHandler
+	Contact      *handler.ContactHandler
+	OperationLog *handler.OperationLogHandler
+	AdminOperLog *handler.AdminOperLogHandler
+	Dashboard    *handler.DashboardHandler
+	DashboardV2  *handler.DashboardV2Handler
+	Nightly      *handler.NightlyHandler
+	SyncHistory  *handler.SyncHistoryHandler
+	SyncFeature  *handler.SyncFeatureHandler
+	System       *handler.SystemHandler
+	Task         *handler.TaskHandler
+	User         *handler.UserHandler
+	OperationSvc *service.OperationLogService
+	JWTSecret    string
+	RateLimiter  *appmw.RateLimiter
+	Origins      []string
+	MetricsIPs   []string
 }
 
 type Router struct {
@@ -66,6 +67,14 @@ func (r *Router) Setup(e *echo.Echo) {
 	api := e.Group("/api/v1", appmw.JWTAuth(d.JWTSecret))
 	{
 		api.PUT("/auth/password", d.Auth.ChangePassword)
+
+		users := api.Group("/users")
+		{
+			users.GET("", d.User.List)
+			users.POST("", d.User.Create)
+			users.PUT("/:id", d.User.Update)
+			users.PUT("/:id/password", d.User.ResetPassword)
+		}
 
 		operationLogs := api.Group("/operation-logs")
 		{
@@ -158,6 +167,9 @@ func (r *Router) Setup(e *echo.Echo) {
 			dashboardV2.GET("/devices", d.DashboardV2.GetDeviceStats)
 			dashboardV2.GET("/users", d.DashboardV2.GetUserList)
 			dashboardV2.GET("/export/overview", d.DashboardV2.ExportOverviewCSV)
+			dashboardV2.GET("/export/trend", d.DashboardV2.ExportTrendCSV)
+			dashboardV2.GET("/export/departments", d.DashboardV2.ExportDepartmentsCSV)
+			dashboardV2.GET("/export/devices", d.DashboardV2.ExportDevicesCSV)
 			dashboardV2.GET("/export/users", d.DashboardV2.ExportUserListCSV)
 		}
 
