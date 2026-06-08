@@ -19,6 +19,7 @@ import type {
   ContactSyncStatus,
   KeyVersion,
   SchedulerStatus,
+  NightlyJobStatus,
   SyncHistoryParams,
   SyncHistory,
   SyncFeature,
@@ -298,6 +299,15 @@ export const schedulerAPI = {
     api.post<ApiResponse<{ message: string }>>('/scheduler/sync', data) as unknown as ApiResult<{ message: string }>,
   setInterval: (data: { interval: string }) =>
     api.put<ApiResponse<{ message: string }>>('/scheduler/interval', data) as unknown as ApiResult<{ message: string }>,
+}
+
+export const nightlyAPI = {
+  status: () =>
+    api.get<ApiResponse<NightlyJobStatus>>('/nightly/status') as unknown as ApiResult<NightlyJobStatus>,
+  run: (date?: string) =>
+    api.post<ApiResponse<{ message: string; date: string }>>('/nightly/run', null, {
+      params: date ? { date } : undefined,
+    }) as unknown as ApiResult<{ message: string; date: string }>,
 }
 
 export const contactAPI = {

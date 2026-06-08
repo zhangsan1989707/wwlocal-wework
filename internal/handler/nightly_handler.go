@@ -42,7 +42,5 @@ func (h *NightlyHandler) Run(c echo.Context) error {
 }
 
 func (h *NightlyHandler) Status(c echo.Context) error {
-	return response.Success(c, map[string]interface{}{
-		"running": h.nightlySvc.IsJobRunning(),
-	})
+	return response.Success(c, h.nightlySvc.Status())
 }

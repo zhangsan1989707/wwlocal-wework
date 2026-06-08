@@ -90,6 +90,13 @@ func (r *DashboardStatsRepository) GetLatestDate() (string, error) {
 	return date, err
 }
 
+// GetLatestUserListDate 获取最新的用户明细预计算日期
+func (r *DashboardStatsRepository) GetLatestUserListDate() (string, error) {
+	var date string
+	err := r.DB.Raw("SELECT COALESCE(MAX(stat_date), '') FROM dashboard_daily_user_list").Scan(&date).Error
+	return date, err
+}
+
 // GetStatsWithAggregation 按时间粒度聚合指标（日/周/月/季）
 func (r *DashboardStatsRepository) GetStatsWithAggregation(metricType, startDate, endDate, granularity string, dimensionKey string) ([]AggregatedStat, error) {
 	dimFilter := ""

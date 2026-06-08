@@ -33,6 +33,16 @@ type NightlyJobService struct {
 	timer          *time.Timer
 }
 
+type NightlyJobStatus struct {
+	Enabled            bool   `json:"enabled"`
+	ScheduleTime       string `json:"schedule_time"`
+	LookbackDays       int    `json:"lookback_days"`
+	Running            bool   `json:"running"`
+	JobRunning         bool   `json:"job_running"`
+	LatestStatDate     string `json:"latest_stat_date"`
+	LatestUserListDate string `json:"latest_user_list_date"`
+}
+
 func NewNightlyJobService(
 	syncSvc *SyncService,
 	contactSyncSvc *ContactSyncService,
@@ -93,6 +103,31 @@ func (s *NightlyJobService) IsJobRunning() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.jobRunning
+}
+
+func (s *NightlyJobService) Status() NightlyJobStatus {
+	s.mu.Lock()
+	running := s.running
+	jobRunning := s.jobRunning
+	s.mu.Unlock()
+
+	lookback := s.cfg.Nightly.LookbackDays
+	if lookback <= 0 {
+		lookback = 1
+	}
+
+	latestStatDate, _ := s.statsRepo.GetLatestDate()
+	latestUserListDate, _ := s.statsRepo.GetLatestUserListDate()
+
+	return NightlyJobStatus{
+		Enabled:            s.cfg.Nightly.Enabled,
+		ScheduleTime:       fmt.Sprintf("%02d:%02d", s.cfg.Nightly.Hour, s.cfg.Nightly.Minute),
+		LookbackDays:       lookback,
+		Running:            running,
+		JobRunning:         jobRunning,
+		LatestStatDate:     latestStatDate,
+		LatestUserListDate: latestUserListDate,
+	}
 }
 
 // scheduleNext 计算距下次目标时间的时长并设置定时器。调用者须持有 s.mu

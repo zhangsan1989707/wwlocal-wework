@@ -206,6 +206,16 @@ export interface SchedulerStatus {
   next_run?: string
 }
 
+export interface NightlyJobStatus {
+  enabled: boolean
+  schedule_time: string
+  lookback_days: number
+  running: boolean
+  job_running: boolean
+  latest_stat_date?: string
+  latest_user_list_date?: string
+}
+
 export interface SyncHistoryParams extends PaginatedParams {
   sync_type?: string
 }

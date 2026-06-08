@@ -109,6 +109,58 @@
     <el-card class="sync-card">
       <template #header>
         <div class="card-header">
+          <span class="card-title">夜间分析任务</span>
+          <el-tag :type="nightlyStatus.job_running ? 'warning' : nightlyStatus.running ? 'success' : 'info'" size="large">
+            {{ nightlyStatus.job_running ? '分析中...' : nightlyStatus.running ? '已启用' : '未启用' }}
+          </el-tag>
+        </div>
+      </template>
+
+      <el-descriptions :column="3" border size="small">
+        <el-descriptions-item label="执行时间">
+          {{ nightlyStatus.schedule_time || '01:00' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="统计日期">
+          {{ nightlyStatus.lookback_days > 0 ? `每天回算 ${nightlyStatus.lookback_days} 天前` : '昨天' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="任务状态">
+          <el-tag :type="nightlyStatus.job_running ? 'warning' : nightlyStatus.running ? 'success' : 'info'" size="small">
+            {{ nightlyStatus.job_running ? '正在计算' : nightlyStatus.running ? '等待下次执行' : '未启用' }}
+          </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="最新指标日期">
+          {{ nightlyStatus.latest_stat_date || '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="最新用户明细日期">
+          {{ nightlyStatus.latest_user_list_date || '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="结果页面">
+          运营总览
+        </el-descriptions-item>
+      </el-descriptions>
+
+      <div class="scheduler-actions" style="margin-top: 16px">
+        <el-button
+          type="primary"
+          plain
+          size="large"
+          :loading="nightlyStatus.job_running"
+          :disabled="nightlyStatus.job_running"
+          @click="handleNightlyRun"
+        >
+          <el-icon><DataAnalysis /></el-icon>
+          重新计算昨天数据
+        </el-button>
+        <el-button size="large" @click="checkNightlyStatus">
+          <el-icon><Refresh /></el-icon>
+          刷新状态
+        </el-button>
+      </div>
+    </el-card>
+
+    <el-card class="sync-card">
+      <template #header>
+        <div class="card-header">
           <span class="card-title">按时间范围同步开放数据日志</span>
           <el-tag :type="syncStatus.running ? 'warning' : 'success'" size="large">
             {{ syncStatus.running ? '同步中...' : '空闲' }}
@@ -375,10 +427,10 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
-import { syncAPI, schedulerAPI, syncHistoryAPI, syncFeatureAPI, adminOperLogAPI, systemAPI } from '../api'
-import type { AdminOperLogStats, SchemaQualityInfo, SyncFeature, SyncHistory } from '../types/api'
+import { syncAPI, schedulerAPI, nightlyAPI, syncHistoryAPI, syncFeatureAPI, adminOperLogAPI, systemAPI } from '../api'
+import type { AdminOperLogStats, NightlyJobStatus, SchemaQualityInfo, SyncFeature, SyncHistory } from '../types/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { VideoPlay, VideoPause, Refresh, Clock } from '@element-plus/icons-vue'
+import { VideoPlay, VideoPause, Refresh, Clock, DataAnalysis } from '@element-plus/icons-vue'
 
 const dateRange = ref<[Date, Date] | null>(null)
 const activeShortcut = ref<string | null>(null)
@@ -395,6 +447,13 @@ const syncStatus = ref({
 const schedulerStatus = ref<any>({
   running: false,
   interval: '',
+})
+const nightlyStatus = ref<NightlyJobStatus>({
+  enabled: false,
+  schedule_time: '',
+  lookback_days: 1,
+  running: false,
+  job_running: false,
 })
 const startDelay = ref('1h')
 const syncAll = ref(true)
@@ -497,6 +556,7 @@ onMounted(async () => {
   await checkStatus()
   await checkAdminOperStatus()
   await checkSchedulerStatus()
+  await checkNightlyStatus()
   await loadSchemaQuality()
   await loadSyncHistory()
   if (syncStatus.value.running) startPolling()
@@ -611,6 +671,33 @@ const handleIncrementalSync = async () => {
     }
   } catch (err: any) {
     ElMessage.error(err.message || '增量同步启动失败')
+  }
+}
+
+const handleNightlyRun = async () => {
+  if (nightlyStatus.value.job_running) {
+    ElMessage.warning('夜间分析任务正在执行中')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      '将重新计算昨天的运营总览指标和用户明细，确定开始吗？',
+      '确认重新计算',
+      { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' }
+    )
+  } catch { return }
+
+  try {
+    const res = await nightlyAPI.run()
+    if (res.code === 0) {
+      ElMessage.success('夜间分析任务已启动')
+      await checkNightlyStatus()
+    } else {
+      ElMessage.error(res.msg || '夜间分析任务启动失败')
+    }
+  } catch (err: any) {
+    ElMessage.error(err.message || '夜间分析任务启动失败')
   }
 }
 
@@ -788,6 +875,17 @@ const checkSchedulerStatus = async () => {
     const res: any = await schedulerAPI.status()
     if (res.code === 0) {
       schedulerStatus.value = res.data
+    }
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+const checkNightlyStatus = async () => {
+  try {
+    const res = await nightlyAPI.status()
+    if (res.code === 0 && res.data) {
+      nightlyStatus.value = res.data
     }
   } catch (err) {
     console.error(err)
