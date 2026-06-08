@@ -26,53 +26,73 @@
             :default-active="activeMenu"
             :collapse="isCollapsed"
             :collapse-transition="false"
+            :default-openeds="defaultOpeneds"
+            unique-opened
             class="el-menu-vertical"
             @select="handleMenuSelect"
           >
-            <el-menu-item index="dashboard" title="总览看板">
-              <el-icon><DataLine /></el-icon>
-              <span>运营总览</span>
-            </el-menu-item>
-            <el-menu-item v-if="authStore.role === 'super_admin'" index="ops-dashboard" title="运维中心">
-              <el-icon><DataLine /></el-icon>
-              <span>运维中心</span>
-            </el-menu-item>
-            <el-menu-item index="query" title="日志审计">
-              <el-icon><Document /></el-icon>
-              <span>日志审计</span>
-            </el-menu-item>
-            <el-menu-item index="behavior" title="行为查询">
-              <el-icon><Search /></el-icon>
-              <span>行为查询</span>
-            </el-menu-item>
-            <el-menu-item index="contacts" title="通讯录">
-              <el-icon><User /></el-icon>
-              <span>通讯录</span>
-            </el-menu-item>
-            <el-menu-item v-if="authStore.role === 'super_admin'" index="sync" title="同步任务">
-              <el-icon><Refresh /></el-icon>
-              <span>同步任务</span>
-            </el-menu-item>
-            <el-menu-item index="adminoper" title="企微操作日志">
-              <el-icon><Setting /></el-icon>
-              <span>企微操作日志</span>
-            </el-menu-item>
-            <el-menu-item v-if="authStore.role === 'super_admin'" index="keys" title="密钥管理">
-              <el-icon><Key /></el-icon>
-              <span>密钥管理</span>
-            </el-menu-item>
-            <el-menu-item v-if="authStore.role === 'super_admin'" index="features" title="数据类型配置">
-              <el-icon><Setting /></el-icon>
-              <span>数据类型配置</span>
-            </el-menu-item>
-            <el-menu-item v-if="authStore.role === 'super_admin'" index="system" title="系统状态">
-              <el-icon><Monitor /></el-icon>
-              <span>系统状态</span>
-            </el-menu-item>
-            <el-menu-item v-if="authStore.role === 'super_admin'" index="users" title="用户权限">
-              <el-icon><User /></el-icon>
-              <span>用户权限</span>
-            </el-menu-item>
+            <el-sub-menu index="business">
+              <template #title>
+                <el-icon><DataLine /></el-icon>
+                <span>运营</span>
+              </template>
+              <el-menu-item index="dashboard" title="运营总览">
+                <el-icon><DataLine /></el-icon>
+                <span>运营总览</span>
+              </el-menu-item>
+              <el-menu-item index="query" title="日志审计">
+                <el-icon><Document /></el-icon>
+                <span>日志审计</span>
+              </el-menu-item>
+              <el-menu-item index="behavior" title="行为查询">
+                <el-icon><Search /></el-icon>
+                <span>行为查询</span>
+              </el-menu-item>
+              <el-menu-item index="contacts" title="通讯录">
+                <el-icon><User /></el-icon>
+                <span>通讯录</span>
+              </el-menu-item>
+            </el-sub-menu>
+            <el-sub-menu index="data-ops">
+              <template #title>
+                <el-icon><Refresh /></el-icon>
+                <span>数据运维</span>
+              </template>
+              <el-menu-item v-if="authStore.role === 'super_admin'" index="sync" title="同步任务">
+                <el-icon><Refresh /></el-icon>
+                <span>同步任务</span>
+              </el-menu-item>
+              <el-menu-item index="adminoper" title="企微操作日志">
+                <el-icon><Setting /></el-icon>
+                <span>企微操作日志</span>
+              </el-menu-item>
+              <el-menu-item v-if="authStore.role === 'super_admin'" index="features" title="数据类型配置">
+                <el-icon><Setting /></el-icon>
+                <span>数据类型配置</span>
+              </el-menu-item>
+            </el-sub-menu>
+            <el-sub-menu v-if="authStore.role === 'super_admin'" index="system-admin">
+              <template #title>
+                <el-icon><Monitor /></el-icon>
+                <span>系统管理</span>
+              </template>
+              <el-menu-item index="ops-dashboard" title="运维中心">
+                <el-icon><DataLine /></el-icon>
+                <span>运维中心</span>
+              </el-menu-item>
+              <el-menu-item index="system" title="系统状态">
+                <el-icon><Monitor /></el-icon>
+                <span>系统状态</span>
+              </el-menu-item>
+              <el-menu-item index="keys" title="密钥管理">
+                <el-icon><Key /></el-icon>
+                <span>密钥管理</span>
+              </el-menu-item>
+              <el-menu-item index="users" title="用户权限">
+                <el-icon><User /></el-icon>
+                <span>用户权限</span>
+              </el-menu-item>
+            </el-sub-menu>
           </el-menu>
         </el-aside>
         <el-main class="main-content">
@@ -121,6 +141,19 @@ const isCollapsed = ref(false)
 const activeMenu = computed(() => {
   const path = route.path.slice(1) || 'dashboard'
   return path
+})
+
+const defaultOpeneds = computed(() => {
+  const dataOpsMenus = ['sync', 'adminoper', 'features']
+  const systemAdminMenus = ['ops-dashboard', 'system', 'keys', 'users']
+
+  if (dataOpsMenus.includes(activeMenu.value)) {
+    return ['data-ops']
+  }
+  if (systemAdminMenus.includes(activeMenu.value)) {
+    return ['system-admin']
+  }
+  return ['business']
 })
 
 const handleMenuSelect = (index: string) => {
