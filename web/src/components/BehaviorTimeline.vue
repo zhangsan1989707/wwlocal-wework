@@ -85,6 +85,24 @@
         </div>
       </template>
 
+      <div v-if="featureSummaries.length > 0" class="query-scope">
+        <el-table :data="featureSummaries" size="small" stripe border max-height="220">
+          <el-table-column prop="feature_id" label="类型编号" width="110" align="center" />
+          <el-table-column prop="feature_name" label="日志类型" min-width="160" show-overflow-tooltip />
+          <el-table-column label="状态" width="110" align="center">
+            <template #default="{ row }">
+              <el-tag :type="featureStatusType(row.status)" size="small">
+                {{ featureStatusText(row.status) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="tables" label="月表" width="80" align="center" />
+          <el-table-column prop="queried_tables" label="已查表" width="80" align="center" />
+          <el-table-column prop="matched_rows" label="命中" width="80" align="center" />
+          <el-table-column prop="reason" label="说明" min-width="220" show-overflow-tooltip />
+        </el-table>
+      </div>
+
       <el-table
         :data="records"
         border
@@ -152,7 +170,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh } from '@element-plus/icons-vue'
 import { logAPI, syncFeatureAPI } from '../api'
-import type { BehaviorRecord, SyncFeature } from '../types/api'
+import type { BehaviorFeatureSummary, BehaviorRecord, SyncFeature } from '../types/api'
 
 interface FeatureItem {
   feature_id: number
@@ -171,6 +189,7 @@ const dateRange = ref<[Date, Date] | null>(null)
 const activeShortcut = ref<string | null>('最近7天')
 const features = ref<FeatureItem[]>([])
 const records = ref<BehaviorRecord[]>([])
+const featureSummaries = ref<BehaviorFeatureSummary[]>([])
 const total = ref(0)
 const loading = ref(false)
 
@@ -225,6 +244,7 @@ const handleQuery = async () => {
     })
     if (res.code === 0 && res.data) {
       records.value = res.data.data
+      featureSummaries.value = res.data.features || []
       total.value = res.data.total
     } else {
       ElMessage.error(res.msg || '查询失败')
@@ -242,6 +262,7 @@ const handleReset = () => {
   pagination.page = 1
   pagination.page_size = 50
   records.value = []
+  featureSummaries.value = []
   total.value = 0
   applyTimeShortcut(timeShortcuts[1])
 }
@@ -263,6 +284,18 @@ const formatSummary = (row: BehaviorRecord) => {
   if (parts.length > 0) return parts.join(' | ')
   const text = JSON.stringify(data)
   return text.length > 120 ? text.slice(0, 120) + '...' : text
+}
+
+const featureStatusType = (status: BehaviorFeatureSummary['status']) => {
+  if (status === 'queried') return 'success'
+  if (status === 'no_match') return 'warning'
+  return 'info'
+}
+
+const featureStatusText = (status: BehaviorFeatureSummary['status']) => {
+  if (status === 'queried') return '已命中'
+  if (status === 'no_match') return '未命中'
+  return '已跳过'
 }
 </script>
 
@@ -332,6 +365,10 @@ const formatSummary = (row: BehaviorRecord) => {
 .result-count {
   color: #4a5568;
   font-size: 13px;
+}
+
+.query-scope {
+  margin-bottom: 14px;
 }
 
 .pagination {

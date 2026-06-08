@@ -68,8 +68,19 @@ export interface BehaviorRecord {
   data: Record<string, unknown>
 }
 
+export interface BehaviorFeatureSummary {
+  feature_id: number
+  feature_name: string
+  status: 'queried' | 'skipped' | 'no_match'
+  reason?: string
+  tables: number
+  queried_tables: number
+  matched_rows: number
+}
+
 export interface BehaviorQueryResponse {
   data: BehaviorRecord[]
+  features: BehaviorFeatureSummary[]
   total: number
   page: number
   page_size: number

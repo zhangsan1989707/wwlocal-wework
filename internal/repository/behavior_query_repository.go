@@ -40,7 +40,7 @@ var behaviorFieldsByFeature = map[int][]behaviorField{
 	90000059: {{Column: "openid", Label: "用户"}},
 }
 
-func (r *LogRepository) QueryBehavior(featureIDs []int, openid string, startTime, endTime int64, page, pageSize int) ([]model.BehaviorRecord, int64, error) {
+func (r *LogRepository) QueryBehavior(featureIDs []int, openid string, startTime, endTime int64, page, pageSize int) ([]model.BehaviorRecord, []model.BehaviorFeatureSummary, int64, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -50,23 +50,61 @@ func (r *LogRepository) QueryBehavior(featureIDs []int, openid string, startTime
 
 	months := r.monthsBetween(startTime, endTime)
 	var all []model.BehaviorRecord
+	summaries := make([]model.BehaviorFeatureSummary, 0, len(featureIDs))
 
 	for _, featureID := range featureIDs {
+		summary := model.BehaviorFeatureSummary{
+			FeatureID: featureID,
+			Status:    "skipped",
+		}
 		fields := behaviorFieldsByFeature[featureID]
 		if len(fields) == 0 {
+			summary.Reason = "暂不支持行为查询"
+			summaries = append(summaries, summary)
 			continue
 		}
+
+		var featureMatched int64
 		for _, month := range months {
 			tableName := r.GetTableName(featureID, month)
 			if !r.TableExists(tableName) {
 				continue
 			}
-			rows, err := r.queryBehaviorTable(tableName, featureID, fields, openid, startTime, endTime)
+			summary.Tables++
+
+			availableFields, missingFields, err := r.availableBehaviorFields(tableName, fields)
 			if err != nil {
-				return nil, 0, err
+				return nil, nil, 0, err
 			}
+			if len(availableFields) == 0 {
+				if summary.Reason == "" {
+					summary.Reason = fmt.Sprintf("结构化字段缺失: %s", strings.Join(missingFields, ", "))
+				}
+				continue
+			}
+
+			rows, err := r.queryBehaviorTable(tableName, featureID, availableFields, openid, startTime, endTime)
+			if err != nil {
+				return nil, nil, 0, err
+			}
+			summary.QueriedTables++
+			featureMatched += int64(len(rows))
 			all = append(all, rows...)
 		}
+		summary.MatchedRows = featureMatched
+		if summary.QueriedTables > 0 {
+			if featureMatched > 0 {
+				summary.Status = "queried"
+			} else {
+				summary.Status = "no_match"
+				summary.Reason = "已查询，未命中该 OpenID"
+			}
+		} else if summary.Tables == 0 {
+			summary.Reason = "时间范围内无月表"
+		} else if summary.Reason == "" {
+			summary.Reason = "时间范围内无可查询结构化字段"
+		}
+		summaries = append(summaries, summary)
 	}
 
 	sort.Slice(all, func(i, j int) bool {
@@ -76,13 +114,13 @@ func (r *LogRepository) QueryBehavior(featureIDs []int, openid string, startTime
 	total := int64(len(all))
 	start := (page - 1) * pageSize
 	if start >= len(all) {
-		return []model.BehaviorRecord{}, total, nil
+		return []model.BehaviorRecord{}, summaries, total, nil
 	}
 	end := start + pageSize
 	if end > len(all) {
 		end = len(all)
 	}
-	return all[start:end], total, nil
+	return all[start:end], summaries, total, nil
 }
 
 func (r *LogRepository) queryBehaviorTable(tableName string, featureID int, fields []behaviorField, openid string, startTime, endTime int64) ([]model.BehaviorRecord, error) {
@@ -122,6 +160,23 @@ func (r *LogRepository) queryBehaviorTable(tableName string, featureID int, fiel
 		})
 	}
 	return records, nil
+}
+
+func (r *LogRepository) availableBehaviorFields(tableName string, fields []behaviorField) ([]behaviorField, []string, error) {
+	columns, err := r.tableColumnSet(tableName)
+	if err != nil {
+		return nil, nil, err
+	}
+	var available []behaviorField
+	var missing []string
+	for _, field := range fields {
+		if columns[field.Column] {
+			available = append(available, field)
+		} else {
+			missing = append(missing, field.Column)
+		}
+	}
+	return available, missing, nil
 }
 
 func matchedFields(row map[string]interface{}, fields []behaviorField, openid string) []model.MatchedField {

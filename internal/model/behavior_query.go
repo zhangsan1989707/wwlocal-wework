@@ -24,9 +24,20 @@ type BehaviorRecord struct {
 	Data          map[string]interface{} `json:"data"`
 }
 
+type BehaviorFeatureSummary struct {
+	FeatureID     int    `json:"feature_id"`
+	FeatureName   string `json:"feature_name"`
+	Status        string `json:"status"`
+	Reason        string `json:"reason,omitempty"`
+	Tables        int    `json:"tables"`
+	QueriedTables int    `json:"queried_tables"`
+	MatchedRows   int64  `json:"matched_rows"`
+}
+
 type BehaviorQueryResult struct {
-	Total    int64            `json:"total"`
-	Page     int              `json:"page"`
-	PageSize int              `json:"page_size"`
-	Data     []BehaviorRecord `json:"data"`
+	Total    int64                    `json:"total"`
+	Page     int                      `json:"page"`
+	PageSize int                      `json:"page_size"`
+	Features []BehaviorFeatureSummary `json:"features"`
+	Data     []BehaviorRecord         `json:"data"`
 }

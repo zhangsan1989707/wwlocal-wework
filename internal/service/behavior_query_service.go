@@ -52,17 +52,21 @@ func (s *BehaviorQueryService) Query(req *model.BehaviorQueryRequest) (*model.Be
 		}
 	}
 
-	rows, total, err := s.logRepo.QueryBehavior(featureIDs, req.OpenID, req.StartTime, req.EndTime, req.Page, req.PageSize)
+	rows, summaries, total, err := s.logRepo.QueryBehavior(featureIDs, req.OpenID, req.StartTime, req.EndTime, req.Page, req.PageSize)
 	if err != nil {
 		return nil, err
 	}
 	for i := range rows {
 		rows[i].FeatureName = s.GetFeatureName(rows[i].FeatureID)
 	}
+	for i := range summaries {
+		summaries[i].FeatureName = s.GetFeatureName(summaries[i].FeatureID)
+	}
 	return &model.BehaviorQueryResult{
 		Total:    total,
 		Page:     req.Page,
 		PageSize: req.PageSize,
+		Features: summaries,
 		Data:     rows,
 	}, nil
 }
