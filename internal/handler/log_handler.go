@@ -19,8 +19,18 @@ import (
 const logQueryTimeout = 25 * time.Second
 
 type LogHandler struct {
-	querySvc *service.QueryService
+	querySvc logQueryService
 	userSvc  dataScopeChecker
+}
+
+type logQueryService interface {
+	QueryContext(ctx context.Context, req *model.QueryRequest) (*model.QueryResult, error)
+	QueryByCursorContext(ctx context.Context, req *model.QueryRequest) (*model.CursorQueryResult, error)
+	PrepareExportCSV(req *model.QueryRequest) error
+	ExportCSVStreamContext(ctx context.Context, req *model.QueryRequest, writeRow func(map[string]interface{}) error) error
+	GetFeatureIDs() []int
+	GetFeatureName(featureID int) string
+	GetFieldPaths() []string
 }
 
 type dataScopeChecker interface {
@@ -37,12 +47,8 @@ func (h *LogHandler) Query(c echo.Context) error {
 		return response.Error(c, 400, "invalid request body")
 	}
 
-	if len(req.FeatureIDs) == 0 {
-		return response.Error(c, 400, "feature_ids is required")
-	}
-
-	if req.StartTime <= 0 || req.EndTime <= 0 {
-		return response.Error(c, 400, "start_time and end_time are required")
+	if err := validateLogQueryRequest(&req, maxLogPageSize); err != nil {
+		return response.Error(c, 400, err.Error())
 	}
 
 	if err := h.checkQueryScope(c, &req); err != nil {
@@ -93,12 +99,8 @@ func (h *LogHandler) QueryByCursor(c echo.Context) error {
 		return response.Error(c, 400, "invalid request body")
 	}
 
-	if len(req.FeatureIDs) == 0 {
-		return response.Error(c, 400, "feature_ids is required")
-	}
-
-	if req.StartTime <= 0 || req.EndTime <= 0 {
-		return response.Error(c, 400, "start_time and end_time are required")
+	if err := validateLogQueryRequest(&req, maxLogPageSize); err != nil {
+		return response.Error(c, 400, err.Error())
 	}
 
 	if err := h.checkQueryScope(c, &req); err != nil {
@@ -121,12 +123,8 @@ func (h *LogHandler) ExportCSV(c echo.Context) error {
 		return response.Error(c, 400, "invalid request body")
 	}
 
-	if len(req.FeatureIDs) == 0 {
-		return response.Error(c, 400, "feature_ids is required")
-	}
-
-	if req.StartTime <= 0 || req.EndTime <= 0 {
-		return response.Error(c, 400, "start_time and end_time are required")
+	if err := validateLogQueryRequest(&req, maxExportPageSize); err != nil {
+		return response.Error(c, 400, err.Error())
 	}
 
 	if err := h.checkQueryScope(c, &req); err != nil {
