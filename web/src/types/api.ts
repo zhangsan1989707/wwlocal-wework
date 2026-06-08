@@ -346,6 +346,24 @@ export interface SystemStatus {
     index_size: string
     total_size: string
   }>
+  schema_quality?: SchemaQualityInfo[]
+}
+
+export interface SchemaFieldCoverage {
+  name: string
+  indexed: boolean
+  present: boolean
+  filled_rows: number
+  coverage_rate: number
+}
+
+export interface SchemaQualityInfo {
+  feature_id: number
+  structured_supported: boolean
+  behavior_supported: boolean
+  tables: number
+  rows: number
+  fields: SchemaFieldCoverage[]
 }
 
 export interface TaskInfo {

@@ -90,6 +90,55 @@
           </el-table>
         </div>
 
+        <!-- 结构化字段质量 -->
+        <div class="section" v-if="schemaQualityData.length > 0">
+          <h4 class="section-title">结构化字段质量</h4>
+          <el-table :data="schemaQualityData" stripe size="small" max-height="420">
+            <el-table-column prop="feature_id" label="日志类型编号" width="130" align="center" />
+            <el-table-column label="结构化" width="110" align="center">
+              <template #default="{ row }">
+                <el-tag :type="row.structured_supported ? 'success' : 'info'" size="small">
+                  {{ row.structured_supported ? '已定义' : '未定义' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="行为查询" width="110" align="center">
+              <template #default="{ row }">
+                <el-tag :type="row.behavior_supported ? 'success' : 'info'" size="small">
+                  {{ row.behavior_supported ? '支持' : '仅原文' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="tables" label="月表数" width="90" align="center" />
+            <el-table-column label="记录数" width="110" align="center">
+              <template #default="{ row }">
+                {{ formatNumber(row.rows) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="字段覆盖" min-width="360">
+              <template #default="{ row }">
+                <div v-if="row.fields.length > 0" class="field-coverage">
+                  <el-tooltip
+                    v-for="field in row.fields"
+                    :key="field.name"
+                    placement="top"
+                    :content="`${field.name}: ${field.present ? formatPercent(field.coverage_rate) : '字段缺失'}，非空 ${formatNumber(field.filled_rows)} 行`"
+                  >
+                    <el-tag
+                      size="small"
+                      :type="fieldTagType(field)"
+                      effect="light"
+                    >
+                      {{ field.name }} {{ field.present ? formatPercent(field.coverage_rate) : '缺失' }}
+                    </el-tag>
+                  </el-tooltip>
+                </div>
+                <span v-else class="muted-text">暂无结构化字段</span>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+
         <!-- 数据库表大小 -->
         <div class="section" v-if="status.table_sizes?.length > 0">
           <h4 class="section-title">数据表存储</h4>
@@ -122,6 +171,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { systemAPI } from '../api'
+import type { SchemaFieldCoverage } from '../types/api'
 
 const status = ref<any>(null)
 const loading = ref(false)
@@ -132,6 +182,10 @@ const coverageData = computed(() => {
     feature_id: featureId,
     ...info,
   }))
+})
+
+const schemaQualityData = computed(() => {
+  return status.value?.schema_quality || []
 })
 
 const loadStatus = async () => {
@@ -180,6 +234,17 @@ const formatBytes = (b: string | number) => {
   return `${(bytes / 1073741824).toFixed(1)} GB`
 }
 
+const formatPercent = (rate: number) => {
+  return `${Math.round((rate || 0) * 100)}%`
+}
+
+const fieldTagType = (field: SchemaFieldCoverage) => {
+  if (!field.present) return 'danger'
+  if (field.coverage_rate >= 0.8) return 'success'
+  if (field.coverage_rate > 0) return 'warning'
+  return 'info'
+}
+
 onMounted(() => {
   loadStatus()
 })
@@ -213,6 +278,17 @@ onMounted(() => {
   font-weight: 600;
   color: #1a365d;
   margin: 0 0 12px 0;
+}
+
+.field-coverage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.muted-text {
+  color: #909399;
+  font-size: 12px;
 }
 
 :deep(.el-card__header) {

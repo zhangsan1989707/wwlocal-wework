@@ -3,6 +3,7 @@ package repository
 import (
 	"fmt"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,23 @@ type TableSizeInfo struct {
 	RowCount  int64  `gorm:"column:TABLE_ROWS"`
 	DataSize  string `gorm:"column:DATA_LENGTH"`
 	IndexSize string `gorm:"column:INDEX_LENGTH"`
+}
+
+type StructuredFieldCoverage struct {
+	Name         string  `json:"name"`
+	Indexed      bool    `json:"indexed"`
+	Present      bool    `json:"present"`
+	FilledRows   int64   `json:"filled_rows"`
+	CoverageRate float64 `json:"coverage_rate"`
+}
+
+type SchemaQualityInfo struct {
+	FeatureID           int                       `json:"feature_id"`
+	StructuredSupported bool                      `json:"structured_supported"`
+	BehaviorSupported   bool                      `json:"behavior_supported"`
+	Tables              int                       `json:"tables"`
+	Rows                int64                     `json:"rows"`
+	Fields              []StructuredFieldCoverage `json:"fields"`
 }
 
 func (r *LogRepository) SampleParsedJSON(featureIDs []int, limit int) []string {
@@ -88,6 +106,159 @@ func (r *LogRepository) GetTableSizes(limit int) ([]TableSizeInfo, error) {
 		LIMIT ?
 	`, limit).Scan(&tables).Error
 	return tables, err
+}
+
+func (r *LogRepository) GetSchemaQuality() ([]SchemaQualityInfo, error) {
+	featureIDs, err := r.schemaQualityFeatureIDs()
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]SchemaQualityInfo, 0, len(featureIDs))
+	for _, featureID := range featureIDs {
+		schema, hasSchema := logSchemas[featureID]
+		info := SchemaQualityInfo{
+			FeatureID:           featureID,
+			StructuredSupported: hasSchema,
+			BehaviorSupported:   len(behaviorFieldsByFeature[featureID]) > 0,
+		}
+
+		if hasSchema {
+			info.Fields = make([]StructuredFieldCoverage, 0, len(schema.Columns))
+			for _, col := range schema.Columns {
+				info.Fields = append(info.Fields, StructuredFieldCoverage{
+					Name:    col.Name,
+					Indexed: col.Index,
+				})
+			}
+		}
+
+		tables, err := r.featureLogTables(featureID)
+		if err != nil {
+			return nil, err
+		}
+		info.Tables = len(tables)
+
+		for _, tableName := range tables {
+			var rows int64
+			if err := r.DB.Raw(fmt.Sprintf("SELECT COUNT(*) FROM %s", quoteIdentifier(tableName))).Scan(&rows).Error; err != nil {
+				return nil, err
+			}
+			info.Rows += rows
+
+			if !hasSchema || rows == 0 {
+				continue
+			}
+
+			columns, err := r.tableColumnSet(tableName)
+			if err != nil {
+				return nil, err
+			}
+			for i, col := range schema.Columns {
+				if !columns[col.Name] {
+					continue
+				}
+				info.Fields[i].Present = true
+
+				var filled int64
+				sql := fmt.Sprintf(
+					"SELECT COUNT(*) FROM %s WHERE %s IS NOT NULL AND CAST(%s AS CHAR) != ''",
+					quoteIdentifier(tableName),
+					quoteIdentifier(col.Name),
+					quoteIdentifier(col.Name),
+				)
+				if err := r.DB.Raw(sql).Scan(&filled).Error; err != nil {
+					return nil, err
+				}
+				info.Fields[i].FilledRows += filled
+			}
+		}
+
+		if info.Rows > 0 {
+			for i := range info.Fields {
+				info.Fields[i].CoverageRate = float64(info.Fields[i].FilledRows) / float64(info.Rows)
+			}
+		}
+		result = append(result, info)
+	}
+	return result, nil
+}
+
+func (r *LogRepository) schemaQualityFeatureIDs() ([]int, error) {
+	ids := make(map[int]struct{})
+	for featureID := range logSchemas {
+		ids[featureID] = struct{}{}
+	}
+	for featureID := range behaviorFieldsByFeature {
+		ids[featureID] = struct{}{}
+	}
+
+	var tableNames []string
+	if err := r.DB.Raw(`
+		SELECT TABLE_NAME
+		FROM information_schema.TABLES
+		WHERE TABLE_SCHEMA = DATABASE()
+		AND TABLE_NAME LIKE ?
+	`, "log\\_%").Scan(&tableNames).Error; err != nil {
+		return nil, err
+	}
+	for _, tableName := range tableNames {
+		featureID, ok := featureIDFromLogTable(tableName)
+		if ok {
+			ids[featureID] = struct{}{}
+		}
+	}
+
+	result := make([]int, 0, len(ids))
+	for featureID := range ids {
+		result = append(result, featureID)
+	}
+	sort.Ints(result)
+	return result, nil
+}
+
+func (r *LogRepository) featureLogTables(featureID int) ([]string, error) {
+	var tableNames []string
+	if err := r.DB.Raw(`
+		SELECT TABLE_NAME
+		FROM information_schema.TABLES
+		WHERE TABLE_SCHEMA = DATABASE()
+		AND TABLE_NAME LIKE ?
+		ORDER BY TABLE_NAME DESC
+	`, fmt.Sprintf("log_%d_%%", featureID)).Scan(&tableNames).Error; err != nil {
+		return nil, err
+	}
+	return tableNames, nil
+}
+
+func (r *LogRepository) tableColumnSet(tableName string) (map[string]bool, error) {
+	var columns []string
+	if err := r.DB.Raw(`
+		SELECT COLUMN_NAME
+		FROM information_schema.COLUMNS
+		WHERE TABLE_SCHEMA = DATABASE()
+		AND TABLE_NAME = ?
+	`, tableName).Scan(&columns).Error; err != nil {
+		return nil, err
+	}
+	result := make(map[string]bool, len(columns))
+	for _, col := range columns {
+		result[col] = true
+	}
+	return result, nil
+}
+
+func featureIDFromLogTable(tableName string) (int, bool) {
+	parts := strings.Split(tableName, "_")
+	if len(parts) < 3 || parts[0] != "log" {
+		return 0, false
+	}
+	featureID, err := strconv.Atoi(parts[1])
+	return featureID, err == nil
+}
+
+func quoteIdentifier(name string) string {
+	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
 }
 
 func (r *LogRepository) CleanupOldData(featureID int, beforeMonth time.Time) (int64, error) {

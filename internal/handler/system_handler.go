@@ -66,6 +66,7 @@ func (h *SystemHandler) GetStatus(c echo.Context) error {
 			"index_bytes": t.IndexSize,
 		})
 	}
+	schemaQuality, schemaQualityErr := h.logRepo.GetSchemaQuality()
 
 	keyStatus := make(map[string]interface{})
 	activeKey, _ := h.keyRepo.GetActive()
@@ -91,6 +92,10 @@ func (h *SystemHandler) GetStatus(c echo.Context) error {
 	status["health"] = health
 	status["sync_coverage"] = coverage
 	status["table_sizes"] = tableSizes
+	status["schema_quality"] = schemaQuality
+	if schemaQualityErr != nil {
+		status["schema_quality_error"] = schemaQualityErr.Error()
+	}
 	status["key_status"] = keyStatus
 	status["contacts"] = contactInfo
 
