@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"time"
 
@@ -155,34 +156,35 @@ func (s *DashboardV2Service) GetMultiTrend(metricTypes []string, startDate, endD
 	granularity = defaultGranularity(granularity)
 	startDate, endDate = resolveDateRange(startDate, endDate, granularity)
 
-	// 用第一个指标获取日期轴
-	firstResults, err := s.statsRepo.GetStatsWithAggregation(metricTypes[0], startDate, endDate, granularity, "")
-	if err != nil {
-		return nil, fmt.Errorf("查询趋势数据失败: %w", err)
-	}
-	dates := make([]string, 0, len(firstResults))
-	for _, r := range firstResults {
-		dates = append(dates, r.Period)
-	}
-
-	seriesMap := make(map[string][]int64, len(metricTypes))
-
-	// 处理第一个指标
-	values0 := make([]int64, 0, len(firstResults))
-	for _, r := range firstResults {
-		values0 = append(values0, r.Value)
-	}
-	seriesMap[metricTypes[0]] = values0
-
-	// 处理剩余指标
-	for _, mt := range metricTypes[1:] {
+	// 收集所有指标的结果，合并日期轴
+	allResults := make(map[string]map[string]int64, len(metricTypes))
+	dateSet := make(map[string]bool)
+	for _, mt := range metricTypes {
 		results, err := s.statsRepo.GetStatsWithAggregation(mt, startDate, endDate, granularity, "")
 		if err != nil {
 			return nil, fmt.Errorf("查询指标 %s 趋势失败: %w", mt, err)
 		}
-		vals := make([]int64, 0, len(results))
+		valueMap := make(map[string]int64, len(results))
 		for _, r := range results {
-			vals = append(vals, r.Value)
+			valueMap[r.Period] = r.Value
+			dateSet[r.Period] = true
+		}
+		allResults[mt] = valueMap
+	}
+
+	// 排序日期轴
+	dates := make([]string, 0, len(dateSet))
+	for d := range dateSet {
+		dates = append(dates, d)
+	}
+	sort.Strings(dates)
+
+	// 按统一日期轴填充各指标数据
+	seriesMap := make(map[string][]int64, len(metricTypes))
+	for _, mt := range metricTypes {
+		vals := make([]int64, len(dates))
+		for i, d := range dates {
+			vals[i] = allResults[mt][d]
 		}
 		seriesMap[mt] = vals
 	}

@@ -187,8 +187,12 @@ func (r *DashboardStatsRepository) ExportUserList(statDate, listType string) ([]
 
 // DeleteByDate 删除指定日期的预计算数据
 func (r *DashboardStatsRepository) DeleteByDate(statDate string) error {
-	r.DB.Where("stat_date = ?", statDate).Delete(&model.DashboardDailyStat{})
-	r.DB.Where("stat_date = ?", statDate).Delete(&model.DashboardDailyUserList{})
+	if err := r.DB.Where("stat_date = ?", statDate).Delete(&model.DashboardDailyStat{}).Error; err != nil {
+		return fmt.Errorf("delete daily stats: %w", err)
+	}
+	if err := r.DB.Where("stat_date = ?", statDate).Delete(&model.DashboardDailyUserList{}).Error; err != nil {
+		return fmt.Errorf("delete user list: %w", err)
+	}
 	return nil
 }
 

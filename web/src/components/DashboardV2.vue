@@ -17,6 +17,8 @@
       <el-button type="primary" :loading="loading" @click="refreshData">刷新</el-button>
     </div>
 
+    <el-alert v-if="!loading && noData" title="暂无数据" description="夜间预计算任务尚未运行，请等待凌晨1点自动执行或手动触发。" type="info" show-icon :closable="false" style="margin-bottom: 16px;" />
+
     <!-- Section 1: KPI Cards (top row) -->
     <div class="kpi-row">
       <el-card shadow="hover" class="kpi-card">
@@ -222,7 +224,10 @@ const userLoading = ref(false)
 function getYesterday(): string {
   const d = new Date()
   d.setDate(d.getDate() - 1)
-  return d.toISOString().slice(0, 10)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 function formatNum(n?: number): string {
@@ -240,6 +245,12 @@ const rateActiveClass = computed(() => {
   const v = overview.value?.rate_active
   if (v === undefined) return ''
   return v >= 500 ? 'kpi-good' : v >= 200 ? '' : 'kpi-bad'
+})
+
+const noData = computed(() => {
+  const o = overview.value
+  if (!o) return true
+  return o.registered === 0 && o.active === 0 && o.msg_count === 0
 })
 
 // --- Data fetching ---

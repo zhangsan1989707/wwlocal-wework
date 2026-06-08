@@ -27,6 +27,7 @@ type NightlyJobService struct {
 	logRepo        *repository.LogRepository
 	cfg            *config.Config
 	running        bool
+	jobRunning     bool // 当前任务是否正在执行
 	mu             sync.Mutex
 	stopCh         chan struct{}
 	timer          *time.Timer
@@ -87,6 +88,13 @@ func (s *NightlyJobService) IsRunning() bool {
 	return s.running
 }
 
+// IsJobRunning 返回当前是否有任务正在执行
+func (s *NightlyJobService) IsJobRunning() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.jobRunning
+}
+
 // scheduleNext 计算距下次目标时间的时长并设置定时器。调用者须持有 s.mu
 func (s *NightlyJobService) scheduleNext() {
 	d := s.durationToNext()
@@ -119,13 +127,18 @@ func (s *NightlyJobService) durationToNext() time.Duration {
 // RunOnce 手动触发一次夜间任务，statDate 格式为 "2006-01-02"
 func (s *NightlyJobService) RunOnce(statDate string) {
 	s.mu.Lock()
-	if s.running {
-		s.stopCh = make(chan struct{})
+	if s.jobRunning {
+		s.mu.Unlock()
+		return
 	}
+	s.jobRunning = true
 	s.mu.Unlock()
 
 	go func() {
 		defer func() {
+			s.mu.Lock()
+			s.jobRunning = false
+			s.mu.Unlock()
 			if r := recover(); r != nil {
 				slog.Error(fmt.Sprintf("nightly job RunOnce panic: %v\n%s", r, debug.Stack()))
 			}
@@ -136,7 +149,19 @@ func (s *NightlyJobService) RunOnce(statDate string) {
 
 // run 按配置的 lookback_days 计算目标日期并执行
 func (s *NightlyJobService) run() {
+	s.mu.Lock()
+	if s.jobRunning {
+		s.mu.Unlock()
+		slog.Warn("nightly job: skipped, previous job still running")
+		return
+	}
+	s.jobRunning = true
+	s.mu.Unlock()
+
 	defer func() {
+		s.mu.Lock()
+		s.jobRunning = false
+		s.mu.Unlock()
 		if r := recover(); r != nil {
 			slog.Error(fmt.Sprintf("nightly job panic: %v\n%s", r, debug.Stack()))
 		}
@@ -247,8 +272,8 @@ func (s *NightlyJobService) computeGlobalStats(statDate string) ([]model.Dashboa
 
 	// -- 激活率 / 活跃率 (permille) --
 	if registered > 0 {
-		stats = append(stats, s.stat(statDate, model.MetricRateActivation, "*", activated*10000/registered))
-		stats = append(stats, s.stat(statDate, model.MetricRateActive, "*", active*10000/registered))
+		stats = append(stats, s.stat(statDate, model.MetricRateActivation, "*", activated*1000/registered))
+		stats = append(stats, s.stat(statDate, model.MetricRateActive, "*", active*1000/registered))
 	}
 
 	// -- 消息量 & 发送人数 --
@@ -288,7 +313,7 @@ func (s *NightlyJobService) computeGlobalStats(statDate string) ([]model.Dashboa
 	if denomGroup < 1 {
 		denomGroup = 1
 	}
-	stats = append(stats, s.stat(statDate, model.MetricRateGroupActive, "*", groupActive*10000/denomGroup))
+	stats = append(stats, s.stat(statDate, model.MetricRateGroupActive, "*", groupActive*1000/denomGroup))
 
 	// -- 设备分布 --
 	deviceStats, err := s.statsRepo.GetDeviceStats(statDate)
@@ -356,7 +381,7 @@ func (s *NightlyJobService) computeDeptStats(statDate string) ([]model.Dashboard
 		stats = append(stats, s.stat(statDate, model.MetricUserActive, dimKey, deptActive))
 		if registered > 0 {
 			stats = append(stats, s.stat(statDate, model.MetricUserInactive, dimKey, registered-deptActive))
-			stats = append(stats, s.stat(statDate, model.MetricRateActive, dimKey, deptActive*10000/registered))
+			stats = append(stats, s.stat(statDate, model.MetricRateActive, dimKey, deptActive*1000/registered))
 		}
 	}
 
@@ -382,20 +407,29 @@ func (s *NightlyJobService) deptActiveCount(deptID int, statDate string) (int64,
 	return count, err
 }
 
-// cumulativeGroupCreated 获取截至 statDate 的累计创建群数
+// cumulativeGroupCreated 获取截至 statDate 的累计创建群数（遍历所有月表）
 func (s *NightlyJobService) cumulativeGroupCreated(statDate string) (int64, error) {
 	t, err := time.Parse("2006-01-02", statDate)
 	if err != nil {
 		return 0, err
 	}
-	tableName := s.logRepo.GetTableName(90000038, t)
-	if !s.logRepo.TableExists(tableName) {
-		return 0, nil
+	var total int64
+	for i := 0; i < 12; i++ {
+		month := t.AddDate(0, -i, 0)
+		month = time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, month.Location())
+		tableName := s.logRepo.GetTableName(90000038, month)
+		if !s.logRepo.TableExists(tableName) {
+			continue
+		}
+		var count int64
+		sql := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE DATE(FROM_UNIXTIME(log_time)) <= ?", tableName)
+		if err := s.statsRepo.DB.Raw(sql, statDate).Scan(&count).Error; err != nil {
+			slog.Warn(fmt.Sprintf("cumulativeGroupCreated: query %s failed: %v", tableName, err))
+			continue
+		}
+		total += count
 	}
-	var count int64
-	sql := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE DATE(FROM_UNIXTIME(log_time)) <= ?", tableName)
-	err = s.statsRepo.DB.Raw(sql, statDate).Scan(&count).Error
-	return count, err
+	return total, nil
 }
 
 // buildInactiveUserList 构建不活跃用户列表：注册(status=1)但当日无活跃记录
