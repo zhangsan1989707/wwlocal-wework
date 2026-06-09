@@ -65,6 +65,9 @@ func validateSubmitTaskRequest(req *SubmitTaskRequest) error {
 			return fmt.Errorf("feature_ids must contain positive integers")
 		}
 	}
+	if len(req.FeatureIDs) > 0 && req.Type != model.TaskTypeLogSync {
+		return fmt.Errorf("feature_ids can only be used with log_sync tasks")
+	}
 
 	if req.StartTime < 0 || req.EndTime < 0 {
 		return fmt.Errorf("start_time and end_time must be non-negative")

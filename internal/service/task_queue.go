@@ -225,9 +225,7 @@ func (t *TaskQueueService) RetryTask(taskID string) error {
 	}
 
 	// 重新提交
-	task.Status = model.TaskStatusPending
-	task.Error = ""
-	task.UpdatedAt = time.Now()
+	resetTaskForRetry(task)
 	if err := t.saveTask(task); err != nil {
 		return err
 	}
@@ -247,6 +245,15 @@ func (t *TaskQueueService) RetryTask(taskID string) error {
 		},
 	}).Result()
 	return err
+}
+
+func resetTaskForRetry(task *model.SyncTask) {
+	task.Status = model.TaskStatusPending
+	task.Progress = 0
+	task.Total = 0
+	task.Error = ""
+	task.Result = nil
+	task.UpdatedAt = time.Now()
 }
 
 func sortAndLimitTasks(tasks []*model.SyncTask, limit int) []*model.SyncTask {

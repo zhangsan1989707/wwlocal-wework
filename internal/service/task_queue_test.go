@@ -63,3 +63,31 @@ func TestTaskPayloadRejectsInvalidPayload(t *testing.T) {
 		}
 	}
 }
+
+func TestResetTaskForRetryClearsFailedState(t *testing.T) {
+	task := &model.SyncTask{
+		Status:    model.TaskStatusFailed,
+		Progress: 8,
+		Total:    10,
+		Error:    "failed",
+		Result:   map[string]interface{}{"old": true},
+	}
+
+	resetTaskForRetry(task)
+
+	if task.Status != model.TaskStatusPending {
+		t.Fatalf("status = %s, want pending", task.Status)
+	}
+	if task.Progress != 0 || task.Total != 0 {
+		t.Fatalf("progress = %d/%d, want 0/0", task.Progress, task.Total)
+	}
+	if task.Error != "" {
+		t.Fatalf("error = %q, want empty", task.Error)
+	}
+	if task.Result != nil {
+		t.Fatalf("result = %v, want nil", task.Result)
+	}
+	if task.UpdatedAt.IsZero() {
+		t.Fatalf("updated_at was not set")
+	}
+}

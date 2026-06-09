@@ -35,6 +35,13 @@ func TestValidateSubmitTaskRequestRejectsInvalidFeatureIDs(t *testing.T) {
 	}
 }
 
+func TestValidateSubmitTaskRequestRejectsFeatureIDsForNonLogTask(t *testing.T) {
+	err := validateSubmitTaskRequest(&SubmitTaskRequest{Type: model.TaskTypeContactSync, FeatureIDs: []int{90000031}})
+	if err == nil || !strings.Contains(err.Error(), "log_sync") {
+		t.Fatalf("error = %v, want feature_ids task type validation error", err)
+	}
+}
+
 func TestValidateSubmitTaskRequestRejectsPartialTimeRange(t *testing.T) {
 	err := validateSubmitTaskRequest(&SubmitTaskRequest{Type: model.TaskTypeLogSync, StartTime: 100})
 	if err == nil || !strings.Contains(err.Error(), "provided together") {
