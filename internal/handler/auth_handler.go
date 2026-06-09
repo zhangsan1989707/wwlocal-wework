@@ -49,6 +49,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		h.limiter.RecordFailure(ip)
 		return response.Error(c, 401, "invalid username or password")
 	}
+	h.limiter.RecordSuccess(ip)
 
 	c.Set("username", user.Username)
 	c.Set("user_id", user.ID)
@@ -222,6 +223,12 @@ func (l *loginLimiter) RecordFailure(ip string) {
 		e.blocked = true
 		e.blockedAt = time.Now()
 	}
+}
+
+func (l *loginLimiter) RecordSuccess(ip string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.attempts, ip)
 }
 
 func (l *loginLimiter) cleanup() {
