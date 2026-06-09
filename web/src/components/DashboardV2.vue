@@ -404,14 +404,30 @@ async function renderDeviceChart() {
   if (!deviceChart) {
     deviceChart = echarts.init(deviceChartRef.value)
   }
+  const total = overview.value?.devices?.total || 0
   deviceChart.setOption({
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { orient: 'vertical', left: 'left', top: 'center' },
+    title: total === 0 ? {
+      text: '暂无设备数据',
+      left: 'center',
+      top: 'middle',
+      textStyle: { color: '#909399', fontSize: 13, fontWeight: 400 },
+    } : undefined,
+    legend: {
+      orient: 'horizontal',
+      bottom: 0,
+      left: 'center',
+      itemWidth: 12,
+      itemHeight: 8,
+      textStyle: { fontSize: 12, color: '#606266' },
+    },
     series: [{
       type: 'pie',
-      radius: ['40%', '70%'],
-      center: ['60%', '50%'],
-      label: { show: true, formatter: '{b}\n{d}%' },
+      radius: ['42%', '64%'],
+      center: ['50%', '45%'],
+      avoidLabelOverlap: true,
+      label: { show: false },
+      labelLine: { show: false },
       data: types.map(d => ({ name: d.name || d.type, value: d.count })),
     }],
   }, true)
@@ -610,50 +626,52 @@ onUnmounted(() => {
 /* Device section */
 .device-section {
   display: flex;
-  gap: 24px;
-  align-items: flex-start;
+  gap: 20px;
+  align-items: center;
 }
 
 .device-chart {
-  width: 360px;
-  height: 280px;
-  flex-shrink: 0;
+  width: min(420px, 42%);
+  height: 260px;
+  flex: 0 0 min(420px, 42%);
 }
 
 .device-list {
-  flex: 1;
+  width: min(360px, 100%);
+  flex: 0 0 360px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .device-item {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 8px 12px;
+  gap: 10px;
+  min-height: 32px;
+  padding: 6px 10px;
   background: #f5f7fa;
-  border-radius: 6px;
+  border-radius: 4px;
 }
 
 .device-name {
   flex: 1;
-  font-size: 14px;
+  font-size: 13px;
   color: #303133;
 }
 
 .device-count {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: #606266;
-  min-width: 60px;
+  min-width: 44px;
   text-align: right;
 }
 
 .device-pct {
-  font-size: 13px;
+  font-size: 12px;
   color: #909399;
-  min-width: 50px;
+  min-width: 42px;
   text-align: right;
 }
 
