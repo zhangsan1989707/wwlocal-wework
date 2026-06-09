@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"fmt"
+
 	"wwlocal-wework/internal/model"
 
 	"gorm.io/gorm"
@@ -52,8 +54,12 @@ func (r *SyncFeatureRepository) SetEnabled(featureID int, enabled bool) error {
 func (r *SyncFeatureRepository) BatchSetEnabled(updates map[int]bool) error {
 	return r.DB.Transaction(func(tx *gorm.DB) error {
 		for fid, enabled := range updates {
-			if err := tx.Model(&model.SyncFeature{}).Where("feature_id = ?", fid).Update("enabled", enabled).Error; err != nil {
-				return err
+			result := tx.Model(&model.SyncFeature{}).Where("feature_id = ?", fid).Update("enabled", enabled)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return fmt.Errorf("sync feature %d not found", fid)
 			}
 		}
 		return nil
