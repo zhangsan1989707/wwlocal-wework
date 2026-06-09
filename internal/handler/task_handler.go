@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"wwlocal-wework/internal/model"
 	"wwlocal-wework/internal/service"
@@ -33,6 +34,9 @@ func (h *TaskHandler) SubmitTask(c echo.Context) error {
 	if err := c.Bind(req); err != nil {
 		return response.Error(c, 400, "invalid request body")
 	}
+	if err := validateSubmitTaskRequest(req); err != nil {
+		return response.Error(c, http.StatusBadRequest, err.Error())
+	}
 
 	task := &model.SyncTask{
 		Type:       req.Type,
@@ -47,6 +51,34 @@ func (h *TaskHandler) SubmitTask(c echo.Context) error {
 	}
 
 	return response.Success(c, map[string]interface{}{"task_id": taskID})
+}
+
+func validateSubmitTaskRequest(req *SubmitTaskRequest) error {
+	switch req.Type {
+	case model.TaskTypeLogSync, model.TaskTypeContactSync, model.TaskTypeAdminLogSync:
+	default:
+		return fmt.Errorf("type must be one of log_sync, contact_sync, admin_log_sync")
+	}
+
+	for _, id := range req.FeatureIDs {
+		if id <= 0 {
+			return fmt.Errorf("feature_ids must contain positive integers")
+		}
+	}
+
+	if req.StartTime < 0 || req.EndTime < 0 {
+		return fmt.Errorf("start_time and end_time must be non-negative")
+	}
+	if req.StartTime > 0 || req.EndTime > 0 {
+		if req.StartTime <= 0 || req.EndTime <= 0 {
+			return fmt.Errorf("start_time and end_time must be provided together")
+		}
+		if req.EndTime < req.StartTime {
+			return fmt.Errorf("end_time must be greater than or equal to start_time")
+		}
+	}
+
+	return nil
 }
 
 func (h *TaskHandler) GetTask(c echo.Context) error {

@@ -453,7 +453,7 @@ export const operationLogAPI = {
 
 export const taskAPI = {
   submit: (data: TaskSubmitParams) =>
-    api.post<ApiResponse<TaskInfo>>('/tasks', data) as unknown as ApiResult<TaskInfo>,
+    api.post<ApiResponse<{ task_id: string }>>('/tasks', data) as unknown as ApiResult<{ task_id: string }>,
   list: () =>
     api.get<ApiResponse<TaskInfo[]>>('/tasks') as unknown as ApiResult<TaskInfo[]>,
   get: (id: string) =>
@@ -461,7 +461,7 @@ export const taskAPI = {
   cancel: (id: string) =>
     api.post<ApiResponse<{ message: string }>>(`/tasks/${id}/cancel`) as unknown as ApiResult<{ message: string }>,
   retry: (id: string) =>
-    api.post<ApiResponse<TaskInfo>>(`/tasks/${id}/retry`) as unknown as ApiResult<TaskInfo>,
+    api.post<ApiResponse<{ message: string }>>(`/tasks/${id}/retry`) as unknown as ApiResult<{ message: string }>,
 }
 
 type PagedResponse<T> = {
