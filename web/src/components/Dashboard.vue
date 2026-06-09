@@ -374,10 +374,9 @@ const loadDeptTree = async () => {
   try {
     const res = await contactAPI.getDeptTree()
     if (!isMounted.value) return
-    if (res.code === 0) {
-      const d = res.data as unknown as { tree: Department[] }
-      deptTree.value = d.tree || []
-      expandedKeys.value = d.tree?.map((n: Department) => n.id) || []
+    if (res.code === 0 && res.data) {
+      deptTree.value = res.data.tree || []
+      expandedKeys.value = res.data.tree?.map((n) => n.id) || []
     }
   } catch (err: unknown) {
     if (isMounted.value) ElMessage.error(err instanceof Error ? err.message : '加载部门树失败')
