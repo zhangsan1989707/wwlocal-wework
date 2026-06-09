@@ -242,7 +242,7 @@ func (s *DashboardV2Service) GetOverview(date string, scope *DataScope) (map[str
 // GetTrend 获取单指标趋势
 func (s *DashboardV2Service) GetTrend(metricType, startDate, endDate, granularity, dimensionKey string, scope *DataScope) (map[string]interface{}, error) {
 	if metricType == "" {
-		return nil, fmt.Errorf("metric_type 不能为空")
+		return nil, fmt.Errorf("%w: metric_type 不能为空", ErrDashboardInvalidParam)
 	}
 	granularity = defaultGranularity(granularity)
 	if err := validateMetricType(metricType); err != nil {
@@ -281,7 +281,7 @@ func (s *DashboardV2Service) GetTrend(metricType, startDate, endDate, granularit
 // GetMultiTrend 获取多指标趋势（用于趋势图）
 func (s *DashboardV2Service) GetMultiTrend(metricTypes []string, startDate, endDate, granularity string, scope *DataScope) (map[string]interface{}, error) {
 	if len(metricTypes) == 0 {
-		return nil, fmt.Errorf("metric_types 不能为空")
+		return nil, fmt.Errorf("%w: metric_types 不能为空", ErrDashboardInvalidParam)
 	}
 	granularity = defaultGranularity(granularity)
 	for _, mt := range metricTypes {

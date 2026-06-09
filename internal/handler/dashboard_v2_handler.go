@@ -89,6 +89,9 @@ func (h *DashboardV2Handler) GetMultiTrend(c echo.Context) error {
 		}
 	}
 	metricTypes = cleaned
+	if len(metricTypes) == 0 {
+		return response.Error(c, 400, "metric_types 不能为空")
+	}
 
 	startDate := c.QueryParam("start_date")
 	endDate := c.QueryParam("end_date")
@@ -202,6 +205,9 @@ func (h *DashboardV2Handler) ExportTrendCSV(c echo.Context) error {
 		}
 	}
 	metricTypes = cleaned
+	if len(metricTypes) == 0 {
+		return response.Error(c, 400, "metric_types 不能为空")
+	}
 	scope, err := h.scope(c)
 	if err != nil {
 		return response.Error(c, 401, "用户无效")

@@ -193,6 +193,36 @@ func TestDashboardV2UserListValidatesPagination(t *testing.T) {
 	}
 }
 
+func TestDashboardV2MultiTrendRejectsEmptyMetricTypes(t *testing.T) {
+	tests := []struct {
+		name   string
+		target string
+		call   func(*DashboardV2Handler, echo.Context) error
+	}{
+		{
+			name:   "query",
+			target: "/dashboard/v2/multi-trend?metric_types=,,",
+			call:   (*DashboardV2Handler).GetMultiTrend,
+		},
+		{
+			name:   "export",
+			target: "/dashboard/v2/export/trend?metric_types=,,",
+			call:   (*DashboardV2Handler).ExportTrendCSV,
+		},
+	}
+
+	for _, tc := range tests {
+		c, rec := newListQueryContext(tc.target)
+		h := &DashboardV2Handler{}
+		if err := tc.call(h, c); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s status = %d, want 400", tc.name, rec.Code)
+		}
+	}
+}
+
 type fakeContactRepository struct{}
 
 func (f *fakeContactRepository) QueryContacts(name, mobile string, page, pageSize int) ([]model.Contact, int64, error) {

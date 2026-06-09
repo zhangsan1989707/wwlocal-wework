@@ -116,6 +116,15 @@ func TestDashboardV2ResolveDateRangeValidatesInput(t *testing.T) {
 	}
 }
 
+func TestDashboardV2GetMultiTrendRejectsEmptyMetricTypesAsInvalidParam(t *testing.T) {
+	svc := &DashboardV2Service{statsRepo: &fakeDashboardV2StatsRepo{}}
+
+	_, err := svc.GetMultiTrend([]string{}, "", "2026-06-08", "day", nil)
+	if !errors.Is(err, ErrDashboardInvalidParam) {
+		t.Fatalf("error = %v, want ErrDashboardInvalidParam", err)
+	}
+}
+
 func TestDashboardV2NormalizeListType(t *testing.T) {
 	got, err := normalizeListType("")
 	if err != nil {
