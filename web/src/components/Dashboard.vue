@@ -433,12 +433,25 @@ const handleUserClick = (row: { mobile?: string }) => {
 }
 
 const exportCSV = () => {
-  const url = dashboardAPI.exportInactiveUsersURL({
+  dashboardAPI.exportInactiveUsers({
     range: rangeVal.value,
     dept_id: deptVal.value,
     min_inactive_days: minDays.value,
+  }).then((res) => {
+    downloadBlob(res, `inactive_users_${rangeVal.value}.csv`)
+  }).catch(() => {
+    ElMessage.error('导出失败')
   })
-  window.open(url, '_blank')
+}
+
+const downloadBlob = (res: Blob, filename: string) => {
+  const blob = new Blob([res], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 const formatTime = (timeStr: string) => {
@@ -512,11 +525,14 @@ const onTrendFilterChange = () => {
 }
 
 const exportTrendCSV = () => {
-  const url = dashboardAPI.exportTrendURL({
+  dashboardAPI.exportTrend({
     granularity: trendGranularity.value,
     range: trendRange.value,
+  }).then((res) => {
+    downloadBlob(res, `trend_${trendGranularity.value}_${trendRange.value}.csv`)
+  }).catch(() => {
+    ElMessage.error('导出失败')
   })
-  window.open(url, '_blank')
 }
 
 onMounted(() => {
