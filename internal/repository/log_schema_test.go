@@ -79,6 +79,30 @@ func TestBehaviorFieldsIncludeWeDriveOper(t *testing.T) {
 	}
 }
 
+func TestDeviceLogSourcesIncludeUsageFeatures(t *testing.T) {
+	got := deviceLogSources()
+	byFeature := make(map[int]string)
+	for _, source := range got {
+		byFeature[source.FeatureID] = source.OpenIDColumn
+	}
+
+	want := map[int]string{
+		90000031: "login_user_openid",
+		90000032: "login_user_openid",
+		90000033: "user_openid",
+		90000035: "sender_openid",
+		90000054: "openid",
+		90000055: "openid",
+		90000058: "openid",
+		90000059: "openid",
+	}
+	for featureID, openIDColumn := range want {
+		if byFeature[featureID] != openIDColumn {
+			t.Fatalf("feature %d openid column = %q, want %q; sources=%#v", featureID, byFeature[featureID], openIDColumn, got)
+		}
+	}
+}
+
 func TestJSONTextContainsOpenID(t *testing.T) {
 	cases := []struct {
 		name string

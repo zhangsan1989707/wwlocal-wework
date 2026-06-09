@@ -564,35 +564,85 @@ func (r *DashboardStatsRepository) CountDistinctMultiTable(featureIDs []int, sta
 	return int64(len(seen)), nil
 }
 
-// GetDeviceStats 从 90000054 日志中统计设备类型分布
+type deviceLogSource struct {
+	FeatureID    int
+	OpenIDColumn string
+}
+
+func deviceLogSources() []deviceLogSource {
+	sources := make([]deviceLogSource, 0)
+	for featureID, schema := range logSchemas {
+		hasDevtype := false
+		hasDeviceID := false
+		openIDColumn := ""
+		for _, col := range schema.Columns {
+			switch col.Name {
+			case "devtype":
+				hasDevtype = true
+			case "deviceid":
+				hasDeviceID = true
+			case "openid", "login_user_openid", "user_openid", "sender_openid":
+				if openIDColumn == "" {
+					openIDColumn = col.Name
+				}
+			}
+		}
+		if hasDevtype && hasDeviceID && openIDColumn != "" {
+			sources = append(sources, deviceLogSource{FeatureID: featureID, OpenIDColumn: openIDColumn})
+		}
+	}
+	sort.Slice(sources, func(i, j int) bool {
+		return sources[i].FeatureID < sources[j].FeatureID
+	})
+	return sources
+}
+
+func (r *DashboardStatsRepository) tableExists(tableName string) bool {
+	var exists int
+	r.DB.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?", tableName).Scan(&exists)
+	return exists > 0
+}
+
+// GetDeviceStats 从当天所有带 devtype/deviceid 的开放数据日志中统计设备类型分布。
 func (r *DashboardStatsRepository) GetDeviceStats(statDate string) (map[int]int64, error) {
 	t, err := time.Parse("2006-01-02", statDate)
 	if err != nil {
 		return nil, err
 	}
-	tableName := fmt.Sprintf("log_90000054_%s", t.Format("200601"))
 
-	var exists int
-	r.DB.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?", tableName).Scan(&exists)
-	if exists == 0 {
-		return nil, nil
+	var selects []string
+	var args []interface{}
+	for _, source := range deviceLogSources() {
+		tableName := fmt.Sprintf("log_%d_%s", source.FeatureID, t.Format("200601"))
+		if !r.tableExists(tableName) {
+			continue
+		}
+		selects = append(selects, fmt.Sprintf(`
+			SELECT devtype, COALESCE(NULLIF(deviceid, ''), %s) AS device_key
+			FROM %s
+			WHERE DATE(FROM_UNIXTIME(log_time)) = ?
+				AND devtype IS NOT NULL
+				AND COALESCE(NULLIF(deviceid, ''), %s) <> ''
+		`, source.OpenIDColumn, tableName, source.OpenIDColumn))
+		args = append(args, statDate)
+	}
+	if len(selects) == 0 {
+		return map[int]int64{}, nil
 	}
 
 	sql := fmt.Sprintf(`
 		SELECT
 			devtype,
-			COUNT(DISTINCT openid) AS cnt
-		FROM %s
-		WHERE DATE(FROM_UNIXTIME(log_time)) = ?
-			AND devtype IS NOT NULL
+			COUNT(DISTINCT device_key) AS cnt
+		FROM (%s) device_logs
 		GROUP BY devtype
-	`, tableName)
+	`, strings.Join(selects, " UNION ALL "))
 
 	var rows []struct {
 		Devtype int
 		Cnt     int64
 	}
-	if err := r.DB.Raw(sql, statDate).Scan(&rows).Error; err != nil {
+	if err := r.DB.Raw(sql, args...).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 
@@ -608,41 +658,53 @@ func (r *DashboardStatsRepository) GetDeviceStatsScoped(statDate string, deptIDs
 	if err != nil {
 		return nil, err
 	}
-	tableName := fmt.Sprintf("log_90000054_%s", t.Format("200601"))
 
-	var exists int
-	r.DB.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?", tableName).Scan(&exists)
-	if exists == 0 {
-		return map[int]int64{}, nil
-	}
-
-	scopeSQL := ""
-	args := []interface{}{statDate}
+	var selects []string
+	var args []interface{}
 	if !unrestricted {
 		if len(deptIDs) == 0 {
-			scopeSQL = "AND 1 = 0"
-		} else {
+			return map[int]int64{}, nil
+		}
+	}
+	for _, source := range deviceLogSources() {
+		tableName := fmt.Sprintf("log_%d_%s", source.FeatureID, t.Format("200601"))
+		if !r.tableExists(tableName) {
+			continue
+		}
+		scopeSQL := ""
+		if !unrestricted {
 			scopeSQL = fmt.Sprintf(`
 				AND EXISTS (
 					SELECT 1 FROM contacts c
 					INNER JOIN contact_departments cd_scope ON cd_scope.user_id = c.user_id
-					WHERE c.status = 1 AND c.mobile = %s.openid AND cd_scope.department IN ?
+					WHERE c.status = 1 AND c.mobile = %s.%s AND cd_scope.department IN ?
 				)
-			`, tableName)
+			`, tableName, source.OpenIDColumn)
+		}
+		selects = append(selects, fmt.Sprintf(`
+			SELECT devtype, COALESCE(NULLIF(deviceid, ''), %s) AS device_key
+			FROM %s
+			WHERE DATE(FROM_UNIXTIME(log_time)) = ?
+				AND devtype IS NOT NULL
+				AND COALESCE(NULLIF(deviceid, ''), %s) <> ''
+				%s
+		`, source.OpenIDColumn, tableName, source.OpenIDColumn, scopeSQL))
+		args = append(args, statDate)
+		if !unrestricted {
 			args = append(args, deptIDs)
 		}
+	}
+	if len(selects) == 0 {
+		return map[int]int64{}, nil
 	}
 
 	sql := fmt.Sprintf(`
 		SELECT
 			devtype,
-			COUNT(DISTINCT openid) AS cnt
-		FROM %s
-		WHERE DATE(FROM_UNIXTIME(log_time)) = ?
-			AND devtype IS NOT NULL
-			%s
+			COUNT(DISTINCT device_key) AS cnt
+		FROM (%s) device_logs
 		GROUP BY devtype
-	`, tableName, scopeSQL)
+	`, strings.Join(selects, " UNION ALL "))
 
 	var rows []struct {
 		Devtype int
