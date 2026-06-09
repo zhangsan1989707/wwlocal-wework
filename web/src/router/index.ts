@@ -68,6 +68,12 @@ const router = createRouter({
       meta: { superAdminOnly: true },
     },
     {
+      path: '/tasks',
+      name: 'Tasks',
+      component: () => import('../components/TaskCenter.vue'),
+      meta: { superAdminOnly: true },
+    },
+    {
       path: '/users',
       name: 'Users',
       component: () => import('../components/UserManagement.vue'),

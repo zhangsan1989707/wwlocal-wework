@@ -76,6 +76,10 @@
                 <el-icon><Monitor /></el-icon>
                 <span>系统状态</span>
               </el-menu-item>
+              <el-menu-item index="tasks" title="任务中心">
+                <el-icon><List /></el-icon>
+                <span>任务中心</span>
+              </el-menu-item>
               <el-menu-item index="keys" title="密钥管理">
                 <el-icon><Key /></el-icon>
                 <span>密钥管理</span>
@@ -122,7 +126,7 @@ import { authAPI } from './api'
 import Login from './components/Login.vue'
 import {
   DataLine, Document, Refresh, User, Setting, Key, Monitor,
-  Search,
+  Search, List,
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -136,7 +140,7 @@ const activeMenu = computed(() => {
 
 const defaultOpeneds = computed(() => {
   const dataOpsMenus = ['sync', 'adminoper', 'features']
-  const systemAdminMenus = ['ops-dashboard', 'system', 'keys', 'users']
+  const systemAdminMenus = ['ops-dashboard', 'system', 'tasks', 'keys', 'users']
 
   if (dataOpsMenus.includes(activeMenu.value)) {
     return ['data-ops']

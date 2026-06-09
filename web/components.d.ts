@@ -66,6 +66,7 @@ declare module 'vue' {
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SystemStatus: typeof import('./src/components/SystemStatus.vue')['default']
+    TaskCenter: typeof import('./src/components/TaskCenter.vue')['default']
     TrendChart: typeof import('./src/components/TrendChart.vue')['default']
     UserManagement: typeof import('./src/components/UserManagement.vue')['default']
   }

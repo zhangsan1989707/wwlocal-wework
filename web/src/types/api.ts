@@ -394,20 +394,24 @@ export interface SchemaQualityInfo {
 
 export interface TaskInfo {
   id: string
-  task_type: string
+  type: 'log_sync' | 'contact_sync' | 'admin_log_sync'
+  feature_ids?: number[]
+  start_time?: number
+  end_time?: number
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
-  progress?: number
-  total?: number
+  progress: number
+  total: number
   result?: Record<string, unknown>
   error?: string
   created_at: string
-  started_at?: string
-  completed_at?: string
+  updated_at: string
 }
 
 export interface TaskSubmitParams {
-  task_type: string
-  params?: Record<string, unknown>
+  type: TaskInfo['type']
+  feature_ids?: number[]
+  start_time?: number
+  end_time?: number
 }
 
 export interface OperationLog {
