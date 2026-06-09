@@ -4,7 +4,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, shallowRef } from 'vue'
-import type * as ECharts from 'echarts'
+import type { EChartsType } from '../utils/echarts'
 
 interface SeriesItem {
   name: string
@@ -24,12 +24,12 @@ const props = withDefaults(defineProps<{
 })
 
 const chartRef = ref<HTMLElement>()
-const chart = shallowRef<ECharts.ECharts>()
-let echartsModule: typeof ECharts | undefined
+const chart = shallowRef<EChartsType>()
+let echartsModule: typeof import('../utils/echarts') | undefined
 
 async function loadECharts() {
   if (!echartsModule) {
-    echartsModule = await import('echarts')
+    echartsModule = await import('../utils/echarts')
   }
   return echartsModule
 }

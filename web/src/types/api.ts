@@ -160,8 +160,10 @@ export interface Contact {
 export interface Department {
   id: number
   name: string
-  parent_id: number
+  parentid: number
+  parent_id?: number
   order: number
+  type?: number
   member_count?: number
   children?: Department[]
 }

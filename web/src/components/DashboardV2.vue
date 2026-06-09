@@ -210,7 +210,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { dashboardV2Api } from '../api'
 import type { DashboardV2Overview, DashboardV2DeptStat, DashboardV2UserItem } from '../types/api'
-import type * as ECharts from 'echarts'
+import type { EChartsType } from '../utils/echarts'
 
 const router = useRouter()
 
@@ -230,12 +230,12 @@ const trendLoading = ref(false)
 const trendMetric = ref('active')
 const trendGranularity = ref('day')
 const trendChartRef = ref<HTMLElement>()
-let trendChart: ECharts.ECharts | undefined
+let trendChart: EChartsType | undefined
 
 // Device
 const deviceChartRef = ref<HTMLElement>()
-let deviceChart: ECharts.ECharts | undefined
-let echartsModule: typeof ECharts | undefined
+let deviceChart: EChartsType | undefined
+let echartsModule: typeof import('../utils/echarts') | undefined
 
 // Users
 const userListType = ref('inactive')
@@ -367,7 +367,7 @@ function onUserTabChange() {
 // --- Charts ---
 async function loadECharts() {
   if (!echartsModule) {
-    echartsModule = await import('echarts')
+    echartsModule = await import('../utils/echarts')
   }
   return echartsModule
 }
