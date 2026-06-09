@@ -88,7 +88,6 @@ router.beforeEach((to) => {
     if (to.path !== '/dashboard') {
       return { path: '/dashboard', query: to.fullPath !== '/dashboard' ? { redirect: to.fullPath } : undefined }
     }
-    return false
   }
   if (to.meta.superAdminOnly && authStore.role !== 'super_admin') {
     return { path: '/dashboard' }
