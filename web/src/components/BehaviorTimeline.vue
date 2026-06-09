@@ -24,8 +24,8 @@
       <el-form :model="form" label-position="top">
         <el-row :gutter="20">
           <el-col :span="8">
-            <el-form-item label="OpenID / 手机号">
-              <el-input v-model="form.openid" placeholder="输入要追踪的 openid" clearable />
+            <el-form-item label="成员标识">
+              <el-input v-model="form.identifier" placeholder="输入 user_id / openid / 手机号" clearable />
             </el-form-item>
           </el-col>
           <el-col :span="8">
@@ -183,7 +183,7 @@ interface FeatureItem {
 }
 
 const form = reactive({
-  openid: '',
+  identifier: '',
   feature_ids: [] as number[],
 })
 const route = useRoute()
@@ -222,15 +222,15 @@ onMounted(async () => {
   } catch {
     ElMessage.error('加载日志类型失败')
   }
-  if (route.query.auto_query === '1' && form.openid.trim()) {
+  if (route.query.auto_query === '1' && form.identifier.trim()) {
     await handleQuery()
   }
 })
 
 const applyRouteQuery = () => {
-  const queryOpenID = route.query.openid || route.query.mobile
-  if (queryOpenID) {
-    form.openid = String(queryOpenID)
+  const queryIdentifier = route.query.identifier || route.query.openid || route.query.mobile
+  if (queryIdentifier) {
+    form.identifier = String(queryIdentifier)
   }
   if (route.query.feature_ids) {
     form.feature_ids = String(route.query.feature_ids).split(',').map(Number).filter(Boolean)
@@ -281,8 +281,8 @@ const handleQuery = async () => {
 }
 
 const validateQueryForm = () => {
-  if (!form.openid.trim()) {
-    ElMessage.warning('请输入 OpenID 或手机号')
+  if (!form.identifier.trim()) {
+    ElMessage.warning('请输入成员标识')
     return false
   }
   if (!dateRange.value) {
@@ -293,7 +293,7 @@ const validateQueryForm = () => {
 }
 
 const buildQueryPayload = (pageSize: number) => ({
-  openid: form.openid.trim(),
+  openid: form.identifier.trim(),
   feature_ids: form.feature_ids,
   start_time: Math.floor((dateRange.value as [Date, Date])[0].getTime() / 1000),
   end_time: Math.floor((dateRange.value as [Date, Date])[1].getTime() / 1000),
@@ -334,7 +334,7 @@ const handleExport = async () => {
 }
 
 const handleReset = () => {
-  form.openid = ''
+  form.identifier = ''
   form.feature_ids = []
   pagination.page = 1
   pagination.page_size = 50

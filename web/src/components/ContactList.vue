@@ -396,7 +396,7 @@ const viewUserLogs = () => {
 const viewUserBehavior = () => {
   if (drawerContact.value?.mobile) {
     drawerVisible.value = false
-    router.push({ path: '/behavior', query: { openid: drawerContact.value.mobile, auto_query: '1' } })
+    router.push({ path: '/behavior', query: { identifier: drawerContact.value.mobile, auto_query: '1' } })
   }
 }
 
