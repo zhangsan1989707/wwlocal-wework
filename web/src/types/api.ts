@@ -275,7 +275,7 @@ export interface AdminOperLogSync {
   end_time?: number
 }
 
-export interface AdminOperLogStats {
+export interface AdminOperLogSyncStatus {
   running: boolean
   synced?: number
   total: number
@@ -283,6 +283,10 @@ export interface AdminOperLogStats {
   last_error?: string
   started_at?: string
   ended_at?: string
+}
+
+export interface AdminOperLogStats {
+  total: number
   by_type?: Record<string, number>
   by_user?: Record<string, number>
   daily?: Array<{ date: string; count: number }>

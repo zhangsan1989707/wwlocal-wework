@@ -78,14 +78,14 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { syncFeatureAPI, adminOperLogAPI } from '../api'
-import type { ApiResponse, SyncFeature, AdminOperLogStats } from '../types/api'
+import type { ApiResponse, SyncFeature, AdminOperLogSyncStatus } from '../types/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const router = useRouter()
 const features = ref<SyncFeature[]>([])
 const loading = ref(false)
 const saving = ref(false)
-const adminOperLogStats = ref<AdminOperLogStats>({
+const adminOperLogStats = ref<AdminOperLogSyncStatus>({
   running: false,
   total: 0,
 })
@@ -116,7 +116,7 @@ const loadFeatures = async () => {
 
 const loadAdminOperLogStats = async () => {
   try {
-    const res = await adminOperLogAPI.syncStatus() as unknown as ApiResponse<AdminOperLogStats>
+    const res = await adminOperLogAPI.syncStatus() as unknown as ApiResponse<AdminOperLogSyncStatus>
     if (res.code === 0 && res.data) {
       adminOperLogStats.value = res.data
       if (adminOperLogStats.value.running) {

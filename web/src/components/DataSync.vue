@@ -427,7 +427,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { syncAPI, schedulerAPI, nightlyAPI, syncHistoryAPI, syncFeatureAPI, adminOperLogAPI, systemAPI } from '../api'
-import type { AdminOperLogStats, NightlyJobStatus, SchemaQualityInfo, SyncFeature, SyncHistory } from '../types/api'
+import type { AdminOperLogSyncStatus, NightlyJobStatus, SchemaQualityInfo, SyncFeature, SyncHistory } from '../types/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { VideoPlay, VideoPause, Refresh, Clock, DataAnalysis } from '@element-plus/icons-vue'
 
@@ -468,7 +468,7 @@ let nightlySawRunning = false
 const NIGHTLY_POLL_INTERVAL = 3000
 const NIGHTLY_MAX_POLLS = 600
 
-const adminOperStatus = ref<AdminOperLogStats>({
+const adminOperStatus = ref<AdminOperLogSyncStatus>({
   running: false,
   total: 0,
   synced: 0,

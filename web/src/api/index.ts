@@ -26,6 +26,7 @@ import type {
   AdminOperLogParams,
   AdminOperLog,
   AdminOperLogSync,
+  AdminOperLogSyncStatus,
   AdminOperLogStats,
   DashboardOverview,
   InactiveUser,
@@ -431,9 +432,9 @@ export const adminOperLogAPI = {
       data
     ) as unknown as ApiResult<{ running: boolean; message: string }>,
   syncStatus: () =>
-    api.get<ApiResponse<AdminOperLogStats>>(
+    api.get<ApiResponse<AdminOperLogSyncStatus>>(
       '/admin-oper-logs/sync/status'
-    ) as unknown as ApiResult<AdminOperLogStats>,
+    ) as unknown as ApiResult<AdminOperLogSyncStatus>,
   getStats: (params?: { start_time?: number; end_time?: number }) =>
     api.get<ApiResponse<AdminOperLogStats>>('/admin-oper-logs/stats', {
       params,
@@ -494,6 +495,7 @@ export type {
   AdminOperLogParams,
   AdminOperLog,
   AdminOperLogSync,
+  AdminOperLogSyncStatus,
   AdminOperLogStats,
   DashboardOverview,
   InactiveUser,
