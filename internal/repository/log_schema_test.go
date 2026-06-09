@@ -29,6 +29,19 @@ func TestMapStructuredFieldsUnmappedFeature(t *testing.T) {
 	}
 }
 
+func TestExtractMobileFromParsedUserOpenID(t *testing.T) {
+	parsed := map[string]interface{}{
+		"user": map[string]interface{}{
+			"openid": "u1",
+			"type":   float64(0),
+		},
+	}
+
+	if got := extractMobileFromParsed(parsed); got != "u1" {
+		t.Fatalf("extractMobileFromParsed() = %q, want u1", got)
+	}
+}
+
 func TestMapStructuredFieldsWeDriveOper(t *testing.T) {
 	parsed := `{
 		"time": 1619586572,

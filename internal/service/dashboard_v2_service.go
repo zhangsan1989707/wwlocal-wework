@@ -21,6 +21,7 @@ var ErrDashboardInvalidParam = errors.New("invalid dashboard parameter")
 
 type dashboardV2StatsRepository interface {
 	CountDistinctUsersFromDailyStats(featureIDs []int, startDate, endDate string, deptIDs []int, unrestricted bool) (int64, error)
+	CountDistinctUsersFromDailyStatsThroughDate(featureIDs []int, endDate string, deptIDs []int, unrestricted bool) (int64, error)
 	CountLogRowsScoped(featureIDs []int, startDate, endDate, userField string, deptIDs []int, unrestricted bool) (int64, error)
 	GetPeopleTrend(featureIDs []int, startDate, endDate, granularity string, deptIDs []int, unrestricted bool) ([]repository.AggregatedStat, error)
 	GetEventTrendScoped(featureIDs []int, startDate, endDate, granularity, userField string, deptIDs []int, unrestricted bool) ([]repository.AggregatedStat, error)
@@ -155,7 +156,7 @@ func (s *DashboardV2Service) GetOverview(date string, scope *DataScope) (map[str
 	if err != nil {
 		return nil, fmt.Errorf("查询注册人数失败: %w", err)
 	}
-	activated, err := s.statsRepo.CountDistinctUsersFromDailyStats([]int{90000048}, startDate, endDate, scope.DeptIDs, scope.Unrestricted)
+	activated, err := s.statsRepo.CountDistinctUsersFromDailyStatsThroughDate([]int{90000048}, endDate, scope.DeptIDs, scope.Unrestricted)
 	if err != nil {
 		return nil, fmt.Errorf("查询激活人数失败: %w", err)
 	}

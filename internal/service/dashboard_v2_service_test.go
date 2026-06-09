@@ -10,15 +10,30 @@ import (
 )
 
 type fakeDashboardV2StatsRepo struct {
-	distinctErrByFeature map[int]error
-	logRowsErrByFeature  map[int]error
-	deviceErr            error
+	distinctErrByFeature     map[int]error
+	distinctThroughByFeature map[int]int64
+	logRowsErrByFeature      map[int]error
+	deviceErr                error
 }
 
 func (f *fakeDashboardV2StatsRepo) CountDistinctUsersFromDailyStats(featureIDs []int, startDate, endDate string, deptIDs []int, unrestricted bool) (int64, error) {
 	if len(featureIDs) > 0 && f.distinctErrByFeature != nil {
 		if err := f.distinctErrByFeature[featureIDs[0]]; err != nil {
 			return 0, err
+		}
+	}
+	return 1, nil
+}
+
+func (f *fakeDashboardV2StatsRepo) CountDistinctUsersFromDailyStatsThroughDate(featureIDs []int, endDate string, deptIDs []int, unrestricted bool) (int64, error) {
+	if len(featureIDs) > 0 && f.distinctErrByFeature != nil {
+		if err := f.distinctErrByFeature[featureIDs[0]]; err != nil {
+			return 0, err
+		}
+	}
+	if len(featureIDs) > 0 && f.distinctThroughByFeature != nil {
+		if count, ok := f.distinctThroughByFeature[featureIDs[0]]; ok {
+			return count, nil
 		}
 	}
 	return 1, nil
@@ -174,6 +189,26 @@ func TestDashboardV2OverviewReturnsGroupCreatedError(t *testing.T) {
 
 	if _, err := svc.GetOverview("2026-06-08", &DataScope{Unrestricted: true}); err == nil {
 		t.Fatalf("GetOverview error = nil, want group query error")
+	}
+}
+
+func TestDashboardV2OverviewUsesCumulativeActivation(t *testing.T) {
+	svc := &DashboardV2Service{
+		statsRepo: &fakeDashboardV2StatsRepo{distinctThroughByFeature: map[int]int64{
+			90000048: 8,
+		}},
+		contactRepo: &fakeDashboardV2ContactRepo{},
+	}
+
+	got, err := svc.GetOverview("2026-06-08", &DataScope{Unrestricted: true})
+	if err != nil {
+		t.Fatalf("GetOverview: %v", err)
+	}
+	if got["activated"] != int64(8) {
+		t.Fatalf("activated = %v, want 8", got["activated"])
+	}
+	if got["rate_activation"] != int64(800) {
+		t.Fatalf("rate_activation = %v, want 800", got["rate_activation"])
 	}
 }
 

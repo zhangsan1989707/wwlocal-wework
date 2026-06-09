@@ -24,7 +24,7 @@ type NightlyJobService struct {
 	contactSyncSvc *ContactSyncService
 	statsRepo      *repository.DashboardStatsRepository
 	contactRepo    *repository.ContactRepository
-	logRepo        *repository.LogRepository
+	logRepo        nightlyLogRepository
 	cfg            *config.Config
 	running        bool
 	jobRunning     bool // 当前任务是否正在执行
@@ -41,6 +41,12 @@ type NightlyJobStatus struct {
 	JobRunning         bool   `json:"job_running"`
 	LatestStatDate     string `json:"latest_stat_date"`
 	LatestUserListDate string `json:"latest_user_list_date"`
+}
+
+type nightlyLogRepository interface {
+	BackfillDailyStatsFromLogs(featureIDs []int, statDate string) error
+	GetTableName(featureID int, t time.Time) string
+	TableExists(tableName string) bool
 }
 
 func NewNightlyJobService(
@@ -251,6 +257,10 @@ func (s *NightlyJobService) runForDate(statDate string) {
 
 // computeStats 计算指定日期的全部看板指标并写入数据库
 func (s *NightlyJobService) computeStats(statDate string) error {
+	if err := s.logRepo.BackfillDailyStatsFromLogs(s.cfg.Features.IDs, statDate); err != nil {
+		return fmt.Errorf("backfill daily stats: %w", err)
+	}
+
 	// 删除旧数据，保证幂等
 	if err := s.statsRepo.DeleteByDate(statDate); err != nil {
 		return fmt.Errorf("delete old stats: %w", err)

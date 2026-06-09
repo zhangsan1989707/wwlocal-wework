@@ -104,3 +104,16 @@ func TestTryStartRunning(t *testing.T) {
 		t.Error("Expected status.Running to be false after ResetRunning()")
 	}
 }
+
+func TestExtractMobileUserOpenID(t *testing.T) {
+	parsed := map[string]interface{}{
+		"user": map[string]interface{}{
+			"openid": "u1",
+			"type":   float64(0),
+		},
+	}
+
+	if got := extractMobile(parsed); got != "u1" {
+		t.Fatalf("extractMobile() = %q, want u1", got)
+	}
+}

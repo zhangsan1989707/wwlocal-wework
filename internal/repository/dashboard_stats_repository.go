@@ -184,6 +184,24 @@ func (r *DashboardStatsRepository) CountDistinctUsersFromDailyStats(featureIDs [
 	return count, err
 }
 
+func (r *DashboardStatsRepository) CountDistinctUsersFromDailyStatsThroughDate(featureIDs []int, endDate string, deptIDs []int, unrestricted bool) (int64, error) {
+	if len(featureIDs) == 0 {
+		return 0, nil
+	}
+	scopeSQL, scopeArgs := deptScopeClause("c", deptIDs, unrestricted)
+	sql := fmt.Sprintf(`
+		SELECT COUNT(DISTINCT uds.mobile)
+		FROM user_daily_stats uds
+		INNER JOIN contacts c ON c.mobile = uds.mobile AND c.status = 1
+		WHERE uds.feature_id IN ? AND uds.stat_date <= ? %s
+	`, scopeSQL)
+	args := []interface{}{featureIDs, endDate}
+	args = append(args, scopeArgs...)
+	var count int64
+	err := r.DB.Raw(sql, args...).Scan(&count).Error
+	return count, err
+}
+
 func (r *DashboardStatsRepository) CountLogRows(featureIDs []int, startDate, endDate string) (int64, error) {
 	return r.CountLogRowsScoped(featureIDs, startDate, endDate, "", nil, true)
 }
@@ -346,8 +364,12 @@ func (r *DashboardStatsRepository) UpsertUserList(users []model.DashboardDailyUs
 			if j > 0 {
 				sql += ","
 			}
+			extra := u.Extra
+			if extra == "" {
+				extra = "{}"
+			}
 			sql += "(?,?,?,?,?,?,?, NOW())"
-			args = append(args, u.StatDate, u.ListType, u.Mobile, u.UserID, u.Name, u.Department, u.Extra)
+			args = append(args, u.StatDate, u.ListType, u.Mobile, u.UserID, u.Name, u.Department, extra)
 		}
 		sql += ` ON DUPLICATE KEY UPDATE user_id=VALUES(user_id), name=VALUES(name), department=VALUES(department), extra=VALUES(extra), created_at=NOW()`
 		if err := r.DB.Exec(sql, args...).Error; err != nil {

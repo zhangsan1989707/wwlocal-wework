@@ -584,14 +584,14 @@ func (s *SyncService) GetStatus() *SyncStatus {
 }
 
 type SyncStatus struct {
-	Running        bool            `json:"running"`
-	Progress       int             `json:"progress"`
-	Total          int             `json:"total"`
-	Failed         int             `json:"failed"`
-	CurrentFeature int             `json:"current_feature,omitempty"`
-	LastSync       time.Time       `json:"last_sync,omitempty"`
-	Results        map[int]int     `json:"results,omitempty"`
-	Errors         map[int]string  `json:"errors,omitempty"`
+	Running        bool           `json:"running"`
+	Progress       int            `json:"progress"`
+	Total          int            `json:"total"`
+	Failed         int            `json:"failed"`
+	CurrentFeature int            `json:"current_feature,omitempty"`
+	LastSync       time.Time      `json:"last_sync,omitempty"`
+	Results        map[int]int    `json:"results,omitempty"`
+	Errors         map[int]string `json:"errors,omitempty"`
 }
 
 func (s *SyncService) saveSyncHistory(syncType, trigger string, startTime time.Time) {
@@ -685,13 +685,35 @@ func extractMobile(parsed map[string]interface{}) string {
 			return openid
 		}
 	}
-	// 路径2: sender.openid（单聊/群聊消息）
+	// 路径2: user.openid（访问应用/添加/激活等）
+	if user, ok := parsed["user"].(map[string]interface{}); ok {
+		if openid, ok := user["openid"].(string); ok && openid != "" {
+			return openid
+		}
+	}
+	// 路径3: sender.openid（单聊/群聊消息）
 	if sender, ok := parsed["sender"].(map[string]interface{}); ok {
 		if openid, ok := sender["openid"].(string); ok && openid != "" {
 			return openid
 		}
 	}
-	// 路径3: 根级 openid
+	// 路径4: 群相关操作人
+	if creator, ok := parsed["creator"].(map[string]interface{}); ok {
+		if openid, ok := creator["openid"].(string); ok && openid != "" {
+			return openid
+		}
+	}
+	if oper, ok := parsed["oper"].(map[string]interface{}); ok {
+		if openid, ok := oper["openid"].(string); ok && openid != "" {
+			return openid
+		}
+	}
+	if quitUser, ok := parsed["quit_user"].(map[string]interface{}); ok {
+		if openid, ok := quitUser["openid"].(string); ok && openid != "" {
+			return openid
+		}
+	}
+	// 路径5: 根级 openid
 	if openid, ok := parsed["openid"].(string); ok && openid != "" {
 		return openid
 	}

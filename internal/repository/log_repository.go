@@ -45,8 +45,28 @@ func extractMobileFromParsed(parsed map[string]interface{}) string {
 			return openid
 		}
 	}
+	if user, ok := parsed["user"].(map[string]interface{}); ok {
+		if openid, ok := user["openid"].(string); ok && openid != "" {
+			return openid
+		}
+	}
 	if sender, ok := parsed["sender"].(map[string]interface{}); ok {
 		if openid, ok := sender["openid"].(string); ok && openid != "" {
+			return openid
+		}
+	}
+	if creator, ok := parsed["creator"].(map[string]interface{}); ok {
+		if openid, ok := creator["openid"].(string); ok && openid != "" {
+			return openid
+		}
+	}
+	if oper, ok := parsed["oper"].(map[string]interface{}); ok {
+		if openid, ok := oper["openid"].(string); ok && openid != "" {
+			return openid
+		}
+	}
+	if quitUser, ok := parsed["quit_user"].(map[string]interface{}); ok {
+		if openid, ok := quitUser["openid"].(string); ok && openid != "" {
 			return openid
 		}
 	}
