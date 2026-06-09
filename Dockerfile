@@ -1,7 +1,9 @@
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 COPY go.mod go.sum ./
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=${GOPROXY}
 RUN go mod download
 
 COPY . .
@@ -9,15 +11,14 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o server ./cmd/server
 
 FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates tzdata
+RUN apk --no-cache add ca-certificates tzdata su-exec
 
 WORKDIR /app
 COPY --from=builder /app/server .
 COPY --from=builder /app/config.yaml .
-COPY --from=builder /app/keys ./keys
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh && mkdir -p keys
 
 EXPOSE 8080
 
-USER nobody
-
-CMD ["./server"]
+ENTRYPOINT ["./entrypoint.sh"]

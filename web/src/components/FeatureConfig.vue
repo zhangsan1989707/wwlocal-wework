@@ -46,27 +46,64 @@
         <el-button @click="handleDisableAll" size="small" type="danger" plain>停用全部日志类型</el-button>
       </div>
     </el-card>
+
+    <el-card class="admin-oper-card">
+      <template #header>
+        <div class="card-header">
+          <span class="card-title">企微操作日志</span>
+          <div class="header-actions">
+            <el-button type="primary" size="small" @click="handleViewAdminOperLog">
+              查看日志
+            </el-button>
+          </div>
+        </div>
+      </template>
+      <el-descriptions :column="3" border size="small">
+        <el-descriptions-item label="状态">
+          <el-tag :type="adminOperLogStats.running ? 'success' : 'info'" size="small">
+            {{ adminOperLogStats.running ? '同步中' : '空闲' }}
+          </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="已同步总数">{{ adminOperLogStats.total > 0 ? formatNumber(adminOperLogStats.total) : '-' }}</el-descriptions-item>
+        <el-descriptions-item label="最新日志时间">
+          <span v-if="adminOperLogStats.last_time">{{ formatTime(adminOperLogStats.last_time) }}</span>
+          <span v-else>-</span>
+        </el-descriptions-item>
+      </el-descriptions>
+    </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, inject } from 'vue'
-import { syncFeatureAPI } from '../api'
+import { ref, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { syncFeatureAPI, adminOperLogAPI } from '../api'
+import type { SyncFeature, AdminOperLogSyncStatus } from '../types/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-const navigate = inject('navigate') as (menu: string, params?: any) => void
-const features = ref<any[]>([])
+const router = useRouter()
+const features = ref<SyncFeature[]>([])
 const loading = ref(false)
 const saving = ref(false)
+const adminOperLogStats = ref<AdminOperLogSyncStatus>({
+  running: false,
+  total: 0,
+})
+let pollTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(async () => {
   await loadFeatures()
+  await loadAdminOperLogStats()
+})
+
+onUnmounted(() => {
+  stopPolling()
 })
 
 const loadFeatures = async () => {
   loading.value = true
   try {
-    const res: any = await syncFeatureAPI.list()
+    const res = await syncFeatureAPI.list()
     if (res.code === 0) {
       features.value = res.data || []
     }
@@ -77,6 +114,37 @@ const loadFeatures = async () => {
   }
 }
 
+const loadAdminOperLogStats = async () => {
+  try {
+    const res = await adminOperLogAPI.syncStatus()
+    if (res.code === 0 && res.data) {
+      adminOperLogStats.value = res.data
+      if (adminOperLogStats.value.running) {
+        startPolling()
+      }
+    }
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+const startPolling = () => {
+  stopPolling()
+  pollTimer = setInterval(async () => {
+    await loadAdminOperLogStats()
+    if (!adminOperLogStats.value.running) {
+      stopPolling()
+    }
+  }, 2000)
+}
+
+const stopPolling = () => {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
 const handleSave = async () => {
   saving.value = true
   try {
@@ -84,15 +152,14 @@ const handleSave = async () => {
       feature_id: f.feature_id,
       enabled: f.enabled,
     }))
-    const res: any = await syncFeatureAPI.update({ features: data })
+    const res = await syncFeatureAPI.update({ features: data })
     if (res.code === 0) {
       ElMessage.success('保存成功')
-      features.value = res.data || []
     } else {
       ElMessage.error(res.msg || '保存失败')
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '保存失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '保存失败')
   } finally {
     saving.value = false
   }
@@ -116,10 +183,18 @@ const handleDisableAll = async () => {
 const viewRecentLogs = (featureId: number) => {
   const end = new Date()
   const start = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000)
-  navigate('query', {
-    feature_ids: [featureId],
-    dateRange: [start, end],
+  router.push({
+    path: '/query',
+    query: {
+      feature_ids: String(featureId),
+      start_time: String(Math.floor(start.getTime() / 1000)),
+      end_time: String(Math.floor(end.getTime() / 1000)),
+    },
   })
+}
+
+const handleViewAdminOperLog = () => {
+  router.push('/adminoper')
 }
 
 const formatTime = (timeStr: string) => {
@@ -148,6 +223,11 @@ const formatNumber = (n: number) => {
   align-items: center;
 }
 
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .card-title {
   font-size: 16px;
   font-weight: 600;
@@ -163,6 +243,10 @@ const formatNumber = (n: number) => {
 .time-text {
   font-size: 12px;
   color: #909399;
+}
+
+.admin-oper-card {
+  margin-top: 16px;
 }
 
 :deep(.el-card__header) {

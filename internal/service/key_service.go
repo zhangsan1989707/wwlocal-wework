@@ -4,10 +4,20 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
+	"strings"
 
 	"wwlocal-wework/internal/model"
 	"wwlocal-wework/internal/repository"
+
+	"gorm.io/gorm"
+)
+
+var (
+	ErrKeyVersionExists  = errors.New("密钥版本已存在")
+	ErrInvalidKeyVersion = errors.New("密钥版本只能包含字母、数字、点、下划线和短横线")
+	ErrInvalidPrivateKey = errors.New("密钥内容不是有效的 RSA 私钥")
 )
 
 type KeyService struct {
@@ -23,6 +33,21 @@ func (s *KeyService) ListKeys() ([]model.RSAKeyVersion, error) {
 }
 
 func (s *KeyService) AddKey(version, privateKeyPEM string) (*model.RSAKeyVersion, error) {
+	version = strings.TrimSpace(version)
+	privateKeyPEM = strings.TrimSpace(privateKeyPEM)
+
+	if !validKeyVersion(version) {
+		return nil, ErrInvalidKeyVersion
+	}
+	if err := validateRSAPrivateKeyPEM(privateKeyPEM); err != nil {
+		return nil, err
+	}
+	if _, err := s.keyRepo.GetByVersion(version); err == nil {
+		return nil, ErrKeyVersionExists
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
 	if err := s.keyRepo.SaveKeyToFile(version, privateKeyPEM); err != nil {
 		return nil, err
 	}
@@ -37,6 +62,42 @@ func (s *KeyService) AddKey(version, privateKeyPEM string) (*model.RSAKeyVersion
 	}
 
 	return key, nil
+}
+
+func validKeyVersion(version string) bool {
+	if version == "" || version == "." || version == ".." || len(version) > 32 {
+		return false
+	}
+	for _, r := range version {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validateRSAPrivateKeyPEM(privateKeyPEM string) error {
+	block, _ := pem.Decode([]byte(privateKeyPEM))
+	if block == nil {
+		return ErrInvalidPrivateKey
+	}
+
+	if priv, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		if priv.N.BitLen() > 0 {
+			return nil
+		}
+		return ErrInvalidPrivateKey
+	}
+
+	keyInterface, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return ErrInvalidPrivateKey
+	}
+	if _, ok := keyInterface.(*rsa.PrivateKey); !ok {
+		return ErrInvalidPrivateKey
+	}
+	return nil
 }
 
 func (s *KeyService) ActivateKey(version string) error {

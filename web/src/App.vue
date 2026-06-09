@@ -1,126 +1,206 @@
 <template>
-  <Login v-if="!isLoggedIn" @login="handleLogin" />
-  <div v-else class="app-container">
-    <el-container>
-      <el-header>
-        <div class="header-left">
-          <h1>政务微信开放数据审计平台</h1>
-          <span class="env-tag">本地部署</span>
-        </div>
-        <div class="header-right">
-          <span>{{ username }}</span>
-          <el-button type="text" style="color: rgba(255,255,255,.85)" @click="handleLogout">退出</el-button>
-        </div>
-      </el-header>
+  <el-config-provider :locale="zhCn">
+    <Login v-if="!authStore.isLoggedIn" />
+    <div v-else class="app-container">
       <el-container>
-        <el-aside :width="isCollapsed ? '64px' : '200px'">
-          <div class="collapse-btn" @click="isCollapsed = !isCollapsed">
-            <el-icon :size="16">
-              <DArrowLeft v-if="!isCollapsed" />
-              <DArrowRight v-else />
-            </el-icon>
+        <el-header>
+          <div class="header-left">
+            <h1>政务微信开放数据审计平台</h1>
+            <span class="env-tag">本地部署</span>
           </div>
-          <el-menu
-            :default-active="activeMenu"
-            :collapse="isCollapsed"
-            :collapse-transition="false"
-            class="el-menu-vertical"
-            @select="handleMenuSelect"
-          >
-            <el-menu-item index="dashboard" title="总览看板">
-              <el-icon><DataLine /></el-icon>
-              <span>总览看板</span>
-            </el-menu-item>
-            <el-menu-item index="query" title="日志审计">
-              <el-icon><Document /></el-icon>
-              <span>日志审计</span>
-            </el-menu-item>
-            <el-menu-item index="sync" title="同步任务">
-              <el-icon><Refresh /></el-icon>
-              <span>同步任务</span>
-            </el-menu-item>
-            <el-menu-item index="contacts" title="通讯录">
-              <el-icon><User /></el-icon>
-              <span>通讯录</span>
-            </el-menu-item>
-            <el-menu-item index="features" title="数据类型配置">
-              <el-icon><Setting /></el-icon>
-              <span>数据类型配置</span>
-            </el-menu-item>
-            <el-menu-item index="keys" title="密钥管理">
-              <el-icon><Key /></el-icon>
-              <span>密钥管理</span>
-            </el-menu-item>
-            <el-menu-item index="opslog" title="操作审计">
-              <el-icon><List /></el-icon>
-              <span>操作审计</span>
-            </el-menu-item>
-            <el-menu-item index="system" title="系统状态">
-              <el-icon><Monitor /></el-icon>
-              <span>系统状态</span>
-            </el-menu-item>
-          </el-menu>
-        </el-aside>
-        <el-main>
-          <Dashboard v-if="activeMenu === 'dashboard'" />
-          <LogQuery v-else-if="activeMenu === 'query'" />
-          <DataSync v-else-if="activeMenu === 'sync'" />
-          <FeatureConfig v-else-if="activeMenu === 'features'" />
-          <KeyManagement v-else-if="activeMenu === 'keys'" />
-          <ContactList v-else-if="activeMenu === 'contacts'" />
-          <OperationLog v-else-if="activeMenu === 'opslog'" />
-          <SystemStatus v-else-if="activeMenu === 'system'" />
-        </el-main>
+          <div class="header-right">
+            <span>{{ authStore.username }}</span>
+            <span class="header-action" @click="showPwDialog = true">修改密码</span>
+            <span class="header-divider">|</span>
+            <span class="header-action" @click="handleLogout">退出</span>
+          </div>
+        </el-header>
+        <el-container class="main-container">
+          <el-aside width="200px">
+            <el-menu
+              :default-active="activeMenu"
+              :default-openeds="defaultOpeneds"
+              unique-opened
+              class="el-menu-vertical"
+              @select="handleMenuSelect"
+            >
+              <el-sub-menu index="business">
+                <template #title>
+                  <el-icon><DataLine /></el-icon>
+                  <span>运营</span>
+                </template>
+                <el-menu-item index="dashboard" title="运营总览">
+                  <el-icon><DataLine /></el-icon>
+                  <span>运营总览</span>
+                </el-menu-item>
+                <el-menu-item index="query" title="日志审计">
+                  <el-icon><Document /></el-icon>
+                  <span>日志审计</span>
+                </el-menu-item>
+                <el-menu-item index="behavior" title="行为查询">
+                  <el-icon><Search /></el-icon>
+                  <span>行为查询</span>
+                </el-menu-item>
+                <el-menu-item index="contacts" title="通讯录">
+                  <el-icon><User /></el-icon>
+                  <span>通讯录</span>
+                </el-menu-item>
+              </el-sub-menu>
+              <el-sub-menu index="data-ops">
+                <template #title>
+                  <el-icon><Refresh /></el-icon>
+                  <span>数据运维</span>
+                </template>
+                <el-menu-item v-if="authStore.role === 'super_admin'" index="sync" title="同步任务">
+                  <el-icon><Refresh /></el-icon>
+                  <span>同步任务</span>
+                </el-menu-item>
+                <el-menu-item index="adminoper" title="企微操作日志">
+                  <el-icon><Setting /></el-icon>
+                  <span>企微操作日志</span>
+                </el-menu-item>
+                <el-menu-item v-if="authStore.role === 'super_admin'" index="features" title="数据类型配置">
+                  <el-icon><Setting /></el-icon>
+                  <span>数据类型配置</span>
+                </el-menu-item>
+              </el-sub-menu>
+              <el-sub-menu v-if="authStore.role === 'super_admin'" index="system-admin">
+                <template #title>
+                  <el-icon><Monitor /></el-icon>
+                  <span>系统管理</span>
+                </template>
+                <el-menu-item index="ops-dashboard" title="运维中心">
+                  <el-icon><DataLine /></el-icon>
+                  <span>运维中心</span>
+                </el-menu-item>
+                <el-menu-item index="system" title="系统状态">
+                  <el-icon><Monitor /></el-icon>
+                  <span>系统状态</span>
+                </el-menu-item>
+                <el-menu-item index="tasks" title="任务中心">
+                  <el-icon><List /></el-icon>
+                  <span>任务中心</span>
+                </el-menu-item>
+                <el-menu-item index="keys" title="密钥管理">
+                  <el-icon><Key /></el-icon>
+                  <span>密钥管理</span>
+                </el-menu-item>
+                <el-menu-item index="users" title="用户权限">
+                  <el-icon><User /></el-icon>
+                  <span>用户权限</span>
+                </el-menu-item>
+              </el-sub-menu>
+            </el-menu>
+          </el-aside>
+          <el-main class="main-content">
+            <router-view />
+          </el-main>
+        </el-container>
       </el-container>
-    </el-container>
-  </div>
+
+      <el-dialog v-model="showPwDialog" title="修改密码" width="400px" :close-on-click-modal="false">
+        <el-form :model="pwForm" label-width="80px">
+          <el-form-item label="旧密码">
+            <el-input v-model="pwForm.old_password" type="password" show-password />
+          </el-form-item>
+          <el-form-item label="新密码">
+            <el-input v-model="pwForm.new_password" type="password" show-password placeholder="至少 8 位，含大小写字母和数字" />
+          </el-form-item>
+          <el-form-item label="确认密码">
+            <el-input v-model="pwForm.confirm" type="password" show-password />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="showPwDialog = false">取消</el-button>
+          <el-button type="primary" :loading="pwLoading" @click="handleChangePassword">确认修改</el-button>
+        </template>
+      </el-dialog>
+    </div>
+  </el-config-provider>
 </template>
 
 <script setup lang="ts">
-import { ref, provide } from 'vue'
+import { ref, computed } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
+import { useAuthStore } from './stores/auth'
+import { authAPI } from './api'
 import Login from './components/Login.vue'
-import Dashboard from './components/Dashboard.vue'
-import LogQuery from './components/LogQuery.vue'
-import DataSync from './components/DataSync.vue'
-import KeyManagement from './components/KeyManagement.vue'
-import ContactList from './components/ContactList.vue'
-import OperationLog from './components/OperationLog.vue'
-import FeatureConfig from './components/FeatureConfig.vue'
-import SystemStatus from './components/SystemStatus.vue'
 import {
-  DataLine, Document, Refresh, User, Setting, Key, List, Monitor,
-  DArrowLeft, DArrowRight,
+  DataLine, Document, Refresh, User, Setting, Key, Monitor,
+  Search, List,
 } from '@element-plus/icons-vue'
 
-const activeMenu = ref('dashboard')
-const isLoggedIn = ref(!!localStorage.getItem('token'))
-const username = ref(localStorage.getItem('username') || '')
-const isCollapsed = ref(false)
-const navigateParams = ref<any>(null)
+const router = useRouter()
+const route = useRoute()
+const authStore = useAuthStore()
 
-const navigate = (menu: string, params?: any) => {
-  navigateParams.value = params || null
-  activeMenu.value = menu
-}
+const activeMenu = computed(() => {
+  const path = route.path.slice(1) || 'dashboard'
+  return path
+})
 
-provide('navigate', navigate)
-provide('navigateParams', navigateParams)
+const defaultOpeneds = computed(() => {
+  const dataOpsMenus = ['sync', 'adminoper', 'features']
+  const systemAdminMenus = ['ops-dashboard', 'system', 'tasks', 'keys', 'users']
+
+  if (dataOpsMenus.includes(activeMenu.value)) {
+    return ['data-ops']
+  }
+  if (systemAdminMenus.includes(activeMenu.value)) {
+    return ['system-admin']
+  }
+  return ['business']
+})
 
 const handleMenuSelect = (index: string) => {
-  navigateParams.value = null
-  activeMenu.value = index
-}
-
-const handleLogin = (user: string) => {
-  isLoggedIn.value = true
-  username.value = user
+  router.push('/' + index)
 }
 
 const handleLogout = () => {
-  localStorage.removeItem('token')
-  localStorage.removeItem('username')
-  isLoggedIn.value = false
-  username.value = ''
+  authStore.logout()
+  router.push('/dashboard')
+}
+
+const showPwDialog = ref(false)
+const pwLoading = ref(false)
+const pwForm = ref({ old_password: '', new_password: '', confirm: '' })
+
+const handleChangePassword = async () => {
+  if (pwForm.value.new_password.length < 8) {
+    ElMessage.warning('新密码长度不能少于 8 位')
+    return
+  }
+  const pw = pwForm.value.new_password
+  if (!/[A-Z]/.test(pw) || !/[a-z]/.test(pw) || !/[0-9]/.test(pw)) {
+    ElMessage.warning('新密码必须包含大小写字母和数字')
+    return
+  }
+  if (pwForm.value.new_password !== pwForm.value.confirm) {
+    ElMessage.warning('两次输入的新密码不一致')
+    return
+  }
+  pwLoading.value = true
+  try {
+    const res = await authAPI.changePassword({
+      old_password: pwForm.value.old_password,
+      new_password: pwForm.value.new_password,
+    })
+    if (res.code === 0) {
+      ElMessage.success('密码修改成功，请重新登录')
+      showPwDialog.value = false
+      pwForm.value = { old_password: '', new_password: '', confirm: '' }
+      authStore.logout()
+      router.push('/dashboard')
+    } else {
+      ElMessage.error(res.msg || '修改失败')
+    }
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '修改失败')
+  } finally {
+    pwLoading.value = false
+  }
 }
 </script>
 
@@ -133,6 +213,7 @@ const handleLogout = () => {
 
 html, body, #app {
   height: 100%;
+  overflow: hidden;
 }
 
 .app-container {
@@ -148,6 +229,8 @@ html, body, #app {
   padding: 0 24px;
   height: 52px !important;
   box-shadow: 0 1px 4px rgba(0,0,0,.15);
+  position: relative;
+  z-index: 100;
 }
 
 .header-left {
@@ -179,48 +262,49 @@ html, body, #app {
   color: rgba(255,255,255,.85);
 }
 
+.header-action {
+  cursor: pointer;
+  color: rgba(255,255,255,.85);
+  transition: color 0.2s;
+}
+
+.header-action:hover {
+  color: #fff;
+}
+
+.header-divider {
+  color: rgba(255,255,255,.3);
+  font-size: 12px;
+}
+
+.main-container {
+  height: calc(100vh - 52px);
+  overflow: hidden;
+}
+
 .el-aside {
   background-color: #f8f9fa;
   border-right: 1px solid #e8e8e8;
   transition: width 0.3s ease;
   overflow: hidden;
   flex-shrink: 0;
-}
-
-.collapse-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 40px;
-  cursor: pointer;
-  color: #909399;
-  border-bottom: 1px solid #e8e8e8;
-  transition: color 0.2s, background-color 0.2s;
-}
-
-.collapse-btn:hover {
-  color: #2b6cb0;
-  background-color: #ecf5ff;
+  height: 100%;
+  position: sticky;
+  top: 0;
 }
 
 .el-menu-vertical {
   border-right: none;
+  height: 100%;
+  overflow-y: auto;
 }
 
-/* 折叠态：隐藏文字 */
-.el-menu--collapse .el-menu-item span {
-  display: none;
-}
-
-/* 折叠态 tooltip */
-.el-menu--collapse .el-menu-item {
-  position: relative;
-}
-
-.el-main {
+.main-content {
   background-color: #f0f2f5;
   padding: 16px;
   flex: 1;
   min-width: 0;
+  overflow-y: auto;
+  height: 100%;
 }
 </style>

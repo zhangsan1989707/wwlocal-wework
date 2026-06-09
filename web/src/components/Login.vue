@@ -23,13 +23,15 @@
 
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { authAPI } from '../api'
+import { useAuthStore } from '../stores/auth'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
 
-const emit = defineEmits<{
-  login: [username: string]
-}>()
+const router = useRouter()
+const route = useRoute()
+const authStore = useAuthStore()
 
 const form = reactive({
   username: '',
@@ -45,17 +47,17 @@ const handleLogin = async () => {
 
   loading.value = true
   try {
-    const res: any = await authAPI.login(form)
-    if (res.code === 0) {
-      localStorage.setItem('token', res.data.token)
-      localStorage.setItem('username', res.data.username)
+    const res = await authAPI.login({ username: form.username, password: form.password })
+    if (res.code === 0 && res.data?.username) {
+      authStore.login(res.data.username, res.data.role)
       ElMessage.success('登录成功')
-      emit('login', res.data.username)
+      const redirect = (route.query.redirect as string) || '/dashboard'
+      router.push(redirect)
     } else {
       ElMessage.error(res.msg || '登录失败')
     }
-  } catch (err: any) {
-    ElMessage.error(err.response?.data?.msg || '登录失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '登录失败')
   } finally {
     loading.value = false
   }

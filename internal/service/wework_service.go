@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -24,21 +24,22 @@ type WeWorkService struct {
 }
 
 func NewWeWorkService(cfg *config.WeWorkConfig) *WeWorkService {
+	return &WeWorkService{
+		baseURL: cfg.BaseURL,
+		cfg:     cfg,
+		client:  NewWeWorkHTTPClient(cfg),
+	}
+}
+
+// NewWeWorkHTTPClient 创建带连接池和 TLS 配置的 HTTP 客户端
+func NewWeWorkHTTPClient(cfg *config.WeWorkConfig) *http.Client {
 	tr := &http.Transport{
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: cfg.InsecureSkipVerify},
+		TLSClientConfig:     &tls.Config{InsecureSkipVerify: cfg.InsecureSkipVerify, MinVersion: tls.VersionTLS12},
 		MaxIdleConnsPerHost: 20,
 		MaxIdleConns:        100,
 		IdleConnTimeout:     90 * time.Second,
 	}
-
-	return &WeWorkService{
-		baseURL: cfg.BaseURL,
-		cfg:     cfg,
-		client: &http.Client{
-			Transport: tr,
-			Timeout:   30 * time.Second,
-		},
-	}
+	return &http.Client{Transport: tr, Timeout: 30 * time.Second}
 }
 
 func (s *WeWorkService) GetToken() (string, error) {
@@ -50,7 +51,7 @@ func (s *WeWorkService) GetToken() (string, error) {
 	}
 
 	path := fmt.Sprintf("/cgi-bin/gettoken?corpid=%s&corpsecret=%s", s.cfg.CorpID, s.cfg.Secret)
-	resp, err := s.doRequest("GET", path, nil)
+	resp, err := s.DoRequest("GET", path, nil)
 	if err != nil {
 		return "", fmt.Errorf("get token failed: %w", err)
 	}
@@ -66,11 +67,11 @@ func (s *WeWorkService) GetToken() (string, error) {
 	}
 
 	if result.ErrCode != 0 {
-		log.Printf("get token error: errcode=%d, errmsg=%s", result.ErrCode, result.ErrMsg)
+		slog.Error(fmt.Sprintf("get token error: errcode=%d, errmsg=%s", result.ErrCode, result.ErrMsg))
 		return "", fmt.Errorf("get token error: %s (errcode: %d)", result.ErrMsg, result.ErrCode)
 	}
 
-	log.Printf("token refreshed successfully, expires_in=%d", result.ExpiresIn)
+	slog.Info(fmt.Sprintf("token refreshed successfully, expires_in=%d", result.ExpiresIn))
 	s.token = result.AccessToken
 	s.tokenExp = time.Now().Add(time.Duration(result.ExpiresIn-60) * time.Second)
 
@@ -83,7 +84,7 @@ func (s *WeWorkService) GetLogList(featureID int, startTime, endTime int64, star
 		return nil, err
 	}
 
-	log.Printf("GetLogList: feature=%d, start=%d, end=%d, index=%d, limit=%d", featureID, startTime, endTime, startIndex, limit)
+	slog.Info(fmt.Sprintf("GetLogList: feature=%d, start=%d, end=%d, index=%d, limit=%d", featureID, startTime, endTime, startIndex, limit))
 	path := "/cgi-bin/corp/get_log_list"
 	reqBody := map[string]interface{}{
 		"feature_id":  featureID,
@@ -93,7 +94,7 @@ func (s *WeWorkService) GetLogList(featureID int, startTime, endTime int64, star
 		"limit":       limit,
 	}
 
-	resp, err := s.doRequest("POST", path, reqBody, token)
+	resp, err := s.DoRequest("POST", path, reqBody, token)
 	if err != nil {
 		return nil, fmt.Errorf("get log list failed: %w", err)
 	}
@@ -112,10 +113,10 @@ func (s *WeWorkService) GetLogList(featureID int, startTime, endTime int64, star
 		return nil, fmt.Errorf("parse log list response failed: %w", err)
 	}
 
-	log.Printf("GetLogList: feature=%d, index=%d, got %d items", featureID, startIndex, len(result.LogList))
+	slog.Info(fmt.Sprintf("GetLogList: feature=%d, index=%d, got %d items", featureID, startIndex, len(result.LogList)))
 
 	if result.ErrCode != 0 {
-		log.Printf("get log list error: feature=%d, errcode=%d, errmsg=%s", featureID, result.ErrCode, result.ErrMsg)
+		slog.Error(fmt.Sprintf("get log list error: feature=%d, errcode=%d, errmsg=%s", featureID, result.ErrCode, result.ErrMsg))
 		return nil, fmt.Errorf("get log list error: %s (errcode: %d)", result.ErrMsg, result.ErrCode)
 	}
 
@@ -130,11 +131,16 @@ type LogItem struct {
 	EncData   string `json:"enc_data"`
 }
 
-func (s *WeWorkService) doRequest(method, path string, body interface{}, token ...string) ([]byte, error) {
+func (s *WeWorkService) DoRequest(method, path string, body interface{}, token ...string) ([]byte, error) {
+	return doHTTPRequest(s.client, s.baseURL, method, path, body, token...)
+}
+
+// doHTTPRequest 通用政务微信 API 请求，带 3 次重试
+func doHTTPRequest(client *http.Client, baseURL, method, path string, body interface{}, token ...string) ([]byte, error) {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			time.Sleep(time.Duration(1<<(attempt-1)) * time.Second) // 1s, 2s
+			time.Sleep(time.Duration(1<<(attempt-1)) * time.Second)
 		}
 
 		var reqBody io.Reader
@@ -143,7 +149,7 @@ func (s *WeWorkService) doRequest(method, path string, body interface{}, token .
 			reqBody = strings.NewReader(string(bodyBytes))
 		}
 
-		req, err := http.NewRequest(method, s.baseURL+path, reqBody)
+		req, err := http.NewRequest(method, baseURL+path, reqBody)
 		if err != nil {
 			return nil, err
 		}
@@ -155,10 +161,10 @@ func (s *WeWorkService) doRequest(method, path string, body interface{}, token .
 			req.URL.RawQuery = q.Encode()
 		}
 
-		resp, err := s.client.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			lastErr = fmt.Errorf("http request failed: %w", err)
-			log.Printf("request attempt %d failed: %v", attempt+1, err)
+			slog.Warn(fmt.Sprintf("request attempt %d failed: %v", attempt+1, err))
 			continue
 		}
 
@@ -171,7 +177,7 @@ func (s *WeWorkService) doRequest(method, path string, body interface{}, token .
 
 		if resp.StatusCode >= 500 {
 			lastErr = fmt.Errorf("server error: HTTP %d", resp.StatusCode)
-			log.Printf("request attempt %d got HTTP %d", attempt+1, resp.StatusCode)
+			slog.Warn(fmt.Sprintf("request attempt %d got HTTP %d", attempt+1, resp.StatusCode))
 			continue
 		}
 

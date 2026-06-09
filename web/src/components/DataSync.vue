@@ -1,5 +1,45 @@
 <template>
   <div class="data-sync">
+    <el-card class="options-card">
+      <template #header>
+        <div class="card-header">
+          <span class="card-title">开放数据日志选项</span>
+          <el-button size="small" @click="handleReset" :disabled="syncStatus.running">
+            <el-icon><Refresh /></el-icon>
+            重置选项
+          </el-button>
+        </div>
+      </template>
+
+      <el-form label-position="left" :inline="true">
+        <el-form-item label="日志类型">
+          <el-checkbox v-model="syncAll" :disabled="syncStatus.running">
+            同步所有 ({{ features.length }} 项)
+          </el-checkbox>
+          <el-select
+            v-if="!syncAll"
+            v-model="form.feature_ids"
+            multiple
+            placeholder="选择日志类型"
+            style="width: 400px; margin-left: 12px"
+            :disabled="syncStatus.running"
+            collapse-tags
+            collapse-tags-tooltip
+          >
+            <el-option
+              v-for="item in features"
+              :key="item.feature_id"
+              :label="item.name"
+              :value="item.feature_id"
+            >
+              <span style="float: left">{{ item.name }}</span>
+              <span style="float: right; color: #8492a6; font-size: 12px">{{ item.feature_id }}</span>
+            </el-option>
+          </el-select>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
     <el-card class="sync-card">
       <template #header>
         <div class="card-header">
@@ -69,7 +109,59 @@
     <el-card class="sync-card">
       <template #header>
         <div class="card-header">
-          <span class="card-title">按时间范围同步</span>
+          <span class="card-title">夜间分析任务</span>
+          <el-tag :type="nightlyStatus.job_running ? 'warning' : nightlyStatus.running ? 'success' : 'info'" size="large">
+            {{ nightlyStatus.job_running ? '分析中...' : nightlyStatus.running ? '已启用' : '未启用' }}
+          </el-tag>
+        </div>
+      </template>
+
+      <el-descriptions :column="3" border size="small">
+        <el-descriptions-item label="执行时间">
+          {{ nightlyStatus.schedule_time || '01:00' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="统计日期">
+          {{ nightlyStatus.lookback_days > 0 ? `每天回算 ${nightlyStatus.lookback_days} 天前` : '昨天' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="任务状态">
+          <el-tag :type="nightlyStatus.job_running ? 'warning' : nightlyStatus.running ? 'success' : 'info'" size="small">
+            {{ nightlyStatus.job_running ? '正在计算' : nightlyStatus.running ? '等待下次执行' : '未启用' }}
+          </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="最新指标日期">
+          {{ nightlyStatus.latest_stat_date || '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="最新用户明细日期">
+          {{ nightlyStatus.latest_user_list_date || '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="结果页面">
+          运营总览
+        </el-descriptions-item>
+      </el-descriptions>
+
+      <div class="scheduler-actions" style="margin-top: 16px">
+        <el-button
+          type="primary"
+          plain
+          size="large"
+          :loading="nightlyStatus.job_running"
+          :disabled="nightlyStatus.job_running"
+          @click="handleNightlyRun"
+        >
+          <el-icon><DataAnalysis /></el-icon>
+          重新计算昨天数据
+        </el-button>
+        <el-button size="large" @click="checkNightlyStatus">
+          <el-icon><Refresh /></el-icon>
+          刷新状态
+        </el-button>
+      </div>
+    </el-card>
+
+    <el-card class="sync-card">
+      <template #header>
+        <div class="card-header">
+          <span class="card-title">按时间范围同步开放数据日志</span>
           <el-tag :type="syncStatus.running ? 'warning' : 'success'" size="large">
             {{ syncStatus.running ? '同步中...' : '空闲' }}
           </el-tag>
@@ -77,63 +169,31 @@
       </template>
 
       <el-form label-position="top">
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <el-form-item label="时间范围">
-              <div class="time-range-container">
-                <el-button-group class="time-shortcuts">
-                  <el-button
-                    v-for="shortcut in timeShortcuts"
-                    :key="shortcut.label"
-                    :type="activeShortcut === shortcut.label ? 'primary' : 'default'"
-                    size="small"
-                    @click="applyTimeShortcut(shortcut)"
-                  >
-                    {{ shortcut.label }}
-                  </el-button>
-                </el-button-group>
-                <el-date-picker
-                  v-model="dateRange"
-                  type="datetimerange"
-                  range-separator="至"
-                  start-placeholder="开始时间"
-                  end-placeholder="结束时间"
-                  style="width: 100%; margin-top: 8px"
-                  @change="handleDateChange"
-                />
-              </div>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="同步选项">
-              <div class="sync-options">
-                <el-checkbox v-model="syncAll" :disabled="syncStatus.running">
-                  同步所有日志类型 ({{ features.length }} 项)
-                </el-checkbox>
-                <el-select
-                  v-if="!syncAll"
-                  v-model="form.feature_ids"
-                  multiple
-                  placeholder="请选择要同步的日志类型"
-                  style="width: 100%; margin-top: 8px"
-                  :disabled="syncStatus.running"
-                  collapse-tags
-                  collapse-tags-tooltip
-                >
-                  <el-option
-                    v-for="item in features"
-                    :key="item.id"
-                    :label="item.name"
-                    :value="item.id"
-                  >
-                    <span style="float: left">{{ item.name }}</span>
-                    <span style="float: right; color: #8492a6; font-size: 12px">{{ item.id }}</span>
-                  </el-option>
-                </el-select>
-              </div>
-            </el-form-item>
-          </el-col>
-        </el-row>
+        <el-form-item label="时间范围">
+          <div class="time-range-container">
+            <el-button-group class="time-shortcuts">
+              <el-button
+                v-for="shortcut in timeShortcuts"
+                :key="shortcut.label"
+                :type="activeShortcut === shortcut.label ? 'primary' : 'default'"
+                size="small"
+                @click="applyTimeShortcut(shortcut)"
+              >
+                {{ shortcut.label }}
+              </el-button>
+            </el-button-group>
+            <el-date-picker
+              v-model="dateRange"
+              type="datetimerange"
+              format="YYYY-MM-DD HH:mm:ss"
+              range-separator="至"
+              start-placeholder="开始时间"
+              end-placeholder="结束时间"
+              style="width: 100%; margin-top: 8px"
+              @change="handleDateChange"
+            />
+          </div>
+        </el-form-item>
 
         <el-form-item>
           <el-button
@@ -144,19 +204,61 @@
             size="large"
           >
             <el-icon><VideoPlay /></el-icon>
-            {{ syncStatus.running ? '同步进行中...' : '开始同步' }}
-          </el-button>
-          <el-button @click="handleReset" :disabled="syncStatus.running" size="large">
-            <el-icon><Refresh /></el-icon>
-            重置
+            {{ syncStatus.running ? '同步进行中...' : '同步开放数据日志' }}
           </el-button>
         </el-form-item>
       </el-form>
     </el-card>
 
+    <el-card class="sync-card">
+      <template #header>
+        <div class="card-header">
+          <span class="card-title">企微操作日志同步</span>
+          <el-tag :type="adminOperStatus.running ? 'warning' : 'success'" size="large">
+            {{ adminOperStatus.running ? '同步中...' : '空闲' }}
+          </el-tag>
+        </div>
+      </template>
+
+      <el-descriptions :column="3" border size="small">
+        <el-descriptions-item label="已同步总数">
+          {{ adminOperStatus.total > 0 ? formatNumber(adminOperStatus.total) : '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="最新日志时间">
+          {{ formatTime(adminOperStatus.last_time) }}
+        </el-descriptions-item>
+        <el-descriptions-item label="本次同步数量">
+          {{ adminOperStatus.synced ?? 0 }}
+        </el-descriptions-item>
+        <el-descriptions-item label="开始时间">
+          {{ formatTime(adminOperStatus.started_at) }}
+        </el-descriptions-item>
+        <el-descriptions-item label="完成时间">
+          {{ formatTime(adminOperStatus.ended_at) }}
+        </el-descriptions-item>
+        <el-descriptions-item label="错误信息">
+          <span v-if="adminOperStatus.last_error" class="error-text">{{ adminOperStatus.last_error }}</span>
+          <span v-else>-</span>
+        </el-descriptions-item>
+      </el-descriptions>
+
+      <div class="scheduler-actions" style="margin-top: 16px">
+        <el-button
+          type="primary"
+          @click="handleAdminOperSync"
+          :loading="adminOperStatus.running"
+          :disabled="adminOperStatus.running"
+          size="large"
+        >
+          <el-icon><VideoPlay /></el-icon>
+          {{ adminOperStatus.running ? '同步进行中...' : '同步企微操作日志' }}
+        </el-button>
+      </div>
+    </el-card>
+
     <el-card class="status-card">
       <template #header>
-        <span class="card-title">同步状态</span>
+        <span class="card-title">开放数据日志同步状态</span>
       </template>
 
       <div v-if="syncStatus.running" class="sync-progress">
@@ -213,6 +315,52 @@
             </template>
           </el-table-column>
         </el-table>
+
+        <div v-if="schemaAcceptanceData.length > 0" class="schema-acceptance">
+          <div class="subsection-header">
+            <h4>结构化验收</h4>
+            <el-button size="small" link :loading="schemaLoading" @click="loadSchemaQuality">
+              刷新验收
+            </el-button>
+          </div>
+          <el-table :data="schemaAcceptanceData" border max-height="260" size="small" v-loading="schemaLoading">
+            <el-table-column prop="feature_id" label="日志类型编号" width="120" align="center" />
+            <el-table-column prop="name" label="数据类型" min-width="150" />
+            <el-table-column label="结构化" width="100" align="center">
+              <template #default="{ row }">
+                <el-tag :type="row.structured_supported ? 'success' : 'info'" size="small">
+                  {{ row.structured_supported ? '已定义' : '未定义' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="行为查询" width="100" align="center">
+              <template #default="{ row }">
+                <el-tag :type="row.behavior_supported ? 'success' : 'info'" size="small">
+                  {{ row.behavior_supported ? '支持' : '仅原文' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="记录数" width="100" align="center">
+              <template #default="{ row }">{{ formatNumber(row.rows) }}</template>
+            </el-table-column>
+            <el-table-column prop="field_count" label="字段数" width="90" align="center" />
+            <el-table-column label="平均覆盖" width="110" align="center">
+              <template #default="{ row }">
+                <el-tag :type="coverageTagType(row.avg_coverage)" size="small">
+                  {{ formatPercent(row.avg_coverage) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="最低覆盖" width="110" align="center">
+              <template #default="{ row }">
+                <el-tag :type="coverageTagType(row.min_coverage)" size="small">
+                  {{ formatPercent(row.min_coverage) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="missing_fields" label="缺失字段" min-width="180" show-overflow-tooltip />
+          </el-table>
+        </div>
       </div>
 
       <el-empty v-if="!syncStatus.running && (!syncStatus.results || Object.keys(syncStatus.results).length === 0)" description="暂无同步记录" />
@@ -278,35 +426,61 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
-import { syncAPI, schedulerAPI, syncHistoryAPI, syncFeatureAPI } from '../api'
+import { syncAPI, schedulerAPI, nightlyAPI, syncHistoryAPI, syncFeatureAPI, adminOperLogAPI, systemAPI } from '../api'
+import type { AdminOperLogSyncStatus, NightlyJobStatus, SchedulerStatus, SchemaQualityInfo, SyncFeature, SyncHistory, SyncStatus } from '../types/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { VideoPlay, VideoPause, Refresh, Clock } from '@element-plus/icons-vue'
+import { VideoPlay, VideoPause, Refresh, Clock, DataAnalysis } from '@element-plus/icons-vue'
 
 const dateRange = ref<[Date, Date] | null>(null)
 const activeShortcut = ref<string | null>(null)
-const syncStatus = ref<any>({
+const syncStatus = ref<SyncStatus>({
   running: false,
   progress: 0,
   total: 0,
-  results: {}
+  failed: 0,
+  current_feature: 0,
+  last_sync: '',
+  results: {} as Record<number, number>,
+  errors: {} as Record<number, string>,
 })
-const schedulerStatus = ref<any>({
+const schedulerStatus = ref<SchedulerStatus>({
   running: false,
   interval: '',
+})
+const nightlyStatus = ref<NightlyJobStatus>({
+  enabled: false,
+  schedule_time: '',
+  lookback_days: 1,
+  running: false,
+  job_running: false,
 })
 const startDelay = ref('1h')
 const syncAll = ref(true)
 const form = reactive({
   feature_ids: [] as number[],
 })
-const features = ref<any[]>([])
+const features = ref<SyncFeature[]>([])
 let pollTimer: ReturnType<typeof setInterval> | null = null
+let adminOperPollTimer: ReturnType<typeof setInterval> | null = null
+let nightlyPollTimer: ReturnType<typeof setInterval> | null = null
+let nightlyPollCount = 0
+let nightlySawRunning = false
+const NIGHTLY_POLL_INTERVAL = 3000
+const NIGHTLY_MAX_POLLS = 600
 
-const syncHistory = ref<any[]>([])
+const adminOperStatus = ref<AdminOperLogSyncStatus>({
+  running: false,
+  total: 0,
+  synced: 0,
+})
+
+const syncHistory = ref<SyncHistory[]>([])
 const historyTotal = ref(0)
 const historyPage = ref(1)
 const historyPageSize = ref(10)
 const historyLoading = ref(false)
+const schemaQuality = ref<SchemaQualityInfo[]>([])
+const schemaLoading = ref(false)
 
 const timeShortcuts = [
   { label: '最近1天', hours: 24 },
@@ -323,22 +497,51 @@ const progressPercentage = computed(() => {
 const progressFormat = (percentage: number) => `${percentage}%`
 
 const resultTableData = computed(() => {
-  if (!syncStatus.value?.results) return []
-  const errors = syncStatus.value?.errors || {}
-  return Object.entries(syncStatus.value.results).map(([featureId, count]) => ({
-    feature_id: featureId,
+  const results = syncStatus.value.results
+  const errors = syncStatus.value.errors || {}
+  if (!results || Object.keys(results).length === 0) return []
+  return Object.entries(results).map(([featureId, count]) => ({
+    feature_id: Number(featureId),
     name: getFeatureName(Number(featureId)),
-    count: count as number,
-    error: errors[featureId] || '',
+    count,
+    error: errors[Number(featureId)] || '',
   }))
 })
 
+const schemaAcceptanceData = computed(() => {
+  const resultIDs = new Set(Object.keys(syncStatus.value.results || {}).map(Number))
+  if (resultIDs.size === 0) return []
+  return schemaQuality.value
+    .filter(item => resultIDs.has(item.feature_id))
+    .map(item => {
+      const fields = item.fields || []
+      const presentFields = fields.filter(field => field.present)
+      const coverages = presentFields.map(field => field.coverage_rate || 0)
+      const avgCoverage = coverages.length > 0
+        ? coverages.reduce((sum, value) => sum + value, 0) / coverages.length
+        : 0
+      const minCoverage = coverages.length > 0 ? Math.min(...coverages) : 0
+      const missingFields = fields.filter(field => !field.present).map(field => field.name)
+      return {
+        feature_id: item.feature_id,
+        name: getFeatureName(item.feature_id),
+        structured_supported: item.structured_supported,
+        behavior_supported: item.behavior_supported,
+        rows: item.rows,
+        field_count: fields.length,
+        avg_coverage: avgCoverage,
+        min_coverage: minCoverage,
+        missing_fields: missingFields.length > 0 ? missingFields.join(', ') : '-',
+      }
+    })
+})
+
 const getFeatureName = (featureId: number) => {
-  const feature = features.value.find(f => f.id === featureId)
+  const feature = features.value.find(f => f.feature_id === featureId)
   return feature ? feature.name : `Feature ${featureId}`
 }
 
-const formatTime = (timeStr: string) => {
+const formatTime = (timeStr?: string) => {
   if (!timeStr || timeStr === '0001-01-01T00:00:00Z') return '-'
   const date = new Date(timeStr)
   return date.toLocaleString('zh-CN')
@@ -346,22 +549,28 @@ const formatTime = (timeStr: string) => {
 
 onMounted(async () => {
   try {
-    const res: any = await syncFeatureAPI.list()
+    const res = await syncFeatureAPI.list()
     if (res.code === 0) {
-      // 只显示启用的 feature 用于同步下拉
-      features.value = (res.data || []).filter((f: any) => f.enabled)
+      features.value = (res.data || []).filter(f => f.enabled)
     }
   } catch (err) {
     console.error(err)
   }
   await checkStatus()
+  await checkAdminOperStatus()
   await checkSchedulerStatus()
+  await checkNightlyStatus()
+  await loadSchemaQuality()
   await loadSyncHistory()
   if (syncStatus.value.running) startPolling()
+  if (adminOperStatus.value.running) startAdminOperPolling()
+  if (nightlyStatus.value.job_running) startNightlyPolling()
 })
 
 onUnmounted(() => {
   stopPolling()
+  stopAdminOperPolling()
+  stopNightlyPolling()
 })
 
 const startPolling = () => {
@@ -369,6 +578,7 @@ const startPolling = () => {
   pollTimer = setInterval(async () => {
     await checkStatus()
     if (syncStatus.value && !syncStatus.value.running) {
+      await loadSchemaQuality()
       stopPolling()
     }
   }, 2000)
@@ -379,6 +589,62 @@ const stopPolling = () => {
     clearInterval(pollTimer)
     pollTimer = null
   }
+}
+
+const startAdminOperPolling = () => {
+  stopAdminOperPolling()
+  adminOperPollTimer = setInterval(async () => {
+    await checkAdminOperStatus()
+    if (!adminOperStatus.value.running) {
+      stopAdminOperPolling()
+      await loadSyncHistory()
+    }
+  }, 2000)
+}
+
+const stopAdminOperPolling = () => {
+  if (adminOperPollTimer) {
+    clearInterval(adminOperPollTimer)
+    adminOperPollTimer = null
+  }
+}
+
+const refreshAfterNightlyFinished = async () => {
+  await checkNightlyStatus()
+  await loadSyncHistory()
+  await loadSchemaQuality()
+  await checkStatus()
+}
+
+const startNightlyPolling = (assumeRunning = false) => {
+  stopNightlyPolling()
+  nightlyPollCount = 0
+  nightlySawRunning = assumeRunning || nightlyStatus.value.job_running
+  nightlyPollTimer = setInterval(async () => {
+    nightlyPollCount += 1
+    const status = await checkNightlyStatus()
+    if (status?.job_running) {
+      nightlySawRunning = true
+    }
+    if (status && nightlySawRunning && !status.job_running) {
+      stopNightlyPolling()
+      await refreshAfterNightlyFinished()
+      ElMessage.success('夜间分析任务已完成')
+      return
+    }
+    if (nightlyPollCount >= NIGHTLY_MAX_POLLS) {
+      stopNightlyPolling()
+      ElMessage.warning('夜间分析任务仍在执行，请稍后手动刷新状态')
+    }
+  }, NIGHTLY_POLL_INTERVAL)
+}
+
+const stopNightlyPolling = () => {
+  if (nightlyPollTimer) {
+    clearInterval(nightlyPollTimer)
+    nightlyPollTimer = null
+  }
+  nightlySawRunning = false
 }
 
 const applyTimeShortcut = (shortcut: { label: string; hours: number }) => {
@@ -394,13 +660,13 @@ const handleDateChange = () => {
 
 const handleSchedulerStart = async () => {
   try {
-    const res: any = await schedulerAPI.start({ start_delay: startDelay.value })
+    const res = await schedulerAPI.start({ start_delay: startDelay.value })
     if (res.code === 0) {
       ElMessage.success('定时同步已启动')
-      schedulerStatus.value = res.data
+      if (res.data) schedulerStatus.value = res.data
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '启动失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '启动失败')
   }
 }
 
@@ -414,13 +680,13 @@ const handleSchedulerStop = async () => {
   } catch { return }
 
   try {
-    const res: any = await schedulerAPI.stop()
+    const res = await schedulerAPI.stop()
     if (res.code === 0) {
       ElMessage.success('定时同步已停止')
-      schedulerStatus.value = res.data
+      if (res.data) schedulerStatus.value = res.data
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '停止失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '停止失败')
   }
 }
 
@@ -439,15 +705,43 @@ const handleIncrementalSync = async () => {
   } catch { return }
 
   try {
-    const res: any = await schedulerAPI.incrementalSync({ sync_all: true })
+    const res = await schedulerAPI.incrementalSync({ sync_all: true })
     if (res.code === 0) {
       ElMessage.success('同步任务已启动')
       startPolling()
     } else {
       ElMessage.error(res.msg || '增量同步启动失败')
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '增量同步启动失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '增量同步启动失败')
+  }
+}
+
+const handleNightlyRun = async () => {
+  if (nightlyStatus.value.job_running) {
+    ElMessage.warning('夜间分析任务正在执行中')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      '将重新计算昨天的运营总览指标和用户明细，确定开始吗？',
+      '确认重新计算',
+      { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' }
+    )
+  } catch { return }
+
+  try {
+    const res = await nightlyAPI.run()
+    if (res.code === 0) {
+      ElMessage.success('夜间分析任务已启动')
+      await checkNightlyStatus()
+      startNightlyPolling(true)
+    } else {
+      ElMessage.error(res.msg || '夜间分析任务启动失败')
+    }
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '夜间分析任务启动失败')
   }
 }
 
@@ -466,7 +760,7 @@ const handleRetryFeature = async (featureId: number) => {
   } catch { return }
 
   try {
-    const res: any = await schedulerAPI.incrementalSync({
+    const res = await schedulerAPI.incrementalSync({
       sync_all: false,
       feature_ids: [featureId],
     })
@@ -476,8 +770,8 @@ const handleRetryFeature = async (featureId: number) => {
     } else {
       ElMessage.error(res.msg || '重试启动失败')
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '重试启动失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '重试启动失败')
   }
 }
 
@@ -494,7 +788,7 @@ const handleSync = async () => {
 
   try {
     await ElMessageBox.confirm(
-      '将按选定时间范围从政务微信拉取数据并解密存储，确定开始吗？',
+      '将按选定时间范围从政务微信拉取开放数据日志并解密存储，确定开始吗？',
       '确认同步',
       { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' }
     )
@@ -506,7 +800,7 @@ const handleSync = async () => {
     const startTime = Math.floor(dateRange.value[0].getTime() / 1000)
     const endTime = Math.floor(dateRange.value[1].getTime() / 1000)
 
-    const res: any = await syncAPI.sync({
+    const res = await syncAPI.sync({
       sync_all: syncAll.value,
       feature_ids: form.feature_ids,
       start_time: startTime,
@@ -514,19 +808,49 @@ const handleSync = async () => {
     })
 
     if (res.code === 0) {
-      ElMessage.success('全量同步已启动')
+      ElMessage.success('开放数据日志同步已启动')
       startPolling()
     } else {
       ElMessage.error(res.msg || '同步启动失败')
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '同步启动失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '同步启动失败')
+  }
+}
+
+const handleAdminOperSync = async () => {
+  if (!dateRange.value) {
+    ElMessage.warning('请选择时间范围')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      '将按选定时间范围同步企微操作日志，确定开始吗？',
+      '确认同步',
+      { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+
+  try {
+    const startTime = Math.floor(dateRange.value[0].getTime() / 1000)
+    const endTime = Math.floor(dateRange.value[1].getTime() / 1000)
+    const res = await adminOperLogAPI.sync({ start_time: startTime, end_time: endTime })
+    if (res.code === 0) {
+      ElMessage.success('企微操作日志同步已启动')
+      await checkAdminOperStatus()
+      startAdminOperPolling()
+    } else {
+      ElMessage.error(res.msg || '企微操作日志同步启动失败')
+    }
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '企微操作日志同步启动失败')
   }
 }
 
 const handleReset = () => {
-  dateRange.value = null
-  activeShortcut.value = null
   syncAll.value = true
   form.feature_ids = []
 }
@@ -543,21 +867,21 @@ const handleCancel = async () => {
   }
 
   try {
-    const res: any = await syncAPI.cancel()
+    const res = await syncAPI.cancel()
     if (res.code === 0) {
       ElMessage.success('已发送取消请求')
     } else {
       ElMessage.error(res.msg || '取消失败')
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '取消失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '取消失败')
   }
 }
 
 const checkStatus = async () => {
   try {
-    const res: any = await syncAPI.status()
-    if (res.code === 0) {
+    const res = await syncAPI.status()
+    if (res.code === 0 && res.data) {
       syncStatus.value = res.data
     }
   } catch (err) {
@@ -565,10 +889,35 @@ const checkStatus = async () => {
   }
 }
 
+const checkAdminOperStatus = async () => {
+  try {
+    const res = await adminOperLogAPI.syncStatus()
+    if (res.code === 0 && res.data) {
+      adminOperStatus.value = res.data
+    }
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+const loadSchemaQuality = async () => {
+  schemaLoading.value = true
+  try {
+    const res = await systemAPI.getStatus()
+    if (res.code === 0) {
+      schemaQuality.value = res.data?.schema_quality || []
+    }
+  } catch (err) {
+    console.error(err)
+  } finally {
+    schemaLoading.value = false
+  }
+}
+
 const checkSchedulerStatus = async () => {
   try {
-    const res: any = await schedulerAPI.status()
-    if (res.code === 0) {
+    const res = await schedulerAPI.status()
+    if (res.code === 0 && res.data) {
       schedulerStatus.value = res.data
     }
   } catch (err) {
@@ -576,14 +925,27 @@ const checkSchedulerStatus = async () => {
   }
 }
 
+const checkNightlyStatus = async () => {
+  try {
+    const res = await nightlyAPI.status()
+    if (res.code === 0 && res.data) {
+      nightlyStatus.value = res.data
+      return res.data
+    }
+  } catch (err) {
+    console.error(err)
+  }
+  return null
+}
+
 const loadSyncHistory = async () => {
   historyLoading.value = true
   try {
-    const res: any = await syncHistoryAPI.list({
+    const res = await syncHistoryAPI.list({
       page: historyPage.value,
       page_size: historyPageSize.value,
     })
-    if (res.code === 0) {
+    if (res.code === 0 && res.data) {
       syncHistory.value = res.data.data || []
       historyTotal.value = res.data.total || 0
     }
@@ -613,11 +975,65 @@ const formatDuration = (ms: number) => {
   return `${min}m${sec}s`
 }
 
+const formatNumber = (n: number) => {
+  if (n >= 10000) return (n / 10000).toFixed(1) + '万'
+  return Number(n || 0).toLocaleString()
+}
+
+const formatPercent = (rate: number) => {
+  return `${Math.round((rate || 0) * 100)}%`
+}
+
+const coverageTagType = (rate: number) => {
+  if (rate >= 0.8) return 'success'
+  if (rate > 0) return 'warning'
+  return 'info'
+}
+
 </script>
 
 <style scoped>
 .data-sync {
   padding: 0;
+}
+
+.options-card {
+  margin-bottom: 16px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+}
+
+.options-card :deep(.el-card__header) {
+  background: rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
+.options-card :deep(.el-card__body) {
+  background: rgba(255, 255, 255, 0.95);
+  padding: 20px;
+}
+
+.options-card .card-title {
+  color: white;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.options-card :deep(.el-form-item__label) {
+  color: #606266;
+  font-weight: 600;
+  padding-right: 12px;
+}
+
+.options-card :deep(.el-button) {
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+}
+
+.options-card :deep(.el-button:hover) {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .sync-card,
@@ -683,6 +1099,16 @@ const formatDuration = (ms: number) => {
   margin: 0 0 12px 0;
   font-size: 14px;
   color: #303133;
+}
+
+.schema-acceptance {
+  margin-top: 16px;
+}
+
+.subsection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .error-text {

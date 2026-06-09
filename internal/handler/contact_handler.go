@@ -1,10 +1,9 @@
 package handler
 
 import (
-	"log"
-	"runtime/debug"
 	"strconv"
 
+	"wwlocal-wework/internal/model"
 	"wwlocal-wework/internal/repository"
 	"wwlocal-wework/internal/service"
 	"wwlocal-wework/pkg/response"
@@ -14,7 +13,17 @@ import (
 
 type ContactHandler struct {
 	contactSyncSvc *service.ContactSyncService
-	contactRepo    *repository.ContactRepository
+	contactRepo    contactRepository
+}
+
+type contactRepository interface {
+	QueryContacts(name, mobile string, page, pageSize int) ([]model.Contact, int64, error)
+	GetAllDepartments() ([]model.Department, error)
+	GetMemberCountByDepartmentIDs(deptIDs []int) (map[int]int, error)
+	GetTotalContacts() (int64, error)
+	GetContactsByDepartmentID(deptID int, page, pageSize int) ([]model.Contact, int64, error)
+	GetNamesByUserIDs(userIDs []string) (map[string]string, error)
+	GetContactByUserID(userID string) (*model.Contact, error)
 }
 
 func NewContactHandler(contactSyncSvc *service.ContactSyncService, contactRepo *repository.ContactRepository) *ContactHandler {
@@ -22,16 +31,9 @@ func NewContactHandler(contactSyncSvc *service.ContactSyncService, contactRepo *
 }
 
 func (h *ContactHandler) List(c echo.Context) error {
-	page, _ := strconv.Atoi(c.QueryParam("page"))
-	if page <= 0 {
-		page = 1
-	}
-	pageSize, _ := strconv.Atoi(c.QueryParam("page_size"))
-	if pageSize <= 0 {
-		pageSize = 20
-	}
-	if pageSize > 100 {
-		pageSize = 100
+	page, pageSize, err := parsePagination(c)
+	if err != nil {
+		return response.Error(c, 400, err.Error())
 	}
 	name := c.QueryParam("name")
 	mobile := c.QueryParam("mobile")
@@ -62,18 +64,9 @@ func (h *ContactHandler) Sync(c echo.Context) error {
 		return response.Error(c, 409, "contact sync already in progress")
 	}
 
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("contact sync goroutine panic: %v\n%s", r, debug.Stack())
-			}
-			h.contactSyncSvc.ResetRunning()
-		}()
-		if !h.contactSyncSvc.TryStartRunning() {
-			return
-		}
+	h.contactSyncSvc.StartSync(func() {
 		h.contactSyncSvc.SyncContactsFull()
-	}()
+	})
 
 	return response.Success(c, map[string]interface{}{
 		"message": "contact sync started",
@@ -86,18 +79,9 @@ func (h *ContactHandler) SyncIncremental(c echo.Context) error {
 		return response.Error(c, 409, "contact sync already in progress")
 	}
 
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("contact incremental sync goroutine panic: %v\n%s", r, debug.Stack())
-			}
-			h.contactSyncSvc.ResetRunning()
-		}()
-		if !h.contactSyncSvc.TryStartRunning() {
-			return
-		}
+	h.contactSyncSvc.StartSync(func() {
 		h.contactSyncSvc.SyncContactsIncremental()
-	}()
+	})
 
 	return response.Success(c, map[string]interface{}{
 		"message": "contact incremental sync started",
@@ -154,16 +138,9 @@ func (h *ContactHandler) GetDeptMembers(c echo.Context) error {
 		return response.Error(c, 400, "invalid department id")
 	}
 
-	page, _ := strconv.Atoi(c.QueryParam("page"))
-	if page <= 0 {
-		page = 1
-	}
-	pageSize, _ := strconv.Atoi(c.QueryParam("page_size"))
-	if pageSize <= 0 {
-		pageSize = 20
-	}
-	if pageSize > 100 {
-		pageSize = 100
+	page, pageSize, err := parsePagination(c)
+	if err != nil {
+		return response.Error(c, 400, err.Error())
 	}
 
 	contacts, total, err := h.contactRepo.GetContactsByDepartmentID(deptID, page, pageSize)

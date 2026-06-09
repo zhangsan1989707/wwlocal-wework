@@ -3,13 +3,17 @@ package service
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
+	"runtime/debug"
+	"strconv"
 	"sync"
 	"time"
 
+	"gorm.io/gorm"
 	"wwlocal-wework/config"
 	"wwlocal-wework/internal/model"
 	"wwlocal-wework/internal/repository"
+	"wwlocal-wework/pkg/metrics"
 )
 
 type SyncService struct {
@@ -60,15 +64,15 @@ func (s *SyncService) SyncFeature(featureID int, startTime, endTime int64) (int,
 
 	// 按天拆分，政务微信 API 要求 start_time 和 end_time 在同一天
 	days := s.splitByDay(startTime, endTime)
-	log.Printf("SyncFeature: feature=%d, %d days to process", featureID, len(days))
+	slog.Info(fmt.Sprintf("SyncFeature: feature=%d, %d days to process", featureID, len(days)))
 	for di, day := range days {
 		if s.isCancelled() {
 			return totalFetched, totalFailed, maxLogTime, nil
 		}
 		if di%5 == 0 {
-			log.Printf("SyncFeature: feature=%d, day %d/%d (ts=%d)", featureID, di+1, len(days), day.start)
+			slog.Info(fmt.Sprintf("SyncFeature: feature=%d, day %d/%d (ts=%d)", featureID, di+1, len(days), day.start))
 		}
-		fetched, failed, dayMax, err := s.syncFeatureDay(featureID, day.start, day.end, limit)
+		fetched, failed, dayMax, err := s.syncFeatureDay(nil, featureID, day.start, day.end, limit)
 		totalFetched += fetched
 		totalFailed += failed
 		if dayMax > maxLogTime {
@@ -109,7 +113,7 @@ func (s *SyncService) splitByDay(startTime, endTime int64) []dayRange {
 	return days
 }
 
-func (s *SyncService) syncFeatureDay(featureID int, startTime, endTime int64, limit int) (int, int, int64, error) {
+func (s *SyncService) syncFeatureDay(tx *gorm.DB, featureID int, startTime, endTime int64, limit int) (int, int, int64, error) {
 	totalFetched := 0
 	totalFailed := 0
 	var maxLogTime int64
@@ -150,25 +154,39 @@ func (s *SyncService) syncFeatureDay(featureID int, startTime, endTime int64, li
 			entries = append(entries, *entry)
 		}
 
-		// 当前页全部解密失败，密钥不匹配，跳过该 feature
 		if pageFailed == len(logItems) {
-			log.Printf("feature %d: all %d items failed to decrypt (likely missing key), skipping", featureID, len(logItems))
+			slog.Warn(fmt.Sprintf("feature %d: all %d items failed to decrypt (likely missing key), skipping", featureID, len(logItems)))
 			break
 		}
 
 		if len(entries) > 0 {
-			if err := s.logRepo.BatchSave(featureID, entries); err != nil {
-				log.Printf("batch save failed for feature %d: %v", featureID, err)
-				totalFailed += len(entries)
+			if tx != nil {
+				// 事务模式：使用事务写入，失败则回滚当天
+				ms, count, err := s.logRepo.BatchSaveWithTx(tx, featureID, entries)
+				if err != nil {
+					slog.Error(fmt.Sprintf("batch save failed for feature %d: %v", featureID, err))
+					totalFailed += len(entries)
+					return totalFetched, totalFailed, maxLogTime, err
+				}
+				totalFetched += count
+				if len(ms) > 0 {
+					if err := s.logRepo.BatchUpsertDailyStatsWithTx(tx, featureID, ms, startTime); err != nil {
+						slog.Error(fmt.Sprintf("upsert daily stats failed for feature %d: %v", featureID, err))
+						return totalFetched, totalFailed, maxLogTime, err
+					}
+				}
 			} else {
-				totalFetched += len(entries)
-				// 提取已保存条目中的手机号，用于日活跃汇总
-				for _, e := range entries {
-					if e.ParsedJSON != "" {
-						var parsed map[string]interface{}
-						if json.Unmarshal([]byte(e.ParsedJSON), &parsed) == nil {
-							if lu, ok := parsed["login_user"].(map[string]interface{}); ok {
-								if openid, ok := lu["openid"].(string); ok && openid != "" {
+				// 非事务模式：直接写入，失败仅计数
+				if err := s.logRepo.BatchSave(featureID, entries); err != nil {
+					slog.Error(fmt.Sprintf("batch save failed for feature %d: %v", featureID, err))
+					totalFailed += len(entries)
+				} else {
+					totalFetched += len(entries)
+					for _, e := range entries {
+						if e.ParsedJSON != "" {
+							var parsed map[string]interface{}
+							if json.Unmarshal([]byte(e.ParsedJSON), &parsed) == nil {
+								if openid := extractMobile(parsed); openid != "" {
 									savedMobiles[openid] = true
 								}
 							}
@@ -185,8 +203,8 @@ func (s *SyncService) syncFeatureDay(featureID int, startTime, endTime int64, li
 		startIndex += len(logItems)
 	}
 
-	// 写入日活跃汇总表
-	if len(savedMobiles) > 0 {
+	// 非事务模式：最后统一写入日活跃汇总
+	if tx == nil && len(savedMobiles) > 0 {
 		s.logRepo.BatchUpsertDailyStats(featureID, savedMobiles, startTime)
 	}
 
@@ -207,31 +225,82 @@ func (s *SyncService) SyncFeatureIncremental(featureID int) (int, int, error) {
 		}
 		now := time.Now().In(loc)
 		startTime = now.AddDate(0, 0, -30).Unix()
-		log.Printf("first sync for feature %d, pulling last 30 days", featureID)
+		slog.Info(fmt.Sprintf("first sync for feature %d, pulling last 30 days", featureID))
 	}
 
-	log.Printf("SyncFeatureIncremental: feature=%d, lastLogTime=%d, startTime=%d, endTime=%d", featureID, lastLogTime, startTime, endTime)
+	slog.Info(fmt.Sprintf("SyncFeatureIncremental: feature=%d, lastLogTime=%d, startTime=%d, endTime=%d", featureID, lastLogTime, startTime, endTime))
 
 	if startTime > endTime {
 		return 0, 0, nil
 	}
 
-	fetched, failed, maxLogTime, err := s.SyncFeature(featureID, startTime, endTime)
-	if err != nil {
-		log.Printf("SyncFeatureIncremental: feature=%d returned error: %v", featureID, err)
-	} else if maxLogTime > 0 {
-		if updateErr := s.syncStateRepo.UpdateState(featureID, maxLogTime, fetched); updateErr != nil {
-			log.Printf("SyncFeatureIncremental: UpdateState failed for feature %d: %v", featureID, updateErr)
-		}
+	// 按天拆分，政务微信 API 要求 start_time 和 end_time 在同一天
+	days := s.splitByDay(startTime, endTime)
+	slog.Info(fmt.Sprintf("SyncFeature: feature=%d, %d days to process", featureID, len(days)))
+
+	totalFetched := 0
+	totalFailed := 0
+	var maxLogTime int64
+	limit := s.cfg.WeWork.SyncLimit
+	if limit > 1000 {
+		limit = 1000
 	}
-	return fetched, failed, err
+	if limit < 1 {
+		limit = 1
+	}
+
+	for di, day := range days {
+		if s.isCancelled() {
+			return totalFetched, totalFailed, nil
+		}
+		if di%5 == 0 {
+			slog.Info(fmt.Sprintf("SyncFeature: feature=%d, day %d/%d (ts=%d)", featureID, di+1, len(days), day.start))
+		}
+
+		// 启动事务
+		tx := s.syncStateRepo.DB.Begin()
+		if tx.Error != nil {
+			slog.Error(fmt.Sprintf("SyncFeatureIncremental: failed to begin transaction for feature %d: %v", featureID, tx.Error))
+			continue
+		}
+
+		// 同步当天数据
+		fetched, failed, dayMax, err := s.syncFeatureDay(tx, featureID, day.start, day.end, limit)
+		if err != nil {
+			tx.Rollback()
+			slog.Error(fmt.Sprintf("SyncFeatureIncremental: failed to sync day for feature %d: %v", featureID, err))
+			totalFailed += failed
+			continue
+		}
+
+		// 更新 sync_state
+		if dayMax > maxLogTime {
+			maxLogTime = dayMax
+			if updateErr := s.syncStateRepo.UpdateStateWithTx(tx, featureID, maxLogTime, fetched); updateErr != nil {
+				tx.Rollback()
+				slog.Error(fmt.Sprintf("SyncFeatureIncremental: UpdateState failed for feature %d: %v", featureID, updateErr))
+				continue
+			}
+		}
+
+		// 提交事务
+		if commitErr := tx.Commit().Error; commitErr != nil {
+			slog.Error(fmt.Sprintf("SyncFeatureIncremental: commit failed for feature %d: %v", featureID, commitErr))
+			continue
+		}
+
+		totalFetched += fetched
+		totalFailed += failed
+	}
+
+	return totalFetched, totalFailed, nil
 }
 
 // SyncAllFeaturesIncremental 增量同步所有启用的 feature
 func (s *SyncService) SyncAllFeaturesIncremental() map[int]int {
 	ids, err := s.syncFeatureRepo.GetEnabledIDs()
 	if err != nil {
-		log.Printf("get enabled features failed: %v", err)
+		slog.Info(fmt.Sprintf("get enabled features failed: %v", err))
 		return nil
 	}
 	return s.syncFeaturesIncremental(ids)
@@ -248,60 +317,85 @@ func (s *SyncService) syncFeaturesIncremental(featureIDs []int) map[int]int {
 	s.mu.Unlock()
 
 	startTime := time.Now()
-	log.Printf("incremental sync started, %d features to sync", len(featureIDs))
+	slog.Info(fmt.Sprintf("incremental sync started, %d features to sync", len(featureIDs)))
 
 	defer func() {
 		s.mu.Lock()
-		s.status.Running = false
 		s.status.LastSync = time.Now()
 		errCount := len(s.status.Errors)
 		s.mu.Unlock()
-		log.Printf("incremental sync finished, errors=%d", errCount)
+		slog.Info(fmt.Sprintf("incremental sync finished, errors=%d", errCount))
 		s.saveSyncHistory("log", "scheduler", startTime)
 	}()
 
 	results := make(map[int]int)
-	for i, featureID := range featureIDs {
+	var resultsMu sync.Mutex
+	var progress int
+
+	sem := make(chan struct{}, 3) // 并发度 3
+	var wg sync.WaitGroup
+
+	for _, featureID := range featureIDs {
+		// 检查取消
 		select {
 		case <-s.cancelCh:
-			log.Printf("incremental sync cancelled at feature %d", featureID)
+			slog.Info(fmt.Sprintf("incremental sync cancelled"))
+			wg.Wait()
 			return results
 		default:
 		}
 
-		log.Printf("syncing feature %d (%d/%d)...", featureID, i+1, len(featureIDs))
-		s.mu.Lock()
-		s.status.CurrentFeature = featureID
-		s.mu.Unlock()
-		count, failed, err := s.SyncFeatureIncremental(featureID)
-		if err != nil {
-			log.Printf("incremental sync feature %d failed: %v", featureID, err)
-			results[featureID] = -1
+		sem <- struct{}{} // 获取信号量
+		wg.Add(1)
+		go func(fid int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			slog.Info(fmt.Sprintf("syncing feature %d...", fid))
 			s.mu.Lock()
-			s.status.Errors[featureID] = err.Error()
-			log.Printf("stored error for feature %d: %s", featureID, s.status.Errors[featureID])
+			s.status.CurrentFeature = fid
 			s.mu.Unlock()
-		} else {
-			results[featureID] = count
-			log.Printf("feature %d synced: %d records", featureID, count)
-		}
 
-		s.mu.Lock()
-		s.status.Progress = i + 1
-		s.status.Results = results
-		s.status.Failed += failed
-		s.mu.Unlock()
+			featureStart := time.Now()
+			count, failed, err := s.SyncFeatureIncremental(fid)
+			fidStr := strconv.Itoa(fid)
 
-		time.Sleep(100 * time.Millisecond)
+			if err != nil {
+				slog.Error(fmt.Sprintf("incremental sync feature %d failed: %v", fid, err))
+				metrics.RecordSyncOperation(fidStr, "failure", time.Since(featureStart), 0)
+				s.mu.Lock()
+				s.status.Errors[fid] = err.Error()
+				s.mu.Unlock()
+			} else {
+				metrics.RecordSyncOperation(fidStr, "success", time.Since(featureStart), count)
+				slog.Info(fmt.Sprintf("feature %d synced: %d records", fid, count))
+			}
+
+			resultsMu.Lock()
+			if err != nil {
+				results[fid] = -1
+			} else {
+				results[fid] = count
+			}
+			resultsMu.Unlock()
+
+			s.mu.Lock()
+			progress++
+			s.status.Progress = progress
+			s.status.Results = results
+			s.status.Failed += failed
+			s.mu.Unlock()
+		}(featureID)
 	}
 
+	wg.Wait()
 	return results
 }
 
 func (s *SyncService) SyncAllFeatures(startTime, endTime int64) map[int]int {
 	ids, err := s.syncFeatureRepo.GetEnabledIDs()
 	if err != nil {
-		log.Printf("get enabled features failed: %v", err)
+		slog.Info(fmt.Sprintf("get enabled features failed: %v", err))
 		return nil
 	}
 	return s.syncFeatures(ids, startTime, endTime)
@@ -312,6 +406,18 @@ func (s *SyncService) SyncMultipleFeatures(featureIDs []int, startTime, endTime 
 }
 
 func (s *SyncService) syncFeatures(featureIDs []int, startTime, endTime int64) map[int]int {
+	// 当未指定时间范围时，默认拉取最近 30 天
+	if startTime <= 0 && endTime <= 0 {
+		loc, _ := time.LoadLocation("Asia/Shanghai")
+		if loc == nil {
+			loc = time.FixedZone("CST", 8*3600)
+		}
+		now := time.Now().In(loc)
+		startTime = now.AddDate(0, 0, -30).Unix()
+		endTime = now.Unix()
+		slog.Info(fmt.Sprintf("syncFeatures: no time range specified, using last 30 days (start=%d, end=%d)", startTime, endTime))
+	}
+
 	s.mu.Lock()
 	s.status.Total = len(featureIDs)
 	s.mu.Unlock()
@@ -319,46 +425,70 @@ func (s *SyncService) syncFeatures(featureIDs []int, startTime, endTime int64) m
 	syncStart := time.Now()
 	defer func() {
 		s.mu.Lock()
-		s.status.Running = false
 		s.status.LastSync = time.Now()
 		s.mu.Unlock()
 		s.saveSyncHistory("log", "manual", syncStart)
 	}()
 
 	results := make(map[int]int)
-	for i, featureID := range featureIDs {
+	var resultsMu sync.Mutex
+	var progress int
+
+	sem := make(chan struct{}, 3) // 并发度 3
+	var wg sync.WaitGroup
+
+	for _, featureID := range featureIDs {
 		select {
 		case <-s.cancelCh:
-			log.Printf("sync cancelled at feature %d", featureID)
+			slog.Info(fmt.Sprintf("sync cancelled"))
+			wg.Wait()
 			return results
 		default:
 		}
 
-		count, failed, maxLogTime, err := s.SyncFeature(featureID, startTime, endTime)
-		if err != nil {
-			log.Printf("sync feature %d failed: %v", featureID, err)
-			results[featureID] = -1
-			s.mu.Lock()
-			s.status.Errors[featureID] = err.Error()
-			s.mu.Unlock()
-		} else {
-			results[featureID] = count
-			if maxLogTime > 0 {
-				if updateErr := s.syncStateRepo.UpdateState(featureID, maxLogTime, count); updateErr != nil {
-					log.Printf("sync feature %d: UpdateState failed: %v", featureID, updateErr)
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(fid int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			featureStart := time.Now()
+			count, failed, maxLogTime, err := s.SyncFeature(fid, startTime, endTime)
+			fidStr := strconv.Itoa(fid)
+
+			if err != nil {
+				slog.Error(fmt.Sprintf("sync feature %d failed: %v", fid, err))
+				metrics.RecordSyncOperation(fidStr, "failure", time.Since(featureStart), 0)
+				s.mu.Lock()
+				s.status.Errors[fid] = err.Error()
+				s.mu.Unlock()
+			} else {
+				metrics.RecordSyncOperation(fidStr, "success", time.Since(featureStart), count)
+				if maxLogTime > 0 {
+					if updateErr := s.syncStateRepo.UpdateState(fid, maxLogTime, count); updateErr != nil {
+						slog.Error(fmt.Sprintf("sync feature %d: UpdateState failed: %v", fid, updateErr))
+					}
 				}
 			}
-		}
 
-		s.mu.Lock()
-		s.status.Progress = i + 1
-		s.status.Results = results
-		s.status.Failed += failed
-		s.mu.Unlock()
+			resultsMu.Lock()
+			if err != nil {
+				results[fid] = -1
+			} else {
+				results[fid] = count
+			}
+			resultsMu.Unlock()
 
-		time.Sleep(100 * time.Millisecond)
+			s.mu.Lock()
+			progress++
+			s.status.Progress = progress
+			s.status.Results = results
+			s.status.Failed += failed
+			s.mu.Unlock()
+		}(featureID)
 	}
 
+	wg.Wait()
 	return results
 }
 
@@ -418,6 +548,22 @@ func (s *SyncService) ResetRunning() {
 	s.status.Running = false
 }
 
+// StartSync 在后台 goroutine 中启动同步，自动处理 TryStartRunning、panic 恢复和 ResetRunning。
+func (s *SyncService) StartSync(fn func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error(fmt.Sprintf("sync goroutine panic: %v\n%s", r, debug.Stack()))
+			}
+			s.ResetRunning()
+		}()
+		if !s.TryStartRunning() {
+			return
+		}
+		fn()
+	}()
+}
+
 func (s *SyncService) GetStatus() *SyncStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -438,14 +584,14 @@ func (s *SyncService) GetStatus() *SyncStatus {
 }
 
 type SyncStatus struct {
-	Running        bool            `json:"running"`
-	Progress       int             `json:"progress"`
-	Total          int             `json:"total"`
-	Failed         int             `json:"failed"`
-	CurrentFeature int             `json:"current_feature,omitempty"`
-	LastSync       time.Time       `json:"last_sync,omitempty"`
-	Results        map[int]int     `json:"results,omitempty"`
-	Errors         map[int]string  `json:"errors,omitempty"`
+	Running        bool           `json:"running"`
+	Progress       int            `json:"progress"`
+	Total          int            `json:"total"`
+	Failed         int            `json:"failed"`
+	CurrentFeature int            `json:"current_feature,omitempty"`
+	LastSync       time.Time      `json:"last_sync,omitempty"`
+	Results        map[int]int    `json:"results,omitempty"`
+	Errors         map[int]string `json:"errors,omitempty"`
 }
 
 func (s *SyncService) saveSyncHistory(syncType, trigger string, startTime time.Time) {
@@ -487,7 +633,7 @@ func (s *SyncService) saveSyncHistory(syncType, trigger string, startTime time.T
 		Details:    string(detailsJSON),
 	}
 	if err := s.syncHistoryRepo.Create(history); err != nil {
-		log.Printf("save sync history failed: %v", err)
+		slog.Error(fmt.Sprintf("save sync history failed: %v", err))
 	}
 }
 
@@ -495,21 +641,81 @@ func (s *SyncService) saveSyncHistory(syncType, trigger string, startTime time.T
 func (s *SyncService) VerifySyncState() {
 	states, err := s.syncStateRepo.GetAll()
 	if err != nil {
-		log.Printf("verify sync state: failed to get states: %v", err)
+		slog.Error(fmt.Sprintf("verify sync state: failed to get states: %v", err))
 		return
 	}
 
 	for _, state := range states {
 		actualMax := s.logRepo.GetActualMaxLogTime(state.FeatureID)
 		if actualMax > state.LastLogTime {
-			log.Printf("verify sync state: feature %d last_log_time corrected from %d to %d",
-				state.FeatureID, state.LastLogTime, actualMax)
+			slog.Info(fmt.Sprintf("verify sync state: feature %d last_log_time corrected from %d to %d",
+				state.FeatureID, state.LastLogTime, actualMax))
 			if updateErr := s.syncStateRepo.UpdateState(state.FeatureID, actualMax, 0); updateErr != nil {
-				log.Printf("verify sync state: UpdateState failed for feature %d: %v", state.FeatureID, updateErr)
+				slog.Error(fmt.Sprintf("verify sync state: UpdateState failed for feature %d: %v", state.FeatureID, updateErr))
 			}
 		} else if actualMax < state.LastLogTime && actualMax > 0 {
-			log.Printf("verify sync state: feature %d last_log_time %d ahead of actual max %d (state is fine, data may have been purged)",
-				state.FeatureID, state.LastLogTime, actualMax)
+			slog.Info(fmt.Sprintf("verify sync state: feature %d last_log_time %d ahead of actual max %d (state is fine, data may have been purged)",
+				state.FeatureID, state.LastLogTime, actualMax))
 		}
 	}
+}
+
+// SyncFeaturesTask 处理来自队列的任务
+func (s *SyncService) SyncFeaturesTask(task *model.SyncTask) (map[string]interface{}, error) {
+	if len(task.FeatureIDs) == 0 {
+		// 默认同步所有启用的 feature
+		ids, err := s.syncFeatureRepo.GetEnabledIDs()
+		if err != nil {
+			return nil, err
+		}
+		task.FeatureIDs = ids
+	}
+
+	results := s.SyncMultipleFeatures(task.FeatureIDs, task.StartTime, task.EndTime)
+	return map[string]interface{}{
+		"results": results,
+	}, nil
+}
+
+// extractMobile 从 parsed JSON 中提取用户标识（openid），尝试多个常见路径
+func extractMobile(parsed map[string]interface{}) string {
+	// 路径1: login_user.openid（登录/唤醒/访问应用等）
+	if lu, ok := parsed["login_user"].(map[string]interface{}); ok {
+		if openid, ok := lu["openid"].(string); ok && openid != "" {
+			return openid
+		}
+	}
+	// 路径2: user.openid（访问应用/添加/激活等）
+	if user, ok := parsed["user"].(map[string]interface{}); ok {
+		if openid, ok := user["openid"].(string); ok && openid != "" {
+			return openid
+		}
+	}
+	// 路径3: sender.openid（单聊/群聊消息）
+	if sender, ok := parsed["sender"].(map[string]interface{}); ok {
+		if openid, ok := sender["openid"].(string); ok && openid != "" {
+			return openid
+		}
+	}
+	// 路径4: 群相关操作人
+	if creator, ok := parsed["creator"].(map[string]interface{}); ok {
+		if openid, ok := creator["openid"].(string); ok && openid != "" {
+			return openid
+		}
+	}
+	if oper, ok := parsed["oper"].(map[string]interface{}); ok {
+		if openid, ok := oper["openid"].(string); ok && openid != "" {
+			return openid
+		}
+	}
+	if quitUser, ok := parsed["quit_user"].(map[string]interface{}); ok {
+		if openid, ok := quitUser["openid"].(string); ok && openid != "" {
+			return openid
+		}
+	}
+	// 路径5: 根级 openid
+	if openid, ok := parsed["openid"].(string); ok && openid != "" {
+		return openid
+	}
+	return ""
 }

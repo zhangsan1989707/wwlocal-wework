@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -16,19 +17,26 @@ type Config struct {
 	Features  FeaturesConfig  `yaml:"features"`
 	Auth      AuthConfig      `yaml:"auth"`
 	Scheduler SchedulerConfig `yaml:"scheduler"`
+	Nightly   NightlyConfig   `yaml:"nightly"`
+	Redis     RedisConfig     `yaml:"redis"`
+	RateLimit RateLimitConfig `yaml:"rate_limit"`
 }
 
 type ServerConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+	Host           string   `yaml:"host"`
+	Port           int      `yaml:"port"`
+	AllowedOrigins []string `yaml:"allowed_origins"`
 }
 
 type DatabaseConfig struct {
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	User     string `yaml:"user"`
-	Password string `yaml:"password"`
-	DBName   string `yaml:"dbname"`
+	Host            string        `yaml:"host"`
+	Port            int           `yaml:"port"`
+	User            string        `yaml:"user"`
+	Password        string        `yaml:"password"`
+	DBName          string        `yaml:"dbname"`
+	MaxOpenConns    int           `yaml:"max_open_conns"`
+	MaxIdleConns    int           `yaml:"max_idle_conns"`
+	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime"`
 }
 
 type WeWorkConfig struct {
@@ -62,6 +70,27 @@ type SchedulerConfig struct {
 	Interval string `yaml:"interval"` // "1h", "30m", "24h"
 }
 
+type NightlyConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	Hour         int    `yaml:"hour"`          // 执行小时，默认 1
+	Minute       int    `yaml:"minute"`        // 执行分钟，默认 0
+	LookbackDays int    `yaml:"lookback_days"` // 回溯天数，默认 1（昨天）
+}
+
+type RedisConfig struct {
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	Password string `yaml:"password"`
+	DB       int    `yaml:"db"`
+	Stream   string `yaml:"stream"` // stream name
+}
+
+type RateLimitConfig struct {
+	Enabled       bool `yaml:"enabled"`
+	RequestsPerMin int `yaml:"requests_per_minute"`
+	Burst         int  `yaml:"burst"`
+}
+
 func (d *DatabaseConfig) DSN() string {
 	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=10s&readTimeout=30s&writeTimeout=30s&maxAllowedPacket=0",
 		d.User, d.Password, d.Host, d.Port, d.DBName)
@@ -79,6 +108,13 @@ func getEnvInt(key string, fallback int) int {
 		if intVal, err := strconv.Atoi(value); err == nil {
 			return intVal
 		}
+	}
+	return fallback
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	if value, ok := os.LookupEnv(key); ok {
+		return value == "true" || value == "1" || value == "yes"
 	}
 	return fallback
 }
@@ -114,6 +150,27 @@ func Load(path string) (*Config, error) {
 
 	cfg.Keys.EncryptKey = os.Getenv("KEY_ENCRYPT_KEY")
 
+	cfg.Redis.Host = getEnv("REDIS_HOST", "localhost")
+	cfg.Redis.Port = getEnvInt("REDIS_PORT", 6379)
+	cfg.Redis.Password = getEnv("REDIS_PASSWORD", "")
+	cfg.Redis.DB = getEnvInt("REDIS_DB", 0)
+	cfg.Redis.Stream = getEnv("REDIS_STREAM", "wwlocal:sync:tasks")
+
+	cfg.RateLimit.Enabled = getEnvBool("RATE_LIMIT_ENABLED", true)
+	cfg.RateLimit.RequestsPerMin = getEnvInt("RATE_LIMIT_REQUESTS_PER_MINUTE", 100)
+	cfg.RateLimit.Burst = getEnvInt("RATE_LIMIT_BURST", 20)
+
+	cfg.Scheduler.Enabled = getEnvBool("SCHEDULER_ENABLED", cfg.Scheduler.Enabled)
+	cfg.Scheduler.Interval = getEnv("SCHEDULER_INTERVAL", cfg.Scheduler.Interval)
+
+	cfg.Nightly.Enabled = getEnvBool("NIGHTLY_ENABLED", cfg.Nightly.Enabled)
+	if cfg.Nightly.Hour <= 0 {
+		cfg.Nightly.Hour = 1
+	}
+	if cfg.Nightly.LookbackDays <= 0 {
+		cfg.Nightly.LookbackDays = 1
+	}
+
 	// 校验必需配置
 	var missing []string
 	if cfg.Database.Password == "" {
@@ -139,6 +196,22 @@ func Load(path string) (*Config, error) {
 	}
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("missing required config (set via env vars): %v", missing)
+	}
+
+	// 校验 JWT Secret 不为常见占位符值
+	badSecrets := []string{
+		"change-this-to-a-random-string",
+		"changeme", "change-me",
+		"secret", "password", "jwt-secret",
+		"your-secret-here", "your_jwt_secret",
+	}
+	for _, bad := range badSecrets {
+		if cfg.Auth.JWTSecret == bad {
+			return nil, fmt.Errorf("JWT_SECRET is set to placeholder value %q, please use a strong random string (at least 32 chars)", bad)
+		}
+	}
+	if len(cfg.Auth.JWTSecret) < 32 {
+		return nil, fmt.Errorf("JWT_SECRET is too short (%d chars), must be at least 32 characters for security", len(cfg.Auth.JWTSecret))
 	}
 
 	return &cfg, nil

@@ -1,26 +1,29 @@
 package service
 
 import (
-	"log"
+	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 )
 
 type SchedulerService struct {
-	syncSvc   *SyncService
-	interval  time.Duration
-	ticker    *time.Ticker
-	stopCh    chan struct{}
-	running   bool
-	mu        sync.Mutex
-	nextRun   time.Time
-	lastRun   time.Time
+	syncSvc      *SyncService
+	adminLogSvc  *AdminOperLogService
+	interval     time.Duration
+	ticker       *time.Ticker
+	stopCh       chan struct{}
+	running      bool
+	mu           sync.Mutex
+	nextRun      time.Time
+	lastRun      time.Time
 }
 
-func NewSchedulerService(syncSvc *SyncService, interval time.Duration) *SchedulerService {
+func NewSchedulerService(syncSvc *SyncService, adminLogSvc *AdminOperLogService, interval time.Duration) *SchedulerService {
 	return &SchedulerService{
-		syncSvc:  syncSvc,
-		interval: interval,
+		syncSvc:     syncSvc,
+		adminLogSvc: adminLogSvc,
+		interval:    interval,
 	}
 }
 
@@ -37,7 +40,7 @@ func (s *SchedulerService) Start(startDelay time.Duration) {
 	s.nextRun = time.Now().Add(startDelay)
 
 	go s.run(startDelay)
-	log.Printf("scheduler started, interval: %v, first run in: %v", s.interval, startDelay)
+	slog.Info(fmt.Sprintf("scheduler started, interval: %v, first run in: %v", s.interval, startDelay))
 }
 
 func (s *SchedulerService) Stop() {
@@ -50,7 +53,8 @@ func (s *SchedulerService) Stop() {
 	close(s.stopCh)
 	s.ticker.Stop()
 	s.running = false
-	log.Printf("scheduler stopped")
+	s.syncSvc.Cancel()
+	slog.Info(fmt.Sprintf("scheduler stopped"))
 }
 
 func (s *SchedulerService) run(startDelay time.Duration) {
@@ -75,16 +79,18 @@ func (s *SchedulerService) run(startDelay time.Duration) {
 
 func (s *SchedulerService) doSync() {
 	if s.syncSvc.IsRunning() {
-		log.Printf("scheduler: sync already running, skipping this tick")
+		slog.Info(fmt.Sprintf("scheduler: sync already running, skipping this tick"))
 		return
 	}
-	log.Printf("scheduler: starting incremental sync")
+	slog.Info(fmt.Sprintf("scheduler: starting incremental sync"))
 	s.mu.Lock()
 	s.lastRun = time.Now()
 	s.mu.Unlock()
 	go func() {
+		defer s.syncSvc.ResetRunning()
+
 		if !s.syncSvc.TryStartRunning() {
-			log.Printf("scheduler: sync already started by another caller, skipping")
+			slog.Info(fmt.Sprintf("scheduler: sync already started by another caller, skipping"))
 			return
 		}
 		results := s.syncSvc.SyncAllFeaturesIncremental()
@@ -94,7 +100,17 @@ func (s *SchedulerService) doSync() {
 				total += count
 			}
 		}
-		log.Printf("scheduler: incremental sync completed, total fetched: %d", total)
+		slog.Info(fmt.Sprintf("scheduler: feature incremental sync completed, total fetched: %d", total))
+
+		// 同步企微操作日志（在 ResetRunning 之前，防止并发冲突）
+		if s.adminLogSvc != nil {
+			if n, err := s.adminLogSvc.SyncIncremental(); err != nil {
+				slog.Error("scheduler: admin oper log sync failed", "error", err)
+			} else if n > 0 {
+				slog.Info("scheduler: admin oper log sync completed", "fetched", n)
+			}
+		}
+
 		s.mu.Lock()
 		s.nextRun = time.Now().Add(s.interval)
 		s.mu.Unlock()

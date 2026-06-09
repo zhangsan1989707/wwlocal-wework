@@ -3,7 +3,8 @@ package service
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -59,7 +60,7 @@ func (s *ContactSyncService) SyncContactsFull() {
 	// 1. 拉取部门
 	depts, err := s.contactSvc.GetDepartments()
 	if err != nil {
-		log.Printf("contact sync: get departments failed: %v", err)
+		slog.Info(fmt.Sprintf("contact sync: get departments failed: %v", err))
 		finish("departments", fmt.Sprintf("拉取部门失败: %v", err))
 		return
 	}
@@ -68,7 +69,7 @@ func (s *ContactSyncService) SyncContactsFull() {
 		deptModels = append(deptModels, repository.DeptItemToDepartment(d))
 	}
 	if err := s.contactRepo.BatchUpsertDepts(deptModels); err != nil {
-		log.Printf("contact sync: upsert departments failed: %v", err)
+		slog.Error(fmt.Sprintf("contact sync: upsert departments failed: %v (sync continues)", err))
 	}
 
 	s.mu.Lock()
@@ -83,11 +84,11 @@ func (s *ContactSyncService) SyncContactsFull() {
 		if d.ParentID == 0 {
 			users, err := s.contactSvc.GetSimpleUserList(d.ID, 1)
 			if err != nil {
-				log.Printf("contact sync: department %d (%s) failed: %v", d.ID, d.Name, err)
+				slog.Info(fmt.Sprintf("contact sync: department %d (%s) failed: %v", d.ID, d.Name, err))
 				lastErr = err
 				continue
 			}
-			log.Printf("contact sync: got %d users from department %d (%s)", len(users), d.ID, d.Name)
+			slog.Info(fmt.Sprintf("contact sync: got %d users from department %d (%s)", len(users), d.ID, d.Name))
 			for _, u := range users {
 				if !userSeen[u.UserID] {
 					userSeen[u.UserID] = true
@@ -97,7 +98,7 @@ func (s *ContactSyncService) SyncContactsFull() {
 		}
 	}
 	if len(simpleUsers) == 0 && lastErr != nil {
-		log.Printf("contact sync: all root departments failed")
+		slog.Info(fmt.Sprintf("contact sync: all root departments failed"))
 		finish("members", fmt.Sprintf("拉取成员列表失败: %v", lastErr))
 		return
 	}
@@ -114,7 +115,7 @@ func (s *ContactSyncService) SyncContactsFull() {
 	// 3. 比对本地已有用户
 	existing, err := s.contactRepo.GetAllUserIDs()
 	if err != nil {
-		log.Printf("contact sync: get existing user ids failed: %v", err)
+		slog.Info(fmt.Sprintf("contact sync: get existing user ids failed: %v", err))
 		finish("details", fmt.Sprintf("查询本地用户失败: %v", err))
 		return
 	}
@@ -130,7 +131,7 @@ func (s *ContactSyncService) SyncContactsFull() {
 	if len(newUserIDs) > 0 {
 		contacts, failed := s.contactSvc.FetchAllDetails(newUserIDs, 5, s.cancelCh)
 		if err := s.contactRepo.BatchUpsertContacts(contacts); err != nil {
-			log.Printf("contact sync: batch upsert contacts failed: %v", err)
+			slog.Info(fmt.Sprintf("contact sync: batch upsert contacts failed: %v", err))
 		}
 		s.mu.Lock()
 		s.status.NewCount = len(contacts)
@@ -150,7 +151,7 @@ func (s *ContactSyncService) SyncContactsFull() {
 		s.contactRepo.BatchUpdateBasicInfo(simpleContacts)
 	}
 
-	log.Printf("contact sync: completed. new=%d, failed=%d", s.status.NewCount, s.status.FailedCount)
+	slog.Info(fmt.Sprintf("contact sync: completed. new=%d, failed=%d", s.status.NewCount, s.status.FailedCount))
 	s.saveContactSyncHistory("full", startTime, "")
 	finish("", "")
 }
@@ -174,7 +175,7 @@ func (s *ContactSyncService) SyncContactsIncremental() {
 	// 1. 拉取部门
 	depts, err := s.contactSvc.GetDepartments()
 	if err != nil {
-		log.Printf("contact incremental sync: get departments failed: %v", err)
+		slog.Info(fmt.Sprintf("contact incremental sync: get departments failed: %v", err))
 		finish(fmt.Sprintf("拉取部门失败: %v", err))
 		return
 	}
@@ -182,7 +183,9 @@ func (s *ContactSyncService) SyncContactsIncremental() {
 	for _, d := range depts {
 		deptModels = append(deptModels, repository.DeptItemToDepartment(d))
 	}
-	s.contactRepo.BatchUpsertDepts(deptModels)
+	if err := s.contactRepo.BatchUpsertDepts(deptModels); err != nil {
+		slog.Error(fmt.Sprintf("contact incremental sync: upsert departments failed: %v (sync continues)", err))
+	}
 
 	s.mu.Lock()
 	s.status.Phase = "members"
@@ -196,11 +199,11 @@ func (s *ContactSyncService) SyncContactsIncremental() {
 		if d.ParentID == 0 {
 			users, err := s.contactSvc.GetSimpleUserList(d.ID, 1)
 			if err != nil {
-				log.Printf("contact incremental sync: department %d (%s) failed: %v", d.ID, d.Name, err)
+				slog.Info(fmt.Sprintf("contact incremental sync: department %d (%s) failed: %v", d.ID, d.Name, err))
 				lastErr = err
 				continue
 			}
-			log.Printf("contact incremental sync: got %d users from department %d (%s)", len(users), d.ID, d.Name)
+			slog.Info(fmt.Sprintf("contact incremental sync: got %d users from department %d (%s)", len(users), d.ID, d.Name))
 			for _, u := range users {
 				if !userSeen[u.UserID] {
 					userSeen[u.UserID] = true
@@ -210,7 +213,7 @@ func (s *ContactSyncService) SyncContactsIncremental() {
 		}
 	}
 	if len(simpleUsers) == 0 && lastErr != nil {
-		log.Printf("contact incremental sync: all root departments failed")
+		slog.Info(fmt.Sprintf("contact incremental sync: all root departments failed"))
 		finish(fmt.Sprintf("拉取成员列表失败: %v", lastErr))
 		return
 	}
@@ -227,7 +230,7 @@ func (s *ContactSyncService) SyncContactsIncremental() {
 	// 3. 比对本地
 	existing, err := s.contactRepo.GetAllUserIDs()
 	if err != nil {
-		log.Printf("contact incremental sync: get existing user ids failed: %v", err)
+		slog.Info(fmt.Sprintf("contact incremental sync: get existing user ids failed: %v", err))
 		finish(fmt.Sprintf("查询本地用户失败: %v", err))
 		return
 	}
@@ -244,7 +247,7 @@ func (s *ContactSyncService) SyncContactsIncremental() {
 	if len(newUserIDs) > 0 {
 		contacts, failed := s.contactSvc.FetchAllDetails(newUserIDs, 5, s.cancelCh)
 		if err := s.contactRepo.BatchUpsertContacts(contacts); err != nil {
-			log.Printf("contact incremental sync: batch upsert failed: %v", err)
+			slog.Info(fmt.Sprintf("contact incremental sync: batch upsert failed: %v", err))
 		}
 		s.mu.Lock()
 		s.status.NewCount = len(contacts)
@@ -266,10 +269,10 @@ func (s *ContactSyncService) SyncContactsIncremental() {
 
 	// 6. 标记不在 API 中的用户
 	if len(missingUserIDs) > 0 {
-		log.Printf("contact incremental sync: %d users no longer in API", len(missingUserIDs))
+		slog.Info(fmt.Sprintf("contact incremental sync: %d users no longer in API", len(missingUserIDs)))
 	}
 
-	log.Printf("contact incremental sync: completed. new=%d, failed=%d", s.status.NewCount, s.status.FailedCount)
+	slog.Info(fmt.Sprintf("contact incremental sync: completed. new=%d, failed=%d", s.status.NewCount, s.status.FailedCount))
 	s.saveContactSyncHistory("incremental", startTime, "")
 	finish("")
 }
@@ -313,6 +316,22 @@ func (s *ContactSyncService) ResetRunning() {
 	s.status.Running = false
 }
 
+// StartSync 在后台 goroutine 中启动同步，自动处理 TryStartRunning、panic 恢复和 ResetRunning。
+func (s *ContactSyncService) StartSync(fn func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error(fmt.Sprintf("contact sync goroutine panic: %v\n%s", r, debug.Stack()))
+			}
+			s.ResetRunning()
+		}()
+		if !s.TryStartRunning() {
+			return
+		}
+		fn()
+	}()
+}
+
 func (s *ContactSyncService) GetStatus() *ContactSyncStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -347,6 +366,25 @@ func (s *ContactSyncService) saveContactSyncHistory(trigger string, startTime ti
 		ErrorMsg:   errMsg,
 	}
 	if err := s.syncHistoryRepo.Create(history); err != nil {
-		log.Printf("save contact sync history failed: %v", err)
+		slog.Info(fmt.Sprintf("save contact sync history failed: %v", err))
 	}
+}
+
+// SyncContactsTask 处理来自队列的任务
+func (s *ContactSyncService) SyncContactsTask(task *model.SyncTask) (map[string]interface{}, error) {
+	// 判断是增量还是全量同步
+	syncType := "incremental"
+	if task.EndTime > 0 {
+		syncType = "full"
+	}
+
+	if syncType == "full" {
+		s.SyncContactsFull()
+	} else {
+		s.SyncContactsIncremental()
+	}
+
+	return map[string]interface{}{
+		"sync_type": syncType,
+	}, nil
 }

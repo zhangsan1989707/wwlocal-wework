@@ -1,15 +1,14 @@
 <template>
   <div class="contact-list">
-    <el-card class="sync-card">
+    <el-card v-if="isSuperAdmin" class="sync-card">
       <template #header>
         <div class="card-header">
           <span class="card-title">通讯录同步</span>
           <el-tag :type="syncStatus.running ? 'warning' : syncStatus.error_msg ? 'danger' : 'success'" size="large">
-            {{ syncStatus.running ? '同步中...' : syncStatus.phase === 'error' ? '同步失败' : '空闲' }}
+            {{ syncStatus.running ? '同步中...' : '空闲' }}
           </el-tag>
         </div>
       </template>
-
       <div v-if="syncStatus.running" class="sync-progress">
         <el-progress
           :percentage="progressPercentage"
@@ -25,7 +24,6 @@
           请求停止同步
         </el-button>
       </div>
-
       <div v-else class="sync-actions">
         <el-button type="primary" @click="handleSyncFull" size="large">
           同步全部通讯录
@@ -35,12 +33,6 @@
         </el-button>
         <span v-if="syncStatus.last_sync" class="last-sync">
           上次同步: {{ formatTime(syncStatus.last_sync) }}
-          <el-tag v-if="syncStatus.new_count > 0" type="success" size="small" style="margin-left: 8px">
-            新增 {{ syncStatus.new_count }}
-          </el-tag>
-          <el-tag v-if="syncStatus.failed_count > 0" type="danger" size="small" style="margin-left: 8px">
-            失败 {{ syncStatus.failed_count }}
-          </el-tag>
         </span>
       </div>
       <div v-if="syncStatus.error_msg" class="sync-error">
@@ -161,7 +153,7 @@
         </el-descriptions-item>
         <el-descriptions-item label="邮箱">{{ drawerContact.email || '-' }}</el-descriptions-item>
         <el-descriptions-item label="职位">{{ drawerContact.position || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="UserID">{{ drawerContact.userid }}</el-descriptions-item>
+        <el-descriptions-item label="UserID">{{ drawerContact.user_id }}</el-descriptions-item>
         <el-descriptions-item label="状态">
           <el-tag :type="drawerContact.status === 1 ? 'success' : drawerContact.status === 2 ? 'danger' : 'info'" size="small">
             {{ drawerContact.status === 1 ? '已激活' : drawerContact.status === 2 ? '已禁用' : '未激活' }}
@@ -174,37 +166,46 @@
           <el-icon><Search /></el-icon>
           查看该人员日志
         </el-button>
+        <el-button type="success" @click="viewUserBehavior">
+          <el-icon><Connection /></el-icon>
+          查看行为轨迹
+        </el-button>
       </div>
     </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch, inject } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
 import { contactAPI } from '../api'
+import type { Contact, ContactSyncStatus, Department, DeptMember } from '../types/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search } from '@element-plus/icons-vue'
+import { Search, Connection } from '@element-plus/icons-vue'
 
-const navigate = inject('navigate') as (menu: string, params?: any) => void
+const router = useRouter()
+const authStore = useAuthStore()
+const isSuperAdmin = computed(() => authStore.role === 'super_admin')
 
-const contacts = ref<any[]>([])
+const contacts = ref<(Contact | DeptMember)[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const searchName = ref('')
 const searchMobile = ref('')
 const loading = ref(false)
-const syncStatus = ref<any>({ running: false })
+const syncStatus = ref<ContactSyncStatus>({ running: false, progress: 0, total: 0, synced: 0, failed: 0 })
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
-const deptTree = ref<any[]>([])
+const deptTree = ref<Department[]>([])
 const totalContacts = ref(0)
 const treeFilterText = ref('')
-const treeRef = ref<any>(null)
-const selectedDept = ref<any | null>(null)
+const treeRef = ref<{ filter: (val: string) => void; setCurrentKey: (key: number | null) => void } | null>(null)
+const selectedDept = ref<Department | null>(null)
 
 const drawerVisible = ref(false)
-const drawerContact = ref<any | null>(null)
+const drawerContact = ref<Contact | null>(null)
 
 const progressPercentage = computed(() => {
   if (!syncStatus.value || syncStatus.value.total === 0) return 0
@@ -220,19 +221,20 @@ const phaseText = computed(() => {
 })
 
 const deptNames = computed(() => {
-  if (!drawerContact.value?.department) return '-'
+  const dept = drawerContact.value?.department
+  if (!dept) return '-'
   try {
-    const ids = JSON.parse(drawerContact.value.department)
+    const ids: number[] = typeof dept === 'string' ? JSON.parse(dept) : Array.isArray(dept) ? dept : []
     return ids.map((id: number) => {
-      const dept = findDeptById(deptTree.value, id)
-      return dept ? dept.name : `部门${id}`
+      const d = findDeptById(deptTree.value, id)
+      return d ? d.name : `部门${id}`
     }).join('、') || '-'
   } catch {
     return '-'
   }
 })
 
-function findDeptById(tree: any[], id: number): any | null {
+function findDeptById(tree: Department[], id: number): Department | null {
   for (const node of tree) {
     if (node.id === id) return node
     if (node.children) {
@@ -255,15 +257,19 @@ watch(treeFilterText, (val) => {
 onMounted(async () => {
   await loadDeptTree()
   await loadContacts()
-  await checkSyncStatus()
-  if (syncStatus.value.running) startPolling()
+  if (isSuperAdmin.value) {
+    await checkSyncStatus()
+    if (syncStatus.value.running) startPolling()
+  }
 })
 
-onUnmounted(() => stopPolling())
+onUnmounted(() => {
+  stopPolling()
+})
 
 const loadDeptTree = async () => {
   try {
-    const res: any = await contactAPI.getDeptTree()
+    const res = await contactAPI.getDeptTree()
     if (res.code === 0) {
       deptTree.value = res.data?.tree || []
       totalContacts.value = res.data?.total || 0
@@ -277,11 +283,11 @@ const loadDeptMembers = async () => {
   if (!selectedDept.value) return
   loading.value = true
   try {
-    const res: any = await contactAPI.getDeptMembers(selectedDept.value.id, {
+    const res = await contactAPI.getDeptMembers(selectedDept.value.id, {
       page: page.value,
       page_size: pageSize.value,
     })
-    if (res.code === 0) {
+    if (res.code === 0 && res.data) {
       contacts.value = res.data.data || []
       total.value = res.data.total || 0
     }
@@ -295,13 +301,13 @@ const loadDeptMembers = async () => {
 const loadContacts = async () => {
   loading.value = true
   try {
-    const res: any = await contactAPI.list({
+    const res = await contactAPI.list({
       page: page.value,
       page_size: pageSize.value,
       name: searchName.value,
       mobile: searchMobile.value,
     })
-    if (res.code === 0) {
+    if (res.code === 0 && res.data) {
       contacts.value = res.data.data || []
       total.value = res.data.total || 0
     }
@@ -312,7 +318,7 @@ const loadContacts = async () => {
   }
 }
 
-const handleDeptClick = (data: any) => {
+const handleDeptClick = (data: Department) => {
   selectedDept.value = data
   page.value = 1
   searchName.value = ''
@@ -364,12 +370,16 @@ const handleSizeChange = (size: number) => {
   }
 }
 
-const handleRowClick = async (row: any) => {
+const handleRowClick = async (row: Contact | DeptMember) => {
   try {
-    const res: any = await contactAPI.getContact(row.userid || row.user_id)
+    const uid = 'userid' in row ? row.userid : row.user_id
+    const res = await contactAPI.getContact(uid)
     if (res.code === 0) {
-      drawerContact.value = res.data
-      drawerVisible.value = true
+      const data = res.data
+      if (data) {
+        drawerContact.value = data
+        drawerVisible.value = true
+      }
     }
   } catch (err) {
     ElMessage.error('获取人员详情失败')
@@ -379,11 +389,18 @@ const handleRowClick = async (row: any) => {
 const viewUserLogs = () => {
   if (drawerContact.value?.mobile) {
     drawerVisible.value = false
-    navigate('query', { mobile: drawerContact.value.mobile })
+    router.push({ path: '/query', query: { mobile: drawerContact.value.mobile, auto_query: '1' } })
   }
 }
 
-const filterNode = (value: string, data: any) => {
+const viewUserBehavior = () => {
+  if (drawerContact.value?.mobile) {
+    drawerVisible.value = false
+    router.push({ path: '/behavior', query: { identifier: drawerContact.value.mobile, auto_query: '1' } })
+  }
+}
+
+const filterNode = (value: string, data: Department) => {
   if (!value) return true
   return data.name.includes(value)
 }
@@ -398,14 +415,14 @@ const handleSyncFull = async () => {
   } catch { return }
 
   try {
-    const res: any = await contactAPI.sync()
+    const res = await contactAPI.sync()
     if (res.code === 0) {
       ElMessage.success('通讯录同步已启动')
       await checkSyncStatus()
       startPolling()
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '同步启动失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '同步启动失败')
   }
 }
 
@@ -419,30 +436,30 @@ const handleSyncIncremental = async () => {
   } catch { return }
 
   try {
-    const res: any = await contactAPI.syncIncremental()
+    const res = await contactAPI.syncIncremental()
     if (res.code === 0) {
       ElMessage.success('通讯录同步已启动')
       await checkSyncStatus()
       startPolling()
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '同步启动失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '同步启动失败')
   }
 }
 
 const handleCancel = async () => {
   try {
-    const res: any = await contactAPI.cancel()
+    const res = await contactAPI.cancel()
     if (res.code === 0) ElMessage.success('已发送取消请求')
-  } catch (err: any) {
-    ElMessage.error(err.message || '取消失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '取消失败')
   }
 }
 
 const checkSyncStatus = async () => {
   try {
-    const res: any = await contactAPI.status()
-    if (res.code === 0) syncStatus.value = res.data
+    const res = await contactAPI.status()
+    if (res.code === 0 && res.data) syncStatus.value = res.data
   } catch (err) { console.error(err) }
 }
 
@@ -523,11 +540,22 @@ const stopPolling = () => {
 }
 
 .tree-panel {
-  width: 260px;
+  width: 280px;
+  min-width: 280px;
   border-right: 1px solid #ebeef5;
   padding: 12px;
   overflow-y: auto;
+  overflow-x: hidden;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tree-panel :deep(.el-tree) {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: calc(100vh - 380px);
 }
 
 .tree-header {
@@ -546,10 +574,17 @@ const stopPolling = () => {
   justify-content: space-between;
   flex: 1;
   padding-right: 4px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .tree-node-label {
   font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
 .table-panel {
@@ -588,5 +623,6 @@ const stopPolling = () => {
 
 :deep(.el-tree-node__content) {
   height: 32px;
+  overflow: hidden;
 }
 </style>

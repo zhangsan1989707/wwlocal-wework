@@ -3,126 +3,200 @@ package router
 import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"wwlocal-wework/internal/handler"
 	appmw "wwlocal-wework/internal/middleware"
+	"wwlocal-wework/internal/model"
 	"wwlocal-wework/internal/service"
 )
 
-type Router struct {
-	healthHandler        *handler.HealthHandler
-	authHandler          *handler.AuthHandler
-	logHandler           *handler.LogHandler
-	keyHandler           *handler.KeyHandler
-	syncHandler          *handler.SyncHandler
-	schedulerHandler     *handler.SchedulerHandler
-	contactHandler       *handler.ContactHandler
-	operationLogHandler  *handler.OperationLogHandler
-	dashboardHandler     *handler.DashboardHandler
-	syncHistoryHandler   *handler.SyncHistoryHandler
-	syncFeatureHandler   *handler.SyncFeatureHandler
-	systemHandler        *handler.SystemHandler
-	operationLogSvc      *service.OperationLogService
-	jwtSecret            string
+// RouterDeps 路由依赖集合，避免 NewRouter 参数过多
+type RouterDeps struct {
+	Health       *handler.HealthHandler
+	Auth         *handler.AuthHandler
+	Log          *handler.LogHandler
+	Behavior     *handler.BehaviorQueryHandler
+	Key          *handler.KeyHandler
+	Sync         *handler.SyncHandler
+	Scheduler    *handler.SchedulerHandler
+	Contact      *handler.ContactHandler
+	OperationLog *handler.OperationLogHandler
+	AdminOperLog *handler.AdminOperLogHandler
+	Dashboard    *handler.DashboardHandler
+	DashboardV2  *handler.DashboardV2Handler
+	Nightly      *handler.NightlyHandler
+	SyncHistory  *handler.SyncHistoryHandler
+	SyncFeature  *handler.SyncFeatureHandler
+	System       *handler.SystemHandler
+	Task         *handler.TaskHandler
+	User         *handler.UserHandler
+	OperationSvc *service.OperationLogService
+	JWTSecret    string
+	RateLimiter  *appmw.RateLimiter
+	Origins      []string
+	MetricsIPs   []string
 }
 
-func NewRouter(healthHandler *handler.HealthHandler, authHandler *handler.AuthHandler, logHandler *handler.LogHandler, keyHandler *handler.KeyHandler, syncHandler *handler.SyncHandler, schedulerHandler *handler.SchedulerHandler, contactHandler *handler.ContactHandler, operationLogHandler *handler.OperationLogHandler, dashboardHandler *handler.DashboardHandler, syncHistoryHandler *handler.SyncHistoryHandler, syncFeatureHandler *handler.SyncFeatureHandler, systemHandler *handler.SystemHandler, operationLogSvc *service.OperationLogService, jwtSecret string) *Router {
-	return &Router{
-		healthHandler:       healthHandler,
-		authHandler:         authHandler,
-		logHandler:          logHandler,
-		keyHandler:          keyHandler,
-		syncHandler:         syncHandler,
-		schedulerHandler:    schedulerHandler,
-		contactHandler:      contactHandler,
-		operationLogHandler: operationLogHandler,
-		dashboardHandler:    dashboardHandler,
-		syncHistoryHandler:  syncHistoryHandler,
-		syncFeatureHandler:  syncFeatureHandler,
-		systemHandler:       systemHandler,
-		operationLogSvc:     operationLogSvc,
-		jwtSecret:           jwtSecret,
-	}
+type Router struct {
+	deps RouterDeps
+}
+
+func NewRouter(d RouterDeps) *Router {
+	return &Router{deps: d}
 }
 
 func (r *Router) Setup(e *echo.Echo) {
+	d := r.deps
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
-	e.Use(middleware.CORS())
-	e.Use(appmw.OperationLog(r.operationLogSvc))
+	e.Use(middleware.BodyLimit("10M"))
+	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins: d.Origins,
+		AllowMethods: []string{echo.GET, echo.POST, echo.PUT, echo.DELETE, echo.OPTIONS},
+		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+	}))
+	e.Use(appmw.PrometheusMiddleware())
+	e.Use(appmw.OperationLog(d.OperationSvc))
+	if d.RateLimiter != nil {
+		e.Use(d.RateLimiter.Middleware())
+	}
 
-	e.GET("/health", r.healthHandler.Check)
-	e.POST("/api/v1/auth/login", r.authHandler.Login)
+	e.GET("/health", d.Health.Check)
+	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()), appmw.MetricsAuth(d.MetricsIPs))
+	e.POST("/api/v1/auth/login", d.Auth.Login)
+	e.POST("/api/v1/auth/refresh", d.Auth.RefreshToken)
 
-	api := e.Group("/api/v1", appmw.JWTAuth(r.jwtSecret))
+	api := e.Group("/api/v1", appmw.JWTAuth(d.JWTSecret))
 	{
+		api.PUT("/auth/password", d.Auth.ChangePassword)
+
+		superAdminOnly := appmw.RequireRole(model.RoleSuperAdmin)
+
+		users := api.Group("/users", superAdminOnly)
+		{
+			users.GET("", d.User.List)
+			users.POST("", d.User.Create)
+			users.PUT("/:id", d.User.Update)
+			users.PUT("/:id/password", d.User.ResetPassword)
+		}
+
 		operationLogs := api.Group("/operation-logs")
 		{
-			operationLogs.GET("", r.operationLogHandler.List)
-			operationLogs.GET("/actions", r.operationLogHandler.GetActions)
+			operationLogs.GET("", d.OperationLog.List)
+			operationLogs.GET("/actions", d.OperationLog.GetActions)
+		}
+
+		adminOperLogs := api.Group("/admin-oper-logs")
+		{
+			adminOperLogs.GET("", d.AdminOperLog.List)
+			adminOperLogs.POST("/sync", d.AdminOperLog.Sync, superAdminOnly)
+			adminOperLogs.GET("/sync/status", d.AdminOperLog.Status, superAdminOnly)
+			adminOperLogs.GET("/stats", d.AdminOperLog.GetStats)
+			adminOperLogs.GET("/types", d.AdminOperLog.GetOperTypes)
+			adminOperLogs.GET("/users", d.AdminOperLog.GetOperUsers)
+			adminOperLogs.DELETE("/cleanup", d.AdminOperLog.Cleanup, superAdminOnly)
 		}
 
 		logs := api.Group("/logs")
 		{
-			logs.POST("/query", r.logHandler.Query)
-			logs.GET("/features", r.logHandler.GetFeatures)
-			logs.GET("/time-range", r.logHandler.GetTimeRange)
-			logs.GET("/field-paths", r.logHandler.GetFieldPaths)
-			logs.POST("/sync", r.syncHandler.Sync)
-			logs.POST("/sync/cancel", r.syncHandler.Cancel)
-			logs.GET("/sync/status", r.syncHandler.Status)
+			logs.POST("/query", d.Log.Query)
+			logs.POST("/query/cursor", d.Log.QueryByCursor)
+			logs.POST("/behavior-query", d.Behavior.Query)
+			logs.POST("/behavior-export", d.Behavior.ExportCSV)
+			logs.POST("/export", d.Log.ExportCSV)
+			logs.GET("/features", d.Log.GetFeatures)
+			logs.GET("/time-range", d.Log.GetTimeRange)
+			logs.GET("/field-paths", d.Log.GetFieldPaths)
+			logs.POST("/sync", d.Sync.Sync, superAdminOnly)
+			logs.POST("/sync/cancel", d.Sync.Cancel, superAdminOnly)
+			logs.GET("/sync/status", d.Sync.Status, superAdminOnly)
 		}
 
-		keys := api.Group("/keys")
+		keys := api.Group("/keys", superAdminOnly)
 		{
-			keys.GET("", r.keyHandler.List)
-			keys.POST("", r.keyHandler.Add)
-			keys.PUT("/activate", r.keyHandler.Activate)
-			keys.GET("/test", r.keyHandler.Test)
+			keys.GET("", d.Key.List)
+			keys.POST("", d.Key.Add)
+			keys.PUT("/activate", d.Key.Activate)
+			keys.GET("/test", d.Key.Test)
 		}
 
-		scheduler := api.Group("/scheduler")
+		scheduler := api.Group("/scheduler", superAdminOnly)
 		{
-			scheduler.POST("/start", r.schedulerHandler.Start)
-			scheduler.POST("/stop", r.schedulerHandler.Stop)
-			scheduler.GET("/status", r.schedulerHandler.Status)
-			scheduler.POST("/sync", r.schedulerHandler.IncrementalSync)
-			scheduler.PUT("/interval", r.schedulerHandler.SetInterval)
+			scheduler.POST("/start", d.Scheduler.Start)
+			scheduler.POST("/stop", d.Scheduler.Stop)
+			scheduler.GET("/status", d.Scheduler.Status)
+			scheduler.POST("/sync", d.Scheduler.IncrementalSync)
+			scheduler.PUT("/interval", d.Scheduler.SetInterval)
 		}
 
-		syncHistory := api.Group("/sync-history")
+		syncHistory := api.Group("/sync-history", superAdminOnly)
 		{
-			syncHistory.GET("", r.syncHistoryHandler.List)
+			syncHistory.GET("", d.SyncHistory.List)
 		}
 
 		syncFeatures := api.Group("/sync-features")
 		{
-			syncFeatures.GET("", r.syncFeatureHandler.List)
-			syncFeatures.PUT("", r.syncFeatureHandler.Update)
+			syncFeatures.GET("", d.SyncFeature.List)
+			syncFeatures.PUT("", d.SyncFeature.Update, superAdminOnly)
 		}
 
 		contacts := api.Group("/contacts")
 		{
-			contacts.GET("/tree", r.contactHandler.GetDeptTree)
-			contacts.GET("/departments/:id/members", r.contactHandler.GetDeptMembers)
-			contacts.GET("", r.contactHandler.List)
-			contacts.GET("/departments", r.contactHandler.GetDepartments)
-			contacts.POST("/sync", r.contactHandler.Sync)
-			contacts.POST("/sync/incremental", r.contactHandler.SyncIncremental)
-			contacts.POST("/sync/cancel", r.contactHandler.Cancel)
-			contacts.GET("/sync/status", r.contactHandler.Status)
-			contacts.POST("/names", r.contactHandler.GetNames)
-			contacts.GET("/:userId", r.contactHandler.GetContact)
+			contacts.GET("/tree", d.Contact.GetDeptTree)
+			contacts.GET("/departments/:id/members", d.Contact.GetDeptMembers)
+			contacts.GET("", d.Contact.List)
+			contacts.GET("/departments", d.Contact.GetDepartments)
+			contacts.POST("/sync", d.Contact.Sync, superAdminOnly)
+			contacts.POST("/sync/incremental", d.Contact.SyncIncremental, superAdminOnly)
+			contacts.POST("/sync/cancel", d.Contact.Cancel, superAdminOnly)
+			contacts.GET("/sync/status", d.Contact.Status, superAdminOnly)
+			contacts.POST("/names", d.Contact.GetNames)
+			contacts.GET("/:userId", d.Contact.GetContact)
 		}
 
 		dashboard := api.Group("/dashboard")
 		{
-			dashboard.GET("/overview", r.dashboardHandler.GetOverview)
-			dashboard.GET("/inactive-users", r.dashboardHandler.GetInactiveUsers)
+			dashboard.GET("/overview", d.Dashboard.GetOverview)
+			dashboard.GET("/inactive-users", d.Dashboard.GetInactiveUsers)
+			dashboard.GET("/inactive-users/export", d.Dashboard.ExportInactiveUsers)
+			dashboard.GET("/trend", d.Dashboard.GetTrend)
+			dashboard.GET("/trend/dept", d.Dashboard.GetTrendByDept)
+			dashboard.GET("/trend/export", d.Dashboard.ExportTrend)
 		}
 
-		system := api.Group("/system")
+		dashboardV2 := api.Group("/dashboard/v2")
 		{
-			system.GET("/status", r.systemHandler.GetStatus)
+			dashboardV2.GET("/overview", d.DashboardV2.GetOverview)
+			dashboardV2.GET("/trend", d.DashboardV2.GetTrend)
+			dashboardV2.GET("/multi-trend", d.DashboardV2.GetMultiTrend)
+			dashboardV2.GET("/departments", d.DashboardV2.GetDepartmentStats)
+			dashboardV2.GET("/devices", d.DashboardV2.GetDeviceStats)
+			dashboardV2.GET("/users", d.DashboardV2.GetUserList)
+			dashboardV2.GET("/export/overview", d.DashboardV2.ExportOverviewCSV)
+			dashboardV2.GET("/export/trend", d.DashboardV2.ExportTrendCSV)
+			dashboardV2.GET("/export/departments", d.DashboardV2.ExportDepartmentsCSV)
+			dashboardV2.GET("/export/devices", d.DashboardV2.ExportDevicesCSV)
+			dashboardV2.GET("/export/users", d.DashboardV2.ExportUserListCSV)
+		}
+
+		nightly := api.Group("/nightly", superAdminOnly)
+		{
+			nightly.POST("/run", d.Nightly.Run)
+			nightly.GET("/status", d.Nightly.Status)
+		}
+
+		system := api.Group("/system", superAdminOnly)
+		{
+			system.GET("/status", d.System.GetStatus)
+		}
+
+		tasks := api.Group("/tasks", superAdminOnly)
+		{
+			tasks.POST("", d.Task.SubmitTask)
+			tasks.GET("", d.Task.ListTasks)
+			tasks.GET("/:id", d.Task.GetTask)
+			tasks.POST("/:id/cancel", d.Task.CancelTask)
+			tasks.POST("/:id/retry", d.Task.RetryTask)
 		}
 	}
 }
