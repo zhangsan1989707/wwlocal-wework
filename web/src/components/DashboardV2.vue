@@ -68,11 +68,11 @@
       </el-card>
       <el-card shadow="hover" class="kpi-card">
         <div class="kpi-value">{{ formatNum(overview?.msg_count) }}</div>
-        <div class="kpi-label">发消息数</div>
+        <div class="kpi-label">消息发送量</div>
       </el-card>
       <el-card shadow="hover" class="kpi-card">
         <div class="kpi-value">{{ formatNum(overview?.msg_sender) }}</div>
-        <div class="kpi-label">发消息人数</div>
+        <div class="kpi-label">消息发送人数</div>
       </el-card>
       <el-card shadow="hover" class="kpi-card">
         <div class="kpi-value">{{ formatNum(overview?.app_access_user) }}</div>
@@ -97,8 +97,8 @@
             <el-select v-model="trendMetric" style="width: 150px;" @change="fetchTrend">
               <el-option label="活跃用户" value="active" />
               <el-option label="使用人数" value="usage_users" />
-              <el-option label="发消息数" value="msg_count" />
-              <el-option label="发消息人数" value="msg_sender" />
+              <el-option label="消息发送量" value="msg_count" />
+              <el-option label="消息发送人数" value="msg_sender" />
               <el-option label="登录人数" value="login_users" />
               <el-option label="创建群聊" value="group_created" />
             </el-select>
