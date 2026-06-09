@@ -292,9 +292,9 @@ export const keyAPI = {
 
 export const schedulerAPI = {
   start: (data?: { start_delay?: string }) =>
-    api.post<ApiResponse<{ message: string }>>('/scheduler/start', data) as unknown as ApiResult<{ message: string }>,
+    api.post<ApiResponse<SchedulerStatus>>('/scheduler/start', data) as unknown as ApiResult<SchedulerStatus>,
   stop: () =>
-    api.post<ApiResponse<{ message: string }>>('/scheduler/stop') as unknown as ApiResult<{ message: string }>,
+    api.post<ApiResponse<SchedulerStatus>>('/scheduler/stop') as unknown as ApiResult<SchedulerStatus>,
   status: () =>
     api.get<ApiResponse<SchedulerStatus>>('/scheduler/status') as unknown as ApiResult<SchedulerStatus>,
   incrementalSync: (data: SyncParams) =>

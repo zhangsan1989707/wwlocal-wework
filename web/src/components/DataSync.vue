@@ -427,23 +427,23 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { syncAPI, schedulerAPI, nightlyAPI, syncHistoryAPI, syncFeatureAPI, adminOperLogAPI, systemAPI } from '../api'
-import type { AdminOperLogSyncStatus, NightlyJobStatus, SchemaQualityInfo, SyncFeature, SyncHistory } from '../types/api'
+import type { AdminOperLogSyncStatus, NightlyJobStatus, SchedulerStatus, SchemaQualityInfo, SyncFeature, SyncHistory, SyncStatus } from '../types/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { VideoPlay, VideoPause, Refresh, Clock, DataAnalysis } from '@element-plus/icons-vue'
 
 const dateRange = ref<[Date, Date] | null>(null)
 const activeShortcut = ref<string | null>(null)
-const syncStatus = ref({
+const syncStatus = ref<SyncStatus>({
   running: false,
   progress: 0,
   total: 0,
+  failed: 0,
   current_feature: 0,
   last_sync: '',
-  failed: 0,
   results: {} as Record<number, number>,
   errors: {} as Record<number, string>,
 })
-const schedulerStatus = ref<any>({
+const schedulerStatus = ref<SchedulerStatus>({
   running: false,
   interval: '',
 })
@@ -549,10 +549,9 @@ const formatTime = (timeStr?: string) => {
 
 onMounted(async () => {
   try {
-    const res: any = await syncFeatureAPI.list()
+    const res = await syncFeatureAPI.list()
     if (res.code === 0) {
-      // 只显示启用的 feature 用于同步下拉
-      features.value = (res.data || []).filter((f: any) => f.enabled)
+      features.value = (res.data || []).filter(f => f.enabled)
     }
   } catch (err) {
     console.error(err)
@@ -661,13 +660,13 @@ const handleDateChange = () => {
 
 const handleSchedulerStart = async () => {
   try {
-    const res: any = await schedulerAPI.start({ start_delay: startDelay.value })
+    const res = await schedulerAPI.start({ start_delay: startDelay.value })
     if (res.code === 0) {
       ElMessage.success('定时同步已启动')
-      schedulerStatus.value = res.data
+      if (res.data) schedulerStatus.value = res.data
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '启动失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '启动失败')
   }
 }
 
@@ -681,13 +680,13 @@ const handleSchedulerStop = async () => {
   } catch { return }
 
   try {
-    const res: any = await schedulerAPI.stop()
+    const res = await schedulerAPI.stop()
     if (res.code === 0) {
       ElMessage.success('定时同步已停止')
-      schedulerStatus.value = res.data
+      if (res.data) schedulerStatus.value = res.data
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '停止失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '停止失败')
   }
 }
 
@@ -706,15 +705,15 @@ const handleIncrementalSync = async () => {
   } catch { return }
 
   try {
-    const res: any = await schedulerAPI.incrementalSync({ sync_all: true })
+    const res = await schedulerAPI.incrementalSync({ sync_all: true })
     if (res.code === 0) {
       ElMessage.success('同步任务已启动')
       startPolling()
     } else {
       ElMessage.error(res.msg || '增量同步启动失败')
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '增量同步启动失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '增量同步启动失败')
   }
 }
 
@@ -741,8 +740,8 @@ const handleNightlyRun = async () => {
     } else {
       ElMessage.error(res.msg || '夜间分析任务启动失败')
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '夜间分析任务启动失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '夜间分析任务启动失败')
   }
 }
 
@@ -761,7 +760,7 @@ const handleRetryFeature = async (featureId: number) => {
   } catch { return }
 
   try {
-    const res: any = await schedulerAPI.incrementalSync({
+    const res = await schedulerAPI.incrementalSync({
       sync_all: false,
       feature_ids: [featureId],
     })
@@ -771,8 +770,8 @@ const handleRetryFeature = async (featureId: number) => {
     } else {
       ElMessage.error(res.msg || '重试启动失败')
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '重试启动失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '重试启动失败')
   }
 }
 
@@ -801,7 +800,7 @@ const handleSync = async () => {
     const startTime = Math.floor(dateRange.value[0].getTime() / 1000)
     const endTime = Math.floor(dateRange.value[1].getTime() / 1000)
 
-    const res: any = await syncAPI.sync({
+    const res = await syncAPI.sync({
       sync_all: syncAll.value,
       feature_ids: form.feature_ids,
       start_time: startTime,
@@ -814,8 +813,8 @@ const handleSync = async () => {
     } else {
       ElMessage.error(res.msg || '同步启动失败')
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '同步启动失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '同步启动失败')
   }
 }
 
@@ -838,7 +837,7 @@ const handleAdminOperSync = async () => {
   try {
     const startTime = Math.floor(dateRange.value[0].getTime() / 1000)
     const endTime = Math.floor(dateRange.value[1].getTime() / 1000)
-    const res: any = await adminOperLogAPI.sync({ start_time: startTime, end_time: endTime })
+    const res = await adminOperLogAPI.sync({ start_time: startTime, end_time: endTime })
     if (res.code === 0) {
       ElMessage.success('企微操作日志同步已启动')
       await checkAdminOperStatus()
@@ -846,8 +845,8 @@ const handleAdminOperSync = async () => {
     } else {
       ElMessage.error(res.msg || '企微操作日志同步启动失败')
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '企微操作日志同步启动失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '企微操作日志同步启动失败')
   }
 }
 
@@ -868,21 +867,21 @@ const handleCancel = async () => {
   }
 
   try {
-    const res: any = await syncAPI.cancel()
+    const res = await syncAPI.cancel()
     if (res.code === 0) {
       ElMessage.success('已发送取消请求')
     } else {
       ElMessage.error(res.msg || '取消失败')
     }
-  } catch (err: any) {
-    ElMessage.error(err.message || '取消失败')
+  } catch (err: unknown) {
+    ElMessage.error(err instanceof Error ? err.message : '取消失败')
   }
 }
 
 const checkStatus = async () => {
   try {
-    const res: any = await syncAPI.status()
-    if (res.code === 0) {
+    const res = await syncAPI.status()
+    if (res.code === 0 && res.data) {
       syncStatus.value = res.data
     }
   } catch (err) {
@@ -904,7 +903,7 @@ const checkAdminOperStatus = async () => {
 const loadSchemaQuality = async () => {
   schemaLoading.value = true
   try {
-    const res: any = await systemAPI.getStatus()
+    const res = await systemAPI.getStatus()
     if (res.code === 0) {
       schemaQuality.value = res.data?.schema_quality || []
     }
@@ -917,8 +916,8 @@ const loadSchemaQuality = async () => {
 
 const checkSchedulerStatus = async () => {
   try {
-    const res: any = await schedulerAPI.status()
-    if (res.code === 0) {
+    const res = await schedulerAPI.status()
+    if (res.code === 0 && res.data) {
       schedulerStatus.value = res.data
     }
   } catch (err) {
@@ -942,11 +941,11 @@ const checkNightlyStatus = async () => {
 const loadSyncHistory = async () => {
   historyLoading.value = true
   try {
-    const res: any = await syncHistoryAPI.list({
+    const res = await syncHistoryAPI.list({
       page: historyPage.value,
       page_size: historyPageSize.value,
     })
-    if (res.code === 0) {
+    if (res.code === 0 && res.data) {
       syncHistory.value = res.data.data || []
       historyTotal.value = res.data.total || 0
     }

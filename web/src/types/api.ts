@@ -112,13 +112,11 @@ export interface SyncStatus {
   running: boolean
   progress: number
   total: number
-  results: Record<string, SyncFeatureResult>
-}
-
-export interface SyncFeatureResult {
-  synced: number
   failed: number
-  duration: number
+  current_feature?: number
+  last_sync?: string
+  results?: Record<number, number>
+  errors?: Record<number, string>
 }
 
 export interface PaginatedParams {
