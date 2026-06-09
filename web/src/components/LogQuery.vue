@@ -448,7 +448,7 @@ const extractOpenids = (data: LogRow[]): string[] => {
 }
 
 const fetchContactNames = async (data: LogRow[]) => {
-  const ids = extractOpenids(data)
+  const ids = extractOpenids(data).filter((id) => !contactNames.value[id]).slice(0, 200)
   if (ids.length === 0) return
   try {
     const res = await contactAPI.getNames(ids)
