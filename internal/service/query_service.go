@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 
 	"wwlocal-wework/config"
@@ -22,7 +23,7 @@ const exportBatchSize = 1000
 
 type QueryService struct {
 	logRepo         logQueryRepository
-	contactRepo     *repository.ContactRepository
+	contactRepo     contactIdentifierResolver
 	weworkSvc       *WeWorkService
 	decryptSvc      *DecryptService
 	syncFeatureRepo *repository.SyncFeatureRepository
@@ -34,6 +35,10 @@ type logQueryRepository interface {
 	QueryAcrossMonthsWithConditionsContext(ctx context.Context, featureID int, startTime, endTime int64, conditions map[string]interface{}, mobile string, page, pageSize int) ([]model.LogEntry, int64, error)
 	QueryByCursorContext(ctx context.Context, featureID int, startTime, endTime int64, cursor int64, pageSize int, conditions map[string]interface{}, mobile string) ([]model.LogEntry, int64, int64, error)
 	SampleParsedJSON(featureIDs []int, limit int) []string
+}
+
+type contactIdentifierResolver interface {
+	ResolveUserIDByIdentifier(identifier string) (string, error)
 }
 
 func NewQueryService(logRepo *repository.LogRepository, contactRepo *repository.ContactRepository, weworkSvc *WeWorkService, decryptSvc *DecryptService, syncFeatureRepo *repository.SyncFeatureRepository, cfg *config.Config) *QueryService {
@@ -64,7 +69,11 @@ func (s *QueryService) QueryContext(ctx context.Context, req *model.QueryRequest
 		return nil, fmt.Errorf("最多同时查询 10 个数据类型")
 	}
 
-	hasConditions := len(req.Conditions) > 0 || req.Mobile != ""
+	logIdentifier, err := s.resolveLogIdentifier(req.Mobile)
+	if err != nil {
+		return nil, err
+	}
+	hasConditions := len(req.Conditions) > 0 || logIdentifier != ""
 
 	perPage := req.PageSize
 	if len(req.FeatureIDs) > 1 {
@@ -86,7 +95,7 @@ func (s *QueryService) QueryContext(ctx context.Context, req *model.QueryRequest
 		var err error
 
 		if hasConditions {
-			entries, count, err = s.logRepo.QueryAcrossMonthsWithConditionsContext(ctx, featureID, req.StartTime, req.EndTime, req.Conditions, req.Mobile, 1, perPage)
+			entries, count, err = s.logRepo.QueryAcrossMonthsWithConditionsContext(ctx, featureID, req.StartTime, req.EndTime, req.Conditions, logIdentifier, 1, perPage)
 		} else {
 			entries, count, err = s.logRepo.QueryAcrossMonthsContext(ctx, featureID, req.StartTime, req.EndTime, 1, perPage)
 		}
@@ -137,6 +146,14 @@ func (s *QueryService) QueryContext(ctx context.Context, req *model.QueryRequest
 		PageSize: req.PageSize,
 		Data:     pageData,
 	}, nil
+}
+
+func (s *QueryService) resolveLogIdentifier(identifier string) (string, error) {
+	identifier = strings.TrimSpace(identifier)
+	if identifier == "" || s.contactRepo == nil {
+		return identifier, nil
+	}
+	return s.contactRepo.ResolveUserIDByIdentifier(identifier)
 }
 
 func (s *QueryService) queryRealtime(featureID int, startTime, endTime int64) ([]model.LogEntry, error) {
@@ -249,6 +266,10 @@ func (s *QueryService) QueryByCursorContext(ctx context.Context, req *model.Quer
 	if len(req.FeatureIDs) > 10 {
 		return nil, fmt.Errorf("cannot query more than 10 feature types at the same time")
 	}
+	logIdentifier, err := s.resolveLogIdentifier(req.Mobile)
+	if err != nil {
+		return nil, err
+	}
 
 	var allData []map[string]interface{}
 	var total int64
@@ -267,7 +288,7 @@ func (s *QueryService) QueryByCursorContext(ctx context.Context, req *model.Quer
 			req.Cursor,
 			req.PageSize,
 			req.Conditions,
-			req.Mobile,
+			logIdentifier,
 		)
 		if err != nil {
 			if ctxErr := queryContextError(ctx); ctxErr != nil {
@@ -359,6 +380,10 @@ func (s *QueryService) ExportCSVContext(ctx context.Context, req *model.QueryReq
 	if err := s.prepareExportRequest(req); err != nil {
 		return nil, err
 	}
+	logIdentifier, err := s.resolveLogIdentifier(req.Mobile)
+	if err != nil {
+		return nil, err
+	}
 
 	var allData []map[string]interface{}
 
@@ -366,7 +391,7 @@ func (s *QueryService) ExportCSVContext(ctx context.Context, req *model.QueryReq
 		if err := queryContextError(ctx); err != nil {
 			return nil, err
 		}
-		entries, _, err := s.logRepo.QueryAcrossMonthsWithConditionsContext(ctx, featureID, req.StartTime, req.EndTime, req.Conditions, req.Mobile, req.Page, req.PageSize)
+		entries, _, err := s.logRepo.QueryAcrossMonthsWithConditionsContext(ctx, featureID, req.StartTime, req.EndTime, req.Conditions, logIdentifier, req.Page, req.PageSize)
 		if err != nil {
 			if ctxErr := queryContextError(ctx); ctxErr != nil {
 				return nil, ctxErr
@@ -394,6 +419,10 @@ func (s *QueryService) ExportCSVStreamContext(ctx context.Context, req *model.Qu
 	if err := s.prepareExportRequest(req); err != nil {
 		return err
 	}
+	logIdentifier, err := s.resolveLogIdentifier(req.Mobile)
+	if err != nil {
+		return err
+	}
 
 	streams := make([]exportFeatureStream, 0, len(req.FeatureIDs))
 	items := exportEntryHeap{}
@@ -406,7 +435,7 @@ func (s *QueryService) ExportCSVStreamContext(ctx context.Context, req *model.Qu
 		}
 		streams = append(streams, stream)
 		index := len(streams) - 1
-		entry, err := s.nextExportEntry(ctx, req, &streams[index])
+		entry, err := s.nextExportEntry(ctx, req, logIdentifier, &streams[index])
 		if err != nil {
 			return err
 		}
@@ -420,7 +449,7 @@ func (s *QueryService) ExportCSVStreamContext(ctx context.Context, req *model.Qu
 		if err := writeRow(s.parseEntry(&item.entry)); err != nil {
 			return err
 		}
-		entry, err := s.nextExportEntry(ctx, req, &streams[item.streamIndex])
+		entry, err := s.nextExportEntry(ctx, req, logIdentifier, &streams[item.streamIndex])
 		if err != nil {
 			return err
 		}
@@ -442,7 +471,7 @@ type exportFeatureStream struct {
 	pos       int
 }
 
-func (s *QueryService) nextExportEntry(ctx context.Context, req *model.QueryRequest, stream *exportFeatureStream) (*model.LogEntry, error) {
+func (s *QueryService) nextExportEntry(ctx context.Context, req *model.QueryRequest, logIdentifier string, stream *exportFeatureStream) (*model.LogEntry, error) {
 	if stream.written >= req.PageSize {
 		return nil, nil
 	}
@@ -453,7 +482,7 @@ func (s *QueryService) nextExportEntry(ctx context.Context, req *model.QueryRequ
 		if err := queryContextError(ctx); err != nil {
 			return nil, err
 		}
-		entries, _, err := s.logRepo.QueryAcrossMonthsWithConditionsContext(ctx, stream.featureID, req.StartTime, req.EndTime, req.Conditions, req.Mobile, stream.page, exportBatchSize)
+		entries, _, err := s.logRepo.QueryAcrossMonthsWithConditionsContext(ctx, stream.featureID, req.StartTime, req.EndTime, req.Conditions, logIdentifier, stream.page, exportBatchSize)
 		if err != nil {
 			if ctxErr := queryContextError(ctx); ctxErr != nil {
 				return nil, ctxErr

@@ -169,6 +169,22 @@ func (r *ContactRepository) GetContactByMobile(mobile string) (*model.Contact, e
 	return &c, nil
 }
 
+func (r *ContactRepository) ResolveUserIDByIdentifier(identifier string) (string, error) {
+	identifier = strings.TrimSpace(identifier)
+	if identifier == "" {
+		return "", nil
+	}
+	var c model.Contact
+	err := r.DB.Select("user_id").Where("user_id = ? OR mobile = ?", identifier, identifier).First(&c).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return identifier, nil
+		}
+		return "", err
+	}
+	return c.UserID, nil
+}
+
 func (r *ContactRepository) GetAllDepartments() ([]model.Department, error) {
 	var depts []model.Department
 	if err := r.DB.Order("id ASC").Find(&depts).Error; err != nil {
@@ -219,7 +235,7 @@ func (r *ContactRepository) GetScopedContactCount(deptIDs []int, unrestricted bo
 	var count int64
 	if unrestricted {
 		err := r.DB.Model(&model.Contact{}).
-			Where("status = 1 AND mobile IS NOT NULL AND mobile != ''").
+			Where("status = 1").
 			Count(&count).Error
 		return count, err
 	}
@@ -227,11 +243,10 @@ func (r *ContactRepository) GetScopedContactCount(deptIDs []int, unrestricted bo
 		return 0, nil
 	}
 	err := r.DB.Raw(`
-		SELECT COUNT(DISTINCT c.mobile)
+		SELECT COUNT(DISTINCT c.user_id)
 		FROM contacts c
 		INNER JOIN contact_departments cd ON c.user_id = cd.user_id
-		WHERE c.status = 1 AND c.mobile IS NOT NULL AND c.mobile != ''
-		  AND cd.department IN ?
+		WHERE c.status = 1 AND cd.department IN ?
 	`, deptIDs).Scan(&count).Error
 	return count, err
 }

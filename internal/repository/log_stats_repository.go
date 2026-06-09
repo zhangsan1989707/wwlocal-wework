@@ -353,7 +353,7 @@ func (r *LogRepository) GetInactiveUserCount(featureIDs []int, startTime int64) 
 			FROM user_daily_stats
 			WHERE feature_id IN (%s) AND stat_date >= ?
 			GROUP BY mobile
-		) stats ON stats.mobile = c.mobile
+		) stats ON stats.mobile = c.user_id
 		WHERE stats.mobile IS NULL AND c.status = 1
 	`, strings.Join(fidPlaceholders, ","))
 
@@ -396,7 +396,7 @@ func (r *LogRepository) GetUsersWithDayStats(featureIDs []int, startTime int64, 
 			FROM user_daily_stats
 			WHERE feature_id IN (%s) %s
 			GROUP BY mobile
-		) stats ON stats.mobile = c.mobile
+		) stats ON stats.mobile = c.user_id
 		WHERE c.status = 1 %s
 	`, strings.Join(fidPlaceholders, ","), timeFilter, deptFilter)
 
@@ -456,7 +456,7 @@ func (r *LogRepository) GetDeptInactiveStats(featureIDs []int, startTime int64, 
 			FROM user_daily_stats
 			WHERE feature_id IN (%s) AND stat_date >= ?
 			GROUP BY mobile
-		) stats ON stats.mobile = c.mobile
+		) stats ON stats.mobile = c.user_id
 		WHERE c.status = 1 AND (%d - COALESCE(stats.active_days, 0)) >= ?
 		GROUP BY cd.department
 	`, strings.Join(fidPlaceholders, ","), totalDays)
@@ -605,8 +605,8 @@ func (r *LogRepository) GetTrendByDept(featureIDs []int, startDate, endDate stri
 	sql := fmt.Sprintf(`
 		SELECT
 			cd.department AS dept_id,
-			COUNT(DISTINCT c.mobile) AS total_contacts,
-			COUNT(DISTINCT CASE WHEN uds.mobile IS NOT NULL THEN c.mobile END) AS active_count,
+			COUNT(DISTINCT c.user_id) AS total_contacts,
+			COUNT(DISTINCT CASE WHEN uds.mobile IS NOT NULL THEN c.user_id END) AS active_count,
 			COALESCE(AVG(CASE WHEN uds.mobile IS NOT NULL THEN uds.active_days END), 0) AS avg_active_days
 		FROM contacts c
 		INNER JOIN contact_departments cd ON cd.user_id = c.user_id
@@ -615,7 +615,7 @@ func (r *LogRepository) GetTrendByDept(featureIDs []int, startDate, endDate stri
 			FROM user_daily_stats
 			WHERE feature_id IN (%s) AND stat_date >= ? AND stat_date <= ?
 			GROUP BY mobile
-		) uds ON uds.mobile = c.mobile
+		) uds ON uds.mobile = c.user_id
 		WHERE c.status = 1
 		GROUP BY cd.department
 		ORDER BY active_count DESC

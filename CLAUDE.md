@@ -68,7 +68,7 @@ pkg/
 5. **解密管道**: RSA PKCS1v15 解密 `encrypt_key`(base64) → 得到 16 字节 AES 密钥 → AES-128-CBC 解密 `encrypt_data`(base64, IV = 密文前 16 字节)
 6. **分表策略**: 表名 `log_{feature_id}_{YYYYMM}`，由 `LogRepository` 动态创建
 7. **通讯录同步**: `ContactSyncService` → `ContactService.GetSimpleUserList()` → 新用户逐个 `GetUserDetail()`（并发 worker 池）→ `ContactRepository.BatchUpsert()`
-8. **手机号匹配**: 日志查询的 `mobile` 参数匹配 `parsed_json.openid`（openid 即手机号）
+8. **成员标识匹配**: 日志查询的 `mobile` 参数兼容手机号或 UserID；手机号会先解析为通讯录 `user_id`，再匹配日志中的 openid/userid 字段
 9. **通讯录独立 token**: `ContactService` 使用独立的 `contact_secret` 获取 token，与日志 API 的 token 分开管理
 
 ### 密钥热切换

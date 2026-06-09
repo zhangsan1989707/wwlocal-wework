@@ -448,7 +448,7 @@ func (s *NightlyJobService) deptActiveCount(deptID int, statDate string) (int64,
 	sql := `
 		SELECT COUNT(DISTINCT uds.mobile)
 		FROM user_daily_stats uds
-		INNER JOIN contacts c ON uds.mobile = c.mobile
+		INNER JOIN contacts c ON uds.mobile = c.user_id
 		INNER JOIN contact_departments cd ON c.user_id = cd.user_id
 		WHERE cd.department = ?
 		  AND uds.stat_date = ?
@@ -495,7 +495,7 @@ func (s *NightlyJobService) buildInactiveUserList(statDate string) ([]model.Dash
 		  AND c.mobile IS NOT NULL AND c.mobile != ''
 		  AND NOT EXISTS (
 			SELECT 1 FROM user_daily_stats uds
-			WHERE uds.mobile = c.mobile
+			WHERE uds.mobile = c.user_id
 			  AND uds.stat_date = ?
 			  AND uds.feature_id IN (?,?,?, ?,?,?)
 		  )

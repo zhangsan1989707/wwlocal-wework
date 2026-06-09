@@ -9,8 +9,10 @@ import (
 )
 
 type fakeLogQueryRepo struct {
-	calls []exportCall
-	rows  map[int][]model.LogEntry
+	calls        []exportCall
+	rows         map[int][]model.LogEntry
+	lastMobile   string
+	cursorMobile string
 }
 
 type exportCall struct {
@@ -19,12 +21,17 @@ type exportCall struct {
 	PageSize  int
 }
 
+type fakeContactIdentifierRepo struct {
+	resolved map[string]string
+}
+
 func (r *fakeLogQueryRepo) QueryAcrossMonthsContext(ctx context.Context, featureID int, startTime, endTime int64, page, pageSize int) ([]model.LogEntry, int64, error) {
 	return nil, 0, nil
 }
 
 func (r *fakeLogQueryRepo) QueryAcrossMonthsWithConditionsContext(ctx context.Context, featureID int, startTime, endTime int64, conditions map[string]interface{}, mobile string, page, pageSize int) ([]model.LogEntry, int64, error) {
 	r.calls = append(r.calls, exportCall{FeatureID: featureID, Page: page, PageSize: pageSize})
+	r.lastMobile = mobile
 	rows := r.rows[featureID]
 	start := (page - 1) * pageSize
 	if start >= len(rows) {
@@ -38,11 +45,19 @@ func (r *fakeLogQueryRepo) QueryAcrossMonthsWithConditionsContext(ctx context.Co
 }
 
 func (r *fakeLogQueryRepo) QueryByCursorContext(ctx context.Context, featureID int, startTime, endTime int64, cursor int64, pageSize int, conditions map[string]interface{}, mobile string) ([]model.LogEntry, int64, int64, error) {
+	r.cursorMobile = mobile
 	return nil, 0, 0, nil
 }
 
 func (r *fakeLogQueryRepo) SampleParsedJSON(featureIDs []int, limit int) []string {
 	return nil
+}
+
+func (r *fakeContactIdentifierRepo) ResolveUserIDByIdentifier(identifier string) (string, error) {
+	if v := r.resolved[identifier]; v != "" {
+		return v, nil
+	}
+	return identifier, nil
 }
 
 func TestQueryContextError(t *testing.T) {
@@ -62,6 +77,26 @@ func TestQueryContextError(t *testing.T) {
 	defer cancel()
 	if err := queryContextError(ctx); !errors.Is(err, ErrQueryTimeout) {
 		t.Fatalf("deadline context error = %v, want ErrQueryTimeout", err)
+	}
+}
+
+func TestQueryContextResolvesMobileToUserID(t *testing.T) {
+	repo := &fakeLogQueryRepo{rows: map[int][]model.LogEntry{90000031: {}}}
+	svc := &QueryService{
+		logRepo:     repo,
+		contactRepo: &fakeContactIdentifierRepo{resolved: map[string]string{"13800138000": "id-card-user"}},
+	}
+	_, err := svc.QueryContext(context.Background(), &model.QueryRequest{
+		FeatureIDs: []int{90000031},
+		StartTime:  1,
+		EndTime:    2,
+		Mobile:     "13800138000",
+	})
+	if err != nil {
+		t.Fatalf("QueryContext: %v", err)
+	}
+	if repo.lastMobile != "id-card-user" {
+		t.Fatalf("queried identifier = %q, want id-card-user", repo.lastMobile)
 	}
 }
 

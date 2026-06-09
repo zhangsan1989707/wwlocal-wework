@@ -43,6 +43,13 @@ func (s *BehaviorQueryService) prepareRequest(req *model.BehaviorQueryRequest, d
 	if req.OpenID == "" {
 		return nil, fmt.Errorf("openid is required")
 	}
+	if s.contactRepo != nil {
+		userID, err := s.contactRepo.ResolveUserIDByIdentifier(req.OpenID)
+		if err != nil {
+			return nil, err
+		}
+		req.OpenID = userID
+	}
 	if req.StartTime <= 0 || req.EndTime <= 0 {
 		return nil, fmt.Errorf("start_time and end_time are required")
 	}

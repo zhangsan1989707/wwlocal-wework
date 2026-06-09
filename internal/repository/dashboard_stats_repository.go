@@ -174,7 +174,7 @@ func (r *DashboardStatsRepository) CountDistinctUsersFromDailyStats(featureIDs [
 	sql := fmt.Sprintf(`
 		SELECT COUNT(DISTINCT uds.mobile)
 		FROM user_daily_stats uds
-		INNER JOIN contacts c ON c.mobile = uds.mobile AND c.status = 1
+		INNER JOIN contacts c ON c.user_id = uds.mobile AND c.status = 1
 		WHERE uds.feature_id IN ? AND uds.stat_date >= ? AND uds.stat_date <= ? %s
 	`, scopeSQL)
 	args := []interface{}{featureIDs, startDate, endDate}
@@ -192,7 +192,7 @@ func (r *DashboardStatsRepository) CountDistinctUsersFromDailyStatsThroughDate(f
 	sql := fmt.Sprintf(`
 		SELECT COUNT(DISTINCT uds.mobile)
 		FROM user_daily_stats uds
-		INNER JOIN contacts c ON c.mobile = uds.mobile AND c.status = 1
+		INNER JOIN contacts c ON c.user_id = uds.mobile AND c.status = 1
 		WHERE uds.feature_id IN ? AND uds.stat_date <= ? %s
 	`, scopeSQL)
 	args := []interface{}{featureIDs, endDate}
@@ -235,7 +235,7 @@ func (r *DashboardStatsRepository) CountLogRowsScoped(featureIDs []int, startDat
 						AND EXISTS (
 							SELECT 1 FROM contacts c
 							INNER JOIN contact_departments cd_scope ON cd_scope.user_id = c.user_id
-							WHERE c.status = 1 AND c.mobile = %s.%s AND cd_scope.department IN ?
+							WHERE c.status = 1 AND c.user_id = %s.%s AND cd_scope.department IN ?
 						)
 					`, tableName, userField)
 					args = append(args, deptIDs)
@@ -263,7 +263,7 @@ func (r *DashboardStatsRepository) GetPeopleTrend(featureIDs []int, startDate, e
 	sql := fmt.Sprintf(`
 		SELECT %s AS period, COUNT(DISTINCT uds.mobile) AS value
 		FROM user_daily_stats uds
-		INNER JOIN contacts c ON c.mobile = uds.mobile AND c.status = 1
+		INNER JOIN contacts c ON c.user_id = uds.mobile AND c.status = 1
 		WHERE uds.feature_id IN ? AND uds.stat_date >= ? AND uds.stat_date <= ? %s
 		GROUP BY %s
 		ORDER BY %s
@@ -311,7 +311,7 @@ func (r *DashboardStatsRepository) GetEventTrendScoped(featureIDs []int, startDa
 						AND EXISTS (
 							SELECT 1 FROM contacts c
 							INNER JOIN contact_departments cd_scope ON cd_scope.user_id = c.user_id
-							WHERE c.status = 1 AND c.mobile = %s.%s AND cd_scope.department IN ?
+							WHERE c.status = 1 AND c.user_id = %s.%s AND cd_scope.department IN ?
 						)
 					`, tableName, userField)
 					args = append(args, deptIDs)
@@ -412,7 +412,7 @@ func (r *DashboardStatsRepository) GetScopedUserList(statDate, listType string, 
 		  %s
 		  AND %s (
 			SELECT 1 FROM user_daily_stats uds
-			WHERE uds.mobile = c.mobile
+			WHERE uds.mobile = c.user_id
 			  AND uds.stat_date = ?
 			  AND uds.feature_id IN ?
 		  )
@@ -677,7 +677,7 @@ func (r *DashboardStatsRepository) GetDeviceStatsScoped(statDate string, deptIDs
 				AND EXISTS (
 					SELECT 1 FROM contacts c
 					INNER JOIN contact_departments cd_scope ON cd_scope.user_id = c.user_id
-					WHERE c.status = 1 AND c.mobile = %s.%s AND cd_scope.department IN ?
+					WHERE c.status = 1 AND c.user_id = %s.%s AND cd_scope.department IN ?
 				)
 			`, tableName, source.OpenIDColumn)
 		}

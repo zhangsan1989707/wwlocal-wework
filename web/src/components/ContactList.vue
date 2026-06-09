@@ -386,17 +386,24 @@ const handleRowClick = async (row: Contact | DeptMember) => {
   }
 }
 
+const currentContactIdentifier = () => {
+  const contact = drawerContact.value as (Contact & { userid?: string }) | null
+  return contact?.user_id || contact?.userid || contact?.mobile || ''
+}
+
 const viewUserLogs = () => {
-  if (drawerContact.value?.mobile) {
+  const identifier = currentContactIdentifier()
+  if (identifier) {
     drawerVisible.value = false
-    router.push({ path: '/query', query: { mobile: drawerContact.value.mobile, auto_query: '1' } })
+    router.push({ path: '/query', query: { mobile: identifier, auto_query: '1' } })
   }
 }
 
 const viewUserBehavior = () => {
-  if (drawerContact.value?.mobile) {
+  const identifier = currentContactIdentifier()
+  if (identifier) {
     drawerVisible.value = false
-    router.push({ path: '/behavior', query: { identifier: drawerContact.value.mobile, auto_query: '1' } })
+    router.push({ path: '/behavior', query: { identifier, auto_query: '1' } })
   }
 }
 

@@ -75,10 +75,10 @@
 
         <el-row :gutter="20">
           <el-col :span="8">
-            <el-form-item label="手机号匹配">
+            <el-form-item label="成员标识/手机号">
               <el-input
                 v-model="form.mobile"
-                placeholder="输入手机号，匹配日志中的 openid"
+                placeholder="输入 UserID 或手机号"
                 clearable
               />
             </el-form-item>

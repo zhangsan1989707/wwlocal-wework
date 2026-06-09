@@ -440,8 +440,9 @@ function handleResize() {
 
 // --- Actions ---
 function handleUserClick(row: DashboardV2UserItem) {
-  if (row.mobile) {
-    router.push({ path: '/query', query: { mobile: row.mobile, auto_query: '1' } })
+  const identifier = row.user_id || row.mobile
+  if (identifier) {
+    router.push({ path: '/query', query: { mobile: identifier, auto_query: '1' } })
   }
 }
 
