@@ -186,7 +186,6 @@
               v-model="dateRange"
               type="datetimerange"
               format="YYYY-MM-DD HH:mm:ss"
-              value-format="YYYY-MM-DD HH:mm:ss"
               range-separator="至"
               start-placeholder="开始时间"
               end-placeholder="结束时间"
@@ -499,7 +498,7 @@ const progressFormat = (percentage: number) => `${percentage}%`
 
 const resultTableData = computed(() => {
   const results = syncStatus.value.results
-  const errors = syncStatus.value.errors
+  const errors = syncStatus.value.errors || {}
   if (!results || Object.keys(results).length === 0) return []
   return Object.entries(results).map(([featureId, count]) => ({
     feature_id: Number(featureId),
