@@ -78,7 +78,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { syncFeatureAPI, adminOperLogAPI } from '../api'
-import type { ApiResponse, SyncFeature, AdminOperLogSyncStatus } from '../types/api'
+import type { SyncFeature, AdminOperLogSyncStatus } from '../types/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const router = useRouter()
@@ -103,7 +103,7 @@ onUnmounted(() => {
 const loadFeatures = async () => {
   loading.value = true
   try {
-    const res = await syncFeatureAPI.list() as unknown as ApiResponse<SyncFeature[]>
+    const res = await syncFeatureAPI.list()
     if (res.code === 0) {
       features.value = res.data || []
     }
@@ -116,7 +116,7 @@ const loadFeatures = async () => {
 
 const loadAdminOperLogStats = async () => {
   try {
-    const res = await adminOperLogAPI.syncStatus() as unknown as ApiResponse<AdminOperLogSyncStatus>
+    const res = await adminOperLogAPI.syncStatus()
     if (res.code === 0 && res.data) {
       adminOperLogStats.value = res.data
       if (adminOperLogStats.value.running) {
@@ -152,7 +152,7 @@ const handleSave = async () => {
       feature_id: f.feature_id,
       enabled: f.enabled,
     }))
-    const res = await syncFeatureAPI.update({ features: data }) as unknown as ApiResponse<{ message: string }>
+    const res = await syncFeatureAPI.update({ features: data })
     if (res.code === 0) {
       ElMessage.success('保存成功')
     } else {

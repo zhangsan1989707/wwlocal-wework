@@ -180,7 +180,7 @@ import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { contactAPI } from '../api'
-import type { ApiResponse, Contact, ContactSyncStatus, Department, DeptMember, PaginatedResponse } from '../types/api'
+import type { Contact, ContactSyncStatus, Department, DeptMember } from '../types/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Connection } from '@element-plus/icons-vue'
 
@@ -269,7 +269,7 @@ onUnmounted(() => {
 
 const loadDeptTree = async () => {
   try {
-    const res = await contactAPI.getDeptTree() as unknown as { code: number; data?: { tree: Department[]; total: number } }
+    const res = await contactAPI.getDeptTree()
     if (res.code === 0) {
       deptTree.value = res.data?.tree || []
       totalContacts.value = res.data?.total || 0
@@ -286,7 +286,7 @@ const loadDeptMembers = async () => {
     const res = await contactAPI.getDeptMembers(selectedDept.value.id, {
       page: page.value,
       page_size: pageSize.value,
-    }) as unknown as ApiResponse<PaginatedResponse<DeptMember>>
+    })
     if (res.code === 0 && res.data) {
       contacts.value = res.data.data || []
       total.value = res.data.total || 0
@@ -306,7 +306,7 @@ const loadContacts = async () => {
       page_size: pageSize.value,
       name: searchName.value,
       mobile: searchMobile.value,
-    }) as unknown as ApiResponse<PaginatedResponse<Contact>>
+    })
     if (res.code === 0 && res.data) {
       contacts.value = res.data.data || []
       total.value = res.data.total || 0
@@ -373,7 +373,7 @@ const handleSizeChange = (size: number) => {
 const handleRowClick = async (row: Contact | DeptMember) => {
   try {
     const uid = 'userid' in row ? row.userid : row.user_id
-    const res = await contactAPI.getContact(uid) as unknown as ApiResponse<Contact>
+    const res = await contactAPI.getContact(uid)
     if (res.code === 0) {
       const data = res.data
       if (data) {
@@ -415,7 +415,7 @@ const handleSyncFull = async () => {
   } catch { return }
 
   try {
-    const res = await contactAPI.sync() as unknown as ApiResponse<{ message: string }>
+    const res = await contactAPI.sync()
     if (res.code === 0) {
       ElMessage.success('通讯录同步已启动')
       await checkSyncStatus()
@@ -436,7 +436,7 @@ const handleSyncIncremental = async () => {
   } catch { return }
 
   try {
-    const res = await contactAPI.syncIncremental() as unknown as ApiResponse<{ message: string }>
+    const res = await contactAPI.syncIncremental()
     if (res.code === 0) {
       ElMessage.success('通讯录同步已启动')
       await checkSyncStatus()
@@ -449,7 +449,7 @@ const handleSyncIncremental = async () => {
 
 const handleCancel = async () => {
   try {
-    const res = await contactAPI.cancel() as unknown as ApiResponse<{ message: string }>
+    const res = await contactAPI.cancel()
     if (res.code === 0) ElMessage.success('已发送取消请求')
   } catch (err: unknown) {
     ElMessage.error(err instanceof Error ? err.message : '取消失败')
@@ -458,7 +458,7 @@ const handleCancel = async () => {
 
 const checkSyncStatus = async () => {
   try {
-    const res = await contactAPI.status() as unknown as ApiResponse<ContactSyncStatus>
+    const res = await contactAPI.status()
     if (res.code === 0 && res.data) syncStatus.value = res.data
   } catch (err) { console.error(err) }
 }
