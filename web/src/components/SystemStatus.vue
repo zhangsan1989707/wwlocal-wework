@@ -52,7 +52,7 @@
             </el-descriptions-item>
             <el-descriptions-item label="上次同步">
               {{ status.contacts?.last_sync ? formatTime(status.contacts.last_sync) : '未同步' }}
-              <el-tag v-if="status.contacts?.sync_age_hours > 168" type="warning" size="small" style="margin-left: 8px">
+              <el-tag v-if="(status.contacts?.sync_age_hours ?? 0) > 168" type="warning" size="small" style="margin-left: 8px">
                 超过 7 天
               </el-tag>
             </el-descriptions-item>
@@ -171,15 +171,15 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { systemAPI } from '../api'
-import type { SchemaFieldCoverage } from '../types/api'
+import type { SchemaFieldCoverage, SyncCoverageInfo, SystemStatus } from '../types/api'
 
-const status = ref<any>(null)
+const status = ref<SystemStatus | null>(null)
 const loading = ref(false)
 
 const coverageData = computed(() => {
   if (!status.value?.sync_coverage) return []
-  return Object.entries(status.value.sync_coverage).map(([featureId, info]: [string, any]) => ({
-    feature_id: featureId,
+  return Object.entries(status.value.sync_coverage).map(([featureId, info]: [string, SyncCoverageInfo]) => ({
+    feature_id: Number(featureId),
     ...info,
   }))
 })
@@ -191,8 +191,8 @@ const schemaQualityData = computed(() => {
 const loadStatus = async () => {
   loading.value = true
   try {
-    const res: any = await systemAPI.getStatus()
-    if (res.code === 0) {
+    const res = await systemAPI.getStatus()
+    if (res.code === 0 && res.data) {
       status.value = res.data
     }
   } catch (err) {

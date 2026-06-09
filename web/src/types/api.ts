@@ -347,34 +347,36 @@ export interface InactiveUsersResponse {
 }
 
 export interface SystemStatus {
-  db_connected: boolean
-  uptime: string
+  health: {
+    db_connected: boolean
+    uptime_seconds: number
+  }
   key_status: {
     active_version?: string
-    total_versions: number
+    active_days?: number
+    total_keys: number
   }
-  contact_status: {
-    last_sync_time?: string
-    members_count: number
+  contacts: {
+    total: number
+    last_sync?: string
+    sync_age_hours?: number
   }
-  sync_coverage: Array<{
-    feature_id: number
-    feature_name: string
-    last_sync_time?: string
-    total_records: number
-    time_range?: {
-      start?: string
-      end?: string
-    }
-  }>
-  storage: Array<{
-    table_name: string
+  sync_coverage: Record<string, SyncCoverageInfo>
+  table_sizes: Array<{
+    table: string
     rows: number
-    data_size: string
-    index_size: string
-    total_size: string
+    data_bytes: number
+    index_bytes: number
   }>
   schema_quality?: SchemaQualityInfo[]
+  schema_quality_error?: string
+}
+
+export interface SyncCoverageInfo {
+  last_log_time: number
+  last_sync_at?: string
+  total_synced: number
+  data_age_hours?: number
 }
 
 export interface SchemaFieldCoverage {
