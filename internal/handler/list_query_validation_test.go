@@ -102,6 +102,7 @@ func (f *fakeAdminOperLogService) GetStatus() (service.AdminOperLogSyncStatus, e
 func TestAdminOperLogListValidatesQueryParams(t *testing.T) {
 	tests := []string{
 		"/admin-oper-logs?start_time=bad",
+		"/admin-oper-logs?start_time=-1",
 		"/admin-oper-logs?start_time=20&end_time=10",
 	}
 
@@ -113,6 +114,25 @@ func TestAdminOperLogListValidatesQueryParams(t *testing.T) {
 		}
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("List(%s) status = %d, want 400", target, rec.Code)
+		}
+	}
+}
+
+func TestAdminOperLogStatsValidatesQueryParams(t *testing.T) {
+	tests := []string{
+		"/admin-oper-logs/stats?start_time=bad",
+		"/admin-oper-logs/stats?start_time=-1",
+		"/admin-oper-logs/stats?start_time=20&end_time=10",
+	}
+
+	for _, target := range tests {
+		c, rec := newListQueryContext(target)
+		h := &AdminOperLogHandler{svc: &fakeAdminOperLogService{}}
+		if err := h.GetStats(c); err != nil {
+			t.Fatalf("GetStats(%s): %v", target, err)
+		}
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("GetStats(%s) status = %d, want 400", target, rec.Code)
 		}
 	}
 }

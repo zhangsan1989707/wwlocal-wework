@@ -74,3 +74,14 @@ func parseOptionalInt64Query(c echo.Context, name string) (int64, error) {
 	}
 	return value, nil
 }
+
+func parseOptionalNonNegativeInt64Query(c echo.Context, name string) (int64, error) {
+	value, err := parseOptionalInt64Query(c, name)
+	if err != nil {
+		return 0, err
+	}
+	if value < 0 {
+		return 0, fmt.Errorf("%s must be >= 0", name)
+	}
+	return value, nil
+}

@@ -52,6 +52,19 @@ func TestParseOptionalInt64Query(t *testing.T) {
 	}
 }
 
+func TestParseOptionalNonNegativeInt64Query(t *testing.T) {
+	got, err := parseOptionalNonNegativeInt64Query(newQueryContext("/?start_time=1780898409"), "start_time")
+	if err != nil {
+		t.Fatalf("parseOptionalNonNegativeInt64Query: %v", err)
+	}
+	if got != 1780898409 {
+		t.Fatalf("got %d", got)
+	}
+	if _, err := parseOptionalNonNegativeInt64Query(newQueryContext("/?start_time=-1"), "start_time"); err == nil {
+		t.Fatalf("parseOptionalNonNegativeInt64Query error = nil, want error")
+	}
+}
+
 func TestParseOptionalNonNegativeIntQuery(t *testing.T) {
 	got, err := parseOptionalNonNegativeIntQuery(newQueryContext("/?dept_id=12"), "dept_id")
 	if err != nil {

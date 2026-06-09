@@ -212,6 +212,33 @@ func TestDashboardV2OverviewUsesCumulativeActivation(t *testing.T) {
 	}
 }
 
+func TestDashboardV2ExportOverviewCSV(t *testing.T) {
+	svc := &DashboardV2Service{
+		statsRepo:   &fakeDashboardV2StatsRepo{},
+		contactRepo: &fakeDashboardV2ContactRepo{},
+	}
+
+	rows, err := svc.ExportOverviewCSV("2026-06-08", &DataScope{Unrestricted: true})
+	if err != nil {
+		t.Fatalf("ExportOverviewCSV: %v", err)
+	}
+	if !csvRowsContain(rows, "设备总数", "0") {
+		t.Fatalf("CSV rows should include device total 0: %#v", rows)
+	}
+	if csvRowsContainKey(rows, "活跃群数") || csvRowsContainKey(rows, "群活跃率") {
+		t.Fatalf("CSV rows should not include unsupported group active metrics: %#v", rows)
+	}
+}
+
+func TestOverviewDeviceTotalDefaultsToZero(t *testing.T) {
+	if got := overviewDeviceTotal(map[string]interface{}{}); got != 0 {
+		t.Fatalf("missing devices total = %v, want 0", got)
+	}
+	if got := overviewDeviceTotal(map[string]interface{}{"devices": "bad"}); got != 0 {
+		t.Fatalf("invalid devices total = %v, want 0", got)
+	}
+}
+
 func TestDashboardV2OverviewReturnsAppAccessError(t *testing.T) {
 	svc := &DashboardV2Service{
 		statsRepo: &fakeDashboardV2StatsRepo{distinctErrByFeature: map[int]error{
@@ -234,4 +261,22 @@ func TestDashboardV2OverviewReturnsDeviceError(t *testing.T) {
 	if _, err := svc.GetOverview("2026-06-08", &DataScope{Unrestricted: true}); err == nil {
 		t.Fatalf("GetOverview error = nil, want device query error")
 	}
+}
+
+func csvRowsContain(rows [][]string, key, value string) bool {
+	for _, row := range rows {
+		if len(row) >= 2 && row[0] == key && row[1] == value {
+			return true
+		}
+	}
+	return false
+}
+
+func csvRowsContainKey(rows [][]string, key string) bool {
+	for _, row := range rows {
+		if len(row) > 0 && row[0] == key {
+			return true
+		}
+	}
+	return false
 }

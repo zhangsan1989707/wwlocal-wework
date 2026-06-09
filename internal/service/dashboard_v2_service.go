@@ -124,6 +124,17 @@ func normalizeListType(listType string) (string, error) {
 	}
 }
 
+func overviewDeviceTotal(overview map[string]interface{}) interface{} {
+	devices, ok := overview["devices"].(map[string]interface{})
+	if !ok {
+		return 0
+	}
+	if total, ok := devices["total"]; ok {
+		return total
+	}
+	return 0
+}
+
 func validateMetricType(metricType string) error {
 	switch metricType {
 	case "login_users", "usage_users", "active", model.MetricUserActive,
@@ -576,7 +587,7 @@ func (s *DashboardV2Service) ExportOverviewCSV(date string, scope *DataScope) ([
 		{"创建群数", fmt.Sprintf("%v", overview["group_created"])},
 		{"应用访问人数", fmt.Sprintf("%v", overview["app_access_user"])},
 		{"应用访问次数", fmt.Sprintf("%v", overview["app_access_count"])},
-		{"设备总数", fmt.Sprintf("%v", overview["devices"].(map[string]interface{})["total"])},
+		{"设备总数", fmt.Sprintf("%v", overviewDeviceTotal(overview))},
 	}
 
 	return rows, nil

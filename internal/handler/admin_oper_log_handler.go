@@ -35,11 +35,11 @@ func (h *AdminOperLogHandler) List(c echo.Context) error {
 	}
 	operType := c.QueryParam("oper_type")
 	operUserID := c.QueryParam("oper_userid")
-	startTime, err := parseOptionalInt64Query(c, "start_time")
+	startTime, err := parseOptionalNonNegativeInt64Query(c, "start_time")
 	if err != nil {
 		return response.Error(c, 400, err.Error())
 	}
-	endTime, err := parseOptionalInt64Query(c, "end_time")
+	endTime, err := parseOptionalNonNegativeInt64Query(c, "end_time")
 	if err != nil {
 		return response.Error(c, 400, err.Error())
 	}
@@ -71,6 +71,9 @@ func (h *AdminOperLogHandler) Sync(c echo.Context) error {
 
 	startTime := req.StartTime
 	endTime := req.EndTime
+	if startTime < 0 || endTime < 0 {
+		return response.Error(c, 400, "start_time and end_time must be >= 0")
+	}
 
 	if startTime > 0 && endTime > 0 && startTime > endTime {
 		return response.Error(c, 400, "start_time must be less than end_time")
@@ -87,24 +90,13 @@ func (h *AdminOperLogHandler) Sync(c echo.Context) error {
 }
 
 func (h *AdminOperLogHandler) GetStats(c echo.Context) error {
-	startTimeStr := c.QueryParam("start_time")
-	endTimeStr := c.QueryParam("end_time")
-
-	var startTime, endTime int64
-	var err error
-
-	if startTimeStr != "" {
-		startTime, err = strconv.ParseInt(startTimeStr, 10, 64)
-		if err != nil {
-			return response.Error(c, 400, "invalid start_time")
-		}
+	startTime, err := parseOptionalNonNegativeInt64Query(c, "start_time")
+	if err != nil {
+		return response.Error(c, 400, err.Error())
 	}
-
-	if endTimeStr != "" {
-		endTime, err = strconv.ParseInt(endTimeStr, 10, 64)
-		if err != nil {
-			return response.Error(c, 400, "invalid end_time")
-		}
+	endTime, err := parseOptionalNonNegativeInt64Query(c, "end_time")
+	if err != nil {
+		return response.Error(c, 400, err.Error())
 	}
 
 	loc, _ := time.LoadLocation("Asia/Shanghai")
@@ -117,6 +109,9 @@ func (h *AdminOperLogHandler) GetStats(c echo.Context) error {
 	}
 	if startTime == 0 {
 		startTime = now.AddDate(0, 0, -30).Unix()
+	}
+	if startTime > endTime {
+		return response.Error(c, 400, "start_time must be less than end_time")
 	}
 
 	stats, err := h.svc.GetStats(startTime, endTime)
