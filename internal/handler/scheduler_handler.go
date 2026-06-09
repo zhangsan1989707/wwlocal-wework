@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"time"
 
 	"wwlocal-wework/internal/service"
@@ -54,6 +55,9 @@ func (h *SchedulerHandler) IncrementalSync(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return response.Error(c, 400, "invalid request body")
 	}
+	if err := validateIncrementalSyncRequest(&req); err != nil {
+		return response.Error(c, 400, err.Error())
+	}
 
 	if h.syncSvc.IsRunning() {
 		return response.Error(c, 409, "sync already in progress")
@@ -62,10 +66,8 @@ func (h *SchedulerHandler) IncrementalSync(c echo.Context) error {
 	h.syncSvc.StartSync(func() {
 		if req.SyncAll {
 			h.syncSvc.SyncAllFeaturesIncremental()
-		} else if len(req.FeatureIDs) > 0 {
-			h.syncSvc.SyncMultipleFeaturesIncremental(req.FeatureIDs)
 		} else {
-			h.syncSvc.SyncAllFeaturesIncremental()
+			h.syncSvc.SyncMultipleFeaturesIncremental(req.FeatureIDs)
 		}
 	})
 
@@ -73,6 +75,24 @@ func (h *SchedulerHandler) IncrementalSync(c echo.Context) error {
 		"message": "incremental sync started",
 		"running": true,
 	})
+}
+
+func validateIncrementalSyncRequest(req *IncrementalSyncRequest) error {
+	if req.SyncAll {
+		return nil
+	}
+	if len(req.FeatureIDs) == 0 {
+		return fmt.Errorf("sync_all or feature_ids is required")
+	}
+	if len(req.FeatureIDs) > maxLogFeatureCount {
+		return fmt.Errorf("cannot sync more than %d feature types at the same time", maxLogFeatureCount)
+	}
+	for _, featureID := range req.FeatureIDs {
+		if featureID <= 0 {
+			return fmt.Errorf("feature_ids contains invalid id")
+		}
+	}
+	return nil
 }
 
 type SetIntervalRequest struct {
