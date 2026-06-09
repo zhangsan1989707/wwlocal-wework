@@ -52,6 +52,17 @@ func parseOptionalIntQuery(c echo.Context, name string) (int, error) {
 	return value, nil
 }
 
+func parseOptionalNonNegativeIntQuery(c echo.Context, name string) (int, error) {
+	value, err := parseOptionalIntQuery(c, name)
+	if err != nil {
+		return 0, err
+	}
+	if value < 0 {
+		return 0, fmt.Errorf("%s must be >= 0", name)
+	}
+	return value, nil
+}
+
 func parseOptionalInt64Query(c echo.Context, name string) (int64, error) {
 	raw := c.QueryParam(name)
 	if raw == "" {

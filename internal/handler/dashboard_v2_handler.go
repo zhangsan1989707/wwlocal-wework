@@ -137,8 +137,10 @@ func (h *DashboardV2Handler) GetDeviceStats(c echo.Context) error {
 func (h *DashboardV2Handler) GetUserList(c echo.Context) error {
 	date := c.QueryParam("date")
 	listType := c.QueryParam("list_type")
-	page, _ := strconv.Atoi(c.QueryParam("page"))
-	pageSize, _ := strconv.Atoi(c.QueryParam("page_size"))
+	page, pageSize, err := parsePagination(c)
+	if err != nil {
+		return response.Error(c, 400, err.Error())
+	}
 
 	scope, err := h.scope(c)
 	if err != nil {

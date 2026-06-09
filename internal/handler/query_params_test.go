@@ -51,3 +51,16 @@ func TestParseOptionalInt64Query(t *testing.T) {
 		t.Fatalf("parseOptionalInt64Query error = nil, want error")
 	}
 }
+
+func TestParseOptionalNonNegativeIntQuery(t *testing.T) {
+	got, err := parseOptionalNonNegativeIntQuery(newQueryContext("/?dept_id=12"), "dept_id")
+	if err != nil {
+		t.Fatalf("parseOptionalNonNegativeIntQuery: %v", err)
+	}
+	if got != 12 {
+		t.Fatalf("got %d, want 12", got)
+	}
+	if _, err := parseOptionalNonNegativeIntQuery(newQueryContext("/?dept_id=-1"), "dept_id"); err == nil {
+		t.Fatalf("parseOptionalNonNegativeIntQuery error = nil, want error")
+	}
+}

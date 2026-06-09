@@ -135,6 +135,44 @@ func TestSyncHistoryListValidatesPagination(t *testing.T) {
 	}
 }
 
+func TestDashboardInactiveUsersValidatesQueryParams(t *testing.T) {
+	tests := []string{
+		"/dashboard/inactive-users?page=bad",
+		"/dashboard/inactive-users?page_size=101",
+		"/dashboard/inactive-users?dept_id=-1",
+		"/dashboard/inactive-users?min_inactive_days=bad",
+	}
+
+	for _, target := range tests {
+		c, rec := newListQueryContext(target)
+		h := &DashboardHandler{}
+		if err := h.GetInactiveUsers(c); err != nil {
+			t.Fatalf("GetInactiveUsers(%s): %v", target, err)
+		}
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("GetInactiveUsers(%s) status = %d, want 400", target, rec.Code)
+		}
+	}
+}
+
+func TestDashboardV2UserListValidatesPagination(t *testing.T) {
+	tests := []string{
+		"/dashboard/v2/users?page=bad",
+		"/dashboard/v2/users?page_size=101",
+	}
+
+	for _, target := range tests {
+		c, rec := newListQueryContext(target)
+		h := &DashboardV2Handler{}
+		if err := h.GetUserList(c); err != nil {
+			t.Fatalf("GetUserList(%s): %v", target, err)
+		}
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("GetUserList(%s) status = %d, want 400", target, rec.Code)
+		}
+	}
+}
+
 type fakeContactRepository struct{}
 
 func (f *fakeContactRepository) QueryContacts(name, mobile string, page, pageSize int) ([]model.Contact, int64, error) {

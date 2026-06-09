@@ -4,7 +4,6 @@ import (
 	"encoding/csv"
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -33,10 +32,18 @@ func (h *DashboardHandler) GetInactiveUsers(c echo.Context) error {
 	if rangeParam == "" {
 		rangeParam = "quarter"
 	}
-	deptID, _ := strconv.Atoi(c.QueryParam("dept_id"))
-	minInactiveDays, _ := strconv.Atoi(c.QueryParam("min_inactive_days"))
-	page, _ := strconv.Atoi(c.QueryParam("page"))
-	pageSize, _ := strconv.Atoi(c.QueryParam("page_size"))
+	deptID, err := parseOptionalNonNegativeIntQuery(c, "dept_id")
+	if err != nil {
+		return response.Error(c, 400, err.Error())
+	}
+	minInactiveDays, err := parseOptionalNonNegativeIntQuery(c, "min_inactive_days")
+	if err != nil {
+		return response.Error(c, 400, err.Error())
+	}
+	page, pageSize, err := parsePagination(c)
+	if err != nil {
+		return response.Error(c, 400, err.Error())
+	}
 
 	result, err := h.dashboardSvc.GetInactiveUsers(rangeParam, deptID, minInactiveDays, page, pageSize)
 	if err != nil {
@@ -50,8 +57,14 @@ func (h *DashboardHandler) ExportInactiveUsers(c echo.Context) error {
 	if rangeParam == "" {
 		rangeParam = "quarter"
 	}
-	deptID, _ := strconv.Atoi(c.QueryParam("dept_id"))
-	minInactiveDays, _ := strconv.Atoi(c.QueryParam("min_inactive_days"))
+	deptID, err := parseOptionalNonNegativeIntQuery(c, "dept_id")
+	if err != nil {
+		return response.Error(c, 400, err.Error())
+	}
+	minInactiveDays, err := parseOptionalNonNegativeIntQuery(c, "min_inactive_days")
+	if err != nil {
+		return response.Error(c, 400, err.Error())
+	}
 
 	rows, err := h.dashboardSvc.ExportInactiveUsersCSV(rangeParam, deptID, minInactiveDays)
 	if err != nil {
@@ -81,7 +94,10 @@ func (h *DashboardHandler) GetTrend(c echo.Context) error {
 	if rangeParam == "" {
 		rangeParam = "quarter"
 	}
-	deptID, _ := strconv.Atoi(c.QueryParam("dept_id"))
+	deptID, err := parseOptionalNonNegativeIntQuery(c, "dept_id")
+	if err != nil {
+		return response.Error(c, 400, err.Error())
+	}
 	featureIDs := c.QueryParam("feature_ids")
 
 	result, err := h.dashboardSvc.GetTrend(granularity, rangeParam, deptID, featureIDs)
@@ -96,7 +112,10 @@ func (h *DashboardHandler) GetTrendByDept(c echo.Context) error {
 	if rangeParam == "" {
 		rangeParam = "quarter"
 	}
-	featureID, _ := strconv.Atoi(c.QueryParam("feature_id"))
+	featureID, err := parseOptionalNonNegativeIntQuery(c, "feature_id")
+	if err != nil {
+		return response.Error(c, 400, err.Error())
+	}
 
 	result, err := h.dashboardSvc.GetTrendByDept(rangeParam, featureID)
 	if err != nil {
@@ -111,7 +130,10 @@ func (h *DashboardHandler) ExportTrend(c echo.Context) error {
 	if rangeParam == "" {
 		rangeParam = "quarter"
 	}
-	deptID, _ := strconv.Atoi(c.QueryParam("dept_id"))
+	deptID, err := parseOptionalNonNegativeIntQuery(c, "dept_id")
+	if err != nil {
+		return response.Error(c, 400, err.Error())
+	}
 	featureIDs := c.QueryParam("feature_ids")
 
 	rows, err := h.dashboardSvc.ExportTrendCSV(granularity, rangeParam, deptID, featureIDs)
