@@ -242,7 +242,8 @@ export const userAPI = {
 }
 
 export const healthAPI = {
-  check: () => api.get<ApiResponse<HealthCheckResponse>>('/health'),
+  check: () =>
+    axios.get<ApiResponse<HealthCheckResponse>>('/health').then((res) => res.data),
 }
 
 export const logAPI = {

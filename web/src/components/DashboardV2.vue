@@ -207,10 +207,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { dashboardV2Api } from '../api'
 import type { DashboardV2Overview, DashboardV2DeptStat, DashboardV2UserItem } from '../types/api'
+import type * as ECharts from 'echarts'
 
 const router = useRouter()
 
@@ -230,11 +230,12 @@ const trendLoading = ref(false)
 const trendMetric = ref('active')
 const trendGranularity = ref('day')
 const trendChartRef = ref<HTMLElement>()
-let trendChart: echarts.ECharts | undefined
+let trendChart: ECharts.ECharts | undefined
 
 // Device
 const deviceChartRef = ref<HTMLElement>()
-let deviceChart: echarts.ECharts | undefined
+let deviceChart: ECharts.ECharts | undefined
+let echartsModule: typeof ECharts | undefined
 
 // Users
 const userListType = ref('inactive')
@@ -364,8 +365,17 @@ function onUserTabChange() {
 }
 
 // --- Charts ---
-function renderTrendChart(periods: string[], series: Record<string, number[]>) {
+async function loadECharts() {
+  if (!echartsModule) {
+    echartsModule = await import('echarts')
+  }
+  return echartsModule
+}
+
+async function renderTrendChart(periods: string[], series: Record<string, number[]>) {
   if (!trendChartRef.value) return
+  const echarts = await loadECharts()
+  if (!isMounted.value || !trendChartRef.value) return
   if (!trendChart) {
     trendChart = echarts.init(trendChartRef.value)
   }
@@ -386,9 +396,11 @@ function renderTrendChart(periods: string[], series: Record<string, number[]>) {
   }, true)
 }
 
-function renderDeviceChart() {
+async function renderDeviceChart() {
   const types = overview.value?.devices?.types
   if (!deviceChartRef.value || !types?.length) return
+  const echarts = await loadECharts()
+  if (!isMounted.value || !deviceChartRef.value) return
   if (!deviceChart) {
     deviceChart = echarts.init(deviceChartRef.value)
   }
@@ -413,7 +425,7 @@ function handleResize() {
 // --- Actions ---
 function handleUserClick(row: DashboardV2UserItem) {
   if (row.mobile) {
-    router.push({ path: '/query', query: { mobile: row.mobile } })
+    router.push({ path: '/query', query: { mobile: row.mobile, auto_query: '1' } })
   }
 }
 

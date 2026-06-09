@@ -52,9 +52,6 @@
         <div class="card-header">
           <span class="card-title">企微操作日志</span>
           <div class="header-actions">
-            <el-button type="success" size="small" @click="handleSyncAdminOperLog" :loading="adminSyncLoading">
-              同步
-            </el-button>
             <el-button type="primary" size="small" @click="handleViewAdminOperLog">
               查看日志
             </el-button>
@@ -88,7 +85,6 @@ const router = useRouter()
 const features = ref<SyncFeature[]>([])
 const loading = ref(false)
 const saving = ref(false)
-const adminSyncLoading = ref(false)
 const adminOperLogStats = ref<AdminOperLogStats>({
   running: false,
   total: 0,
@@ -195,32 +191,6 @@ const viewRecentLogs = (featureId: number) => {
       end_time: String(Math.floor(end.getTime() / 1000)),
     },
   })
-}
-
-const handleSyncAdminOperLog = async () => {
-  try {
-    await ElMessageBox.confirm(
-      '将同步最新的管理员操作日志，确定开始吗？',
-      '确认同步',
-      { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' }
-    )
-  } catch { return }
-
-  adminSyncLoading.value = true
-  try {
-    const res = await adminOperLogAPI.sync({}) as unknown as ApiResponse<{ running: boolean; message: string }>
-    if (res.code === 0) {
-      ElMessage.success('同步任务已启动')
-      await loadAdminOperLogStats()
-      startPolling()
-    } else {
-      ElMessage.error(res.msg || '同步启动失败')
-    }
-  } catch (err: unknown) {
-    ElMessage.error(err instanceof Error ? err.message : '同步启动失败')
-  } finally {
-    adminSyncLoading.value = false
-  }
 }
 
 const handleViewAdminOperLog = () => {

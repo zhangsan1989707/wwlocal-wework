@@ -488,8 +488,6 @@ export interface DashboardV2Overview {
   msg_count: number
   msg_sender: number
   group_created: number
-  group_active: number
-  rate_group_active: number
   app_access_user: number
   app_access_count: number
   devices: {

@@ -292,10 +292,15 @@ onMounted(async () => {
   if (query.feature_ids) {
     form.feature_ids = String(query.feature_ids).split(',').map(Number).filter(Boolean)
   }
-  if (query.date_start && query.date_end) {
+  if (query.auto_query === '1' && form.feature_ids.length === 0) {
+    form.feature_ids = features.value.filter(f => f.enabled).map(f => f.feature_id)
+  }
+  const start = query.date_start || query.start_time
+  const end = query.date_end || query.end_time
+  if (start && end) {
     dateRange.value = [
-      new Date(Number(query.date_start) * 1000),
-      new Date(Number(query.date_end) * 1000),
+      new Date(Number(start) * 1000),
+      new Date(Number(end) * 1000),
     ]
     activeShortcut.value = '最近7天'
   }
@@ -312,7 +317,7 @@ onMounted(async () => {
         }
       } catch { /* ignore */ }
     }
-    if (form.feature_ids.length > 0) {
+    if ((query.auto_query === '1' || query.feature_ids) && form.feature_ids.length > 0) {
       handleQuery()
     }
   } else {

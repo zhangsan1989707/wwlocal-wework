@@ -428,7 +428,7 @@ const handleProblemClick = (problem: { action?: string }) => {
 
 const handleUserClick = (row: { mobile?: string }) => {
   if (row.mobile) {
-    router.push({ path: '/query', query: { mobile: row.mobile } })
+    router.push({ path: '/query', query: { mobile: row.mobile, auto_query: '1' } })
   }
 }
 

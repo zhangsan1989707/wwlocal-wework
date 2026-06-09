@@ -389,7 +389,7 @@ const handleRowClick = async (row: Contact | DeptMember) => {
 const viewUserLogs = () => {
   if (drawerContact.value?.mobile) {
     drawerVisible.value = false
-    router.push({ path: '/query', query: { mobile: drawerContact.value.mobile } })
+    router.push({ path: '/query', query: { mobile: drawerContact.value.mobile, auto_query: '1' } })
   }
 }
 
