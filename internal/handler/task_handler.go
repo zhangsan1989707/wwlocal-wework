@@ -121,7 +121,7 @@ func (h *TaskHandler) CancelTask(c echo.Context) error {
 		return response.Error(c, http.StatusBadRequest, err.Error())
 	}
 
-	return response.Success(c, nil)
+	return response.Success(c, map[string]string{"message": "task cancelled"})
 }
 
 func (h *TaskHandler) RetryTask(c echo.Context) error {
@@ -134,5 +134,5 @@ func (h *TaskHandler) RetryTask(c echo.Context) error {
 		return response.Error(c, http.StatusBadRequest, err.Error())
 	}
 
-	return response.Success(c, nil)
+	return response.Success(c, map[string]string{"message": "task retried"})
 }
