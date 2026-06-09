@@ -437,8 +437,9 @@ export interface FieldPath {
 }
 
 export interface TimeRange {
-  earliest?: number
-  latest?: number
+  start_time: number
+  end_time: number
+  now: number
 }
 
 export interface TrendCoverage {

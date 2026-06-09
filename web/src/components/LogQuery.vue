@@ -308,8 +308,8 @@ onMounted(async () => {
     if (!dateRange.value) {
       try {
         const timeRes = await logAPI.getTimeRange()
-        if (timeRes.code === 0) {
-          const t = timeRes.data as unknown as { start_time: number; end_time: number; now: number }
+        if (timeRes.code === 0 && timeRes.data) {
+          const t = timeRes.data
           dateRange.value = [
             new Date(t.start_time ? t.start_time * 1000 : (Date.now() - 7 * 24 * 3600 * 1000)),
             new Date(t.end_time ? t.end_time * 1000 : Date.now()),
@@ -323,8 +323,8 @@ onMounted(async () => {
   } else {
     try {
       const timeRes = await logAPI.getTimeRange()
-      if (timeRes.code === 0) {
-        const t = timeRes.data as unknown as { start_time: number; end_time: number; now: number }
+      if (timeRes.code === 0 && timeRes.data) {
+        const t = timeRes.data
         dateRange.value = [
           new Date(t.start_time ? t.start_time * 1000 : (Date.now() - 7 * 24 * 3600 * 1000)),
           new Date(t.end_time ? t.end_time * 1000 : Date.now()),
@@ -338,7 +338,7 @@ const loadFieldPaths = async () => {
   try {
     const res = await logAPI.getFieldPaths()
     if (res.code === 0 && res.data) {
-      fieldPaths.value = (res.data as unknown as Array<{ path: string }>).map((p) => p.path)
+      fieldPaths.value = res.data.map((p) => p.path)
     }
   } catch {
     // ignore
