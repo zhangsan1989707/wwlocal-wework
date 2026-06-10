@@ -12,6 +12,11 @@ import (
 	"wwlocal-wework/internal/repository"
 )
 
+const (
+	contactDetailBatchSize   = 500
+	contactDetailConcurrency = 5
+)
+
 type ContactSyncService struct {
 	contactSvc      *ContactService
 	contactRepo     *repository.ContactRepository
@@ -136,15 +141,7 @@ func (s *ContactSyncService) SyncContactsFull() {
 
 	// 4. 新用户拉取详情
 	if len(newUserIDs) > 0 {
-		contacts, failed := s.contactSvc.FetchAllDetails(newUserIDs, 5, s.cancelCh)
-		if err := s.contactRepo.BatchUpsertContacts(contacts); err != nil {
-			slog.Info(fmt.Sprintf("contact sync: batch upsert contacts failed: %v", err))
-		}
-		s.mu.Lock()
-		s.status.NewCount = len(contacts)
-		s.status.FailedCount = len(failed)
-		s.status.Progress = len(contacts) + len(failed)
-		s.mu.Unlock()
+		s.fetchAndSaveNewContacts("contact sync", newUserIDs)
 	}
 
 	// 5. 已有用户只更新基础字段，不覆盖 mobile/email/avatar 等详情
@@ -274,15 +271,7 @@ func (s *ContactSyncService) SyncContactsIncremental() {
 
 	// 4. 新用户拉取详情
 	if len(newUserIDs) > 0 {
-		contacts, failed := s.contactSvc.FetchAllDetails(newUserIDs, 5, s.cancelCh)
-		if err := s.contactRepo.BatchUpsertContacts(contacts); err != nil {
-			slog.Info(fmt.Sprintf("contact incremental sync: batch upsert failed: %v", err))
-		}
-		s.mu.Lock()
-		s.status.NewCount = len(contacts)
-		s.status.FailedCount = len(failed)
-		s.status.Progress = len(contacts) + len(failed)
-		s.mu.Unlock()
+		s.fetchAndSaveNewContacts("contact incremental sync", newUserIDs)
 	}
 
 	// 5. 已有用户刷新基础字段和部门关系，避免组织架构变更滞后。
@@ -318,6 +307,69 @@ func (s *ContactSyncService) SyncContactsIncremental() {
 		s.status.NewCount, s.status.UpdatedCount, s.status.DeletedCount, s.status.FailedCount))
 	s.saveContactSyncHistory("incremental", startTime, "")
 	finish("")
+}
+
+func (s *ContactSyncService) fetchAndSaveNewContacts(logPrefix string, userIDs []string) {
+	batches := chunkStringSlice(userIDs, contactDetailBatchSize)
+	for i, batch := range batches {
+		select {
+		case <-s.cancelCh:
+			slog.Info(fmt.Sprintf("%s: cancelled while fetching details", logPrefix))
+			return
+		default:
+		}
+
+		contacts, failed := s.contactSvc.FetchAllDetails(batch, contactDetailConcurrency, s.cancelCh)
+		if len(failed) > 0 {
+			slog.Info(fmt.Sprintf("%s: retrying %d failed detail requests in batch %d/%d", logPrefix, len(failed), i+1, len(batches)))
+			retryContacts, retryFailed := s.contactSvc.FetchAllDetails(failed, contactDetailConcurrency, s.cancelCh)
+			contacts = append(contacts, retryContacts...)
+			failed = retryFailed
+		}
+
+		if err := s.contactRepo.BatchUpsertContacts(contacts); err != nil {
+			slog.Info(fmt.Sprintf("%s: batch upsert contacts failed: %v", logPrefix, err))
+			failed = append(failed, contactUserIDs(contacts)...)
+			contacts = nil
+		}
+
+		s.mu.Lock()
+		s.status.NewCount += len(contacts)
+		s.status.FailedCount += len(failed)
+		s.status.Progress += len(contacts) + len(failed)
+		s.mu.Unlock()
+
+		slog.Info(fmt.Sprintf("%s: detail batch %d/%d done (ok=%d, failed=%d)",
+			logPrefix, i+1, len(batches), len(contacts), len(failed)))
+	}
+}
+
+func chunkStringSlice(values []string, size int) [][]string {
+	if len(values) == 0 {
+		return nil
+	}
+	if size <= 0 {
+		size = len(values)
+	}
+	chunks := make([][]string, 0, (len(values)+size-1)/size)
+	for start := 0; start < len(values); start += size {
+		end := start + size
+		if end > len(values) {
+			end = len(values)
+		}
+		chunks = append(chunks, values[start:end])
+	}
+	return chunks
+}
+
+func contactUserIDs(contacts []model.Contact) []string {
+	userIDs := make([]string, 0, len(contacts))
+	for _, contact := range contacts {
+		if contact.UserID != "" {
+			userIDs = append(userIDs, contact.UserID)
+		}
+	}
+	return userIDs
 }
 
 func (s *ContactSyncService) Cancel() {
