@@ -87,37 +87,15 @@ func (s *ContactSyncService) SyncContactsFull() {
 	s.status.Phase = "members"
 	s.mu.Unlock()
 
-	// 2. 拉取所有根部门的成员简略列表（合并去重）
-	var simpleUsers []model.SimpleUser
-	userSeen := make(map[string]bool)
-	var lastErr error
-	for _, d := range depts {
-		if d.ParentID == 0 {
-			users, err := s.contactSvc.GetSimpleUserList(d.ID, 1)
-			if err != nil {
-				slog.Info(fmt.Sprintf("contact sync: department %d (%s) failed: %v", d.ID, d.Name, err))
-				lastErr = err
-				continue
-			}
-			slog.Info(fmt.Sprintf("contact sync: got %d users from department %d (%s)", len(users), d.ID, d.Name))
-			for _, u := range users {
-				if !userSeen[u.UserID] {
-					userSeen[u.UserID] = true
-					simpleUsers = append(simpleUsers, u)
-				}
-			}
-		}
-	}
+	// 2. 按部门逐个拉取直接成员，避免根部门递归接口一次承载全量成员。
+	simpleUsers, lastErr := s.fetchSimpleUsersByDepartment(depts, "contact sync")
 	if len(simpleUsers) == 0 && lastErr != nil {
-		slog.Info(fmt.Sprintf("contact sync: all root departments failed"))
+		slog.Info("contact sync: all department member fetches failed")
 		finish("members", fmt.Sprintf("拉取成员列表失败: %v", lastErr))
 		return
 	}
 
-	allUserIDs := make([]string, len(simpleUsers))
-	for i, u := range simpleUsers {
-		allUserIDs[i] = u.UserID
-	}
+	allUserIDs := simpleUserIDs(simpleUsers)
 
 	s.mu.Lock()
 	s.status.Total = len(allUserIDs)
@@ -217,37 +195,15 @@ func (s *ContactSyncService) SyncContactsIncremental() {
 	s.status.Phase = "members"
 	s.mu.Unlock()
 
-	// 2. 拉取所有根部门的成员简略列表（合并去重）
-	var simpleUsers []model.SimpleUser
-	userSeen := make(map[string]bool)
-	var lastErr error
-	for _, d := range depts {
-		if d.ParentID == 0 {
-			users, err := s.contactSvc.GetSimpleUserList(d.ID, 1)
-			if err != nil {
-				slog.Info(fmt.Sprintf("contact incremental sync: department %d (%s) failed: %v", d.ID, d.Name, err))
-				lastErr = err
-				continue
-			}
-			slog.Info(fmt.Sprintf("contact incremental sync: got %d users from department %d (%s)", len(users), d.ID, d.Name))
-			for _, u := range users {
-				if !userSeen[u.UserID] {
-					userSeen[u.UserID] = true
-					simpleUsers = append(simpleUsers, u)
-				}
-			}
-		}
-	}
+	// 2. 按部门逐个拉取直接成员，避免根部门递归接口一次承载全量成员。
+	simpleUsers, lastErr := s.fetchSimpleUsersByDepartment(depts, "contact incremental sync")
 	if len(simpleUsers) == 0 && lastErr != nil {
-		slog.Info(fmt.Sprintf("contact incremental sync: all root departments failed"))
+		slog.Info("contact incremental sync: all department member fetches failed")
 		finish(fmt.Sprintf("拉取成员列表失败: %v", lastErr))
 		return
 	}
 
-	allUserIDs := make([]string, len(simpleUsers))
-	for i, u := range simpleUsers {
-		allUserIDs[i] = u.UserID
-	}
+	allUserIDs := simpleUserIDs(simpleUsers)
 
 	s.mu.Lock()
 	s.status.Total = len(allUserIDs)
@@ -309,6 +265,40 @@ func (s *ContactSyncService) SyncContactsIncremental() {
 	finish("")
 }
 
+func (s *ContactSyncService) fetchSimpleUsersByDepartment(depts []model.DepartmentItem, logPrefix string) ([]model.SimpleUser, error) {
+	usersByID := make(map[string]model.SimpleUser)
+	var order []string
+	var lastErr error
+
+	for _, d := range depts {
+		select {
+		case <-s.cancelCh:
+			slog.Info(fmt.Sprintf("%s: cancelled while fetching department members", logPrefix))
+			return mergeSimpleUsersInOrder(usersByID, order), nil
+		default:
+		}
+
+		users, err := s.contactSvc.GetSimpleUserList(d.ID, 0)
+		if err != nil {
+			slog.Info(fmt.Sprintf("%s: department %d (%s) failed: %v", logPrefix, d.ID, d.Name, err))
+			lastErr = err
+			continue
+		}
+		slog.Info(fmt.Sprintf("%s: got %d direct users from department %d (%s)", logPrefix, len(users), d.ID, d.Name))
+		for _, user := range users {
+			if user.UserID == "" {
+				continue
+			}
+			if _, ok := usersByID[user.UserID]; !ok {
+				order = append(order, user.UserID)
+			}
+			usersByID[user.UserID] = mergeSimpleUser(usersByID[user.UserID], user)
+		}
+	}
+
+	return mergeSimpleUsersInOrder(usersByID, order), lastErr
+}
+
 func (s *ContactSyncService) fetchAndSaveNewContacts(logPrefix string, userIDs []string) {
 	batches := chunkStringSlice(userIDs, contactDetailBatchSize)
 	for i, batch := range batches {
@@ -344,6 +334,37 @@ func (s *ContactSyncService) fetchAndSaveNewContacts(logPrefix string, userIDs [
 	}
 }
 
+func mergeSimpleUser(existing model.SimpleUser, incoming model.SimpleUser) model.SimpleUser {
+	if existing.UserID == "" {
+		return incoming
+	}
+	if existing.Name == "" {
+		existing.Name = incoming.Name
+	}
+	existing.Department = mergeInts(existing.Department, incoming.Department)
+	existing.IsLeaderInDept = mergeInts(existing.IsLeaderInDept, incoming.IsLeaderInDept)
+	existing.Positions = mergeStrings(existing.Positions, incoming.Positions)
+	return existing
+}
+
+func mergeSimpleUsersInOrder(usersByID map[string]model.SimpleUser, order []string) []model.SimpleUser {
+	users := make([]model.SimpleUser, 0, len(order))
+	for _, id := range order {
+		users = append(users, usersByID[id])
+	}
+	return users
+}
+
+func simpleUserIDs(users []model.SimpleUser) []string {
+	ids := make([]string, 0, len(users))
+	for _, user := range users {
+		if user.UserID != "" {
+			ids = append(ids, user.UserID)
+		}
+	}
+	return ids
+}
+
 func chunkStringSlice(values []string, size int) [][]string {
 	if len(values) == 0 {
 		return nil
@@ -360,6 +381,32 @@ func chunkStringSlice(values []string, size int) [][]string {
 		chunks = append(chunks, values[start:end])
 	}
 	return chunks
+}
+
+func mergeInts(a []int, b []int) []int {
+	seen := make(map[int]bool, len(a)+len(b))
+	result := make([]int, 0, len(a)+len(b))
+	for _, v := range append(a, b...) {
+		if seen[v] {
+			continue
+		}
+		seen[v] = true
+		result = append(result, v)
+	}
+	return result
+}
+
+func mergeStrings(a []string, b []string) []string {
+	seen := make(map[string]bool, len(a)+len(b))
+	result := make([]string, 0, len(a)+len(b))
+	for _, v := range append(a, b...) {
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		result = append(result, v)
+	}
+	return result
 }
 
 func contactUserIDs(contacts []model.Contact) []string {
