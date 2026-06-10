@@ -10,16 +10,17 @@ import (
 )
 
 type Config struct {
-	Server    ServerConfig    `yaml:"server"`
-	Database  DatabaseConfig  `yaml:"database"`
-	WeWork    WeWorkConfig    `yaml:"wework"`
-	Keys      KeysConfig      `yaml:"keys"`
-	Features  FeaturesConfig  `yaml:"features"`
-	Auth      AuthConfig      `yaml:"auth"`
-	Scheduler SchedulerConfig `yaml:"scheduler"`
-	Nightly   NightlyConfig   `yaml:"nightly"`
-	Redis     RedisConfig     `yaml:"redis"`
-	RateLimit RateLimitConfig `yaml:"rate_limit"`
+	Server           ServerConfig           `yaml:"server"`
+	Database         DatabaseConfig         `yaml:"database"`
+	WeWork           WeWorkConfig           `yaml:"wework"`
+	Keys             KeysConfig             `yaml:"keys"`
+	Features         FeaturesConfig         `yaml:"features"`
+	Auth             AuthConfig             `yaml:"auth"`
+	Scheduler        SchedulerConfig        `yaml:"scheduler"`
+	ContactScheduler ContactSchedulerConfig `yaml:"contact_scheduler"`
+	Nightly          NightlyConfig          `yaml:"nightly"`
+	Redis            RedisConfig            `yaml:"redis"`
+	RateLimit        RateLimitConfig        `yaml:"rate_limit"`
 }
 
 type ServerConfig struct {
@@ -55,8 +56,8 @@ type KeysConfig struct {
 }
 
 type FeaturesConfig struct {
-	IDs   []int            `yaml:"ids"`
-	Names map[int]string   `yaml:"names"`
+	IDs   []int          `yaml:"ids"`
+	Names map[int]string `yaml:"names"`
 }
 
 type AuthConfig struct {
@@ -70,11 +71,17 @@ type SchedulerConfig struct {
 	Interval string `yaml:"interval"` // "1h", "30m", "24h"
 }
 
+type ContactSchedulerConfig struct {
+	Enabled    bool   `yaml:"enabled"`
+	Interval   string `yaml:"interval"`
+	StartDelay string `yaml:"start_delay"`
+}
+
 type NightlyConfig struct {
-	Enabled      bool   `yaml:"enabled"`
-	Hour         int    `yaml:"hour"`          // 执行小时，默认 1
-	Minute       int    `yaml:"minute"`        // 执行分钟，默认 0
-	LookbackDays int    `yaml:"lookback_days"` // 回溯天数，默认 1（昨天）
+	Enabled      bool `yaml:"enabled"`
+	Hour         int  `yaml:"hour"`          // 执行小时，默认 1
+	Minute       int  `yaml:"minute"`        // 执行分钟，默认 0
+	LookbackDays int  `yaml:"lookback_days"` // 回溯天数，默认 1（昨天）
 }
 
 type RedisConfig struct {
@@ -86,9 +93,9 @@ type RedisConfig struct {
 }
 
 type RateLimitConfig struct {
-	Enabled       bool `yaml:"enabled"`
-	RequestsPerMin int `yaml:"requests_per_minute"`
-	Burst         int  `yaml:"burst"`
+	Enabled        bool `yaml:"enabled"`
+	RequestsPerMin int  `yaml:"requests_per_minute"`
+	Burst          int  `yaml:"burst"`
 }
 
 func (d *DatabaseConfig) DSN() string {
@@ -162,6 +169,10 @@ func Load(path string) (*Config, error) {
 
 	cfg.Scheduler.Enabled = getEnvBool("SCHEDULER_ENABLED", cfg.Scheduler.Enabled)
 	cfg.Scheduler.Interval = getEnv("SCHEDULER_INTERVAL", cfg.Scheduler.Interval)
+
+	cfg.ContactScheduler.Enabled = getEnvBool("CONTACT_SCHEDULER_ENABLED", cfg.ContactScheduler.Enabled)
+	cfg.ContactScheduler.Interval = getEnv("CONTACT_SCHEDULER_INTERVAL", cfg.ContactScheduler.Interval)
+	cfg.ContactScheduler.StartDelay = getEnv("CONTACT_SCHEDULER_START_DELAY", cfg.ContactScheduler.StartDelay)
 
 	cfg.Nightly.Enabled = getEnvBool("NIGHTLY_ENABLED", cfg.Nightly.Enabled)
 	if cfg.Nightly.Hour <= 0 {

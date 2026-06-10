@@ -30,6 +30,11 @@ scheduler:
   enabled: false
   interval: "1h"
 
+contact_scheduler:
+  enabled: true
+  interval: "30m"
+  start_delay: "2m"
+
 nightly:
   enabled: true
   hour: 1          # 凌晨 1 点执行

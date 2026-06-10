@@ -183,6 +183,9 @@ func main() {
 	dashboardV2Handler := handler.NewDashboardV2Handler(dashboardV2Svc, userSvc)
 	nightlySvc := service.NewNightlyJobService(syncSvc, contactSyncSvc, dashboardStatsRepo, contactRepo, logRepo, cfg)
 	nightlyHandler := handler.NewNightlyHandler(nightlySvc)
+	contactInterval := parseDurationOrDefault(cfg.ContactScheduler.Interval, 30*time.Minute, "contact scheduler interval")
+	contactStartDelay := parseDurationOrDefault(cfg.ContactScheduler.StartDelay, 2*time.Minute, "contact scheduler start delay")
+	contactSchedulerSvc := service.NewContactSchedulerService(contactSyncSvc, contactInterval, contactStartDelay)
 	syncHistoryHandler := handler.NewSyncHistoryHandler(syncHistoryRepo)
 	syncFeatureHandler := handler.NewSyncFeatureHandler(syncFeatureRepo)
 	systemHandler := handler.NewSystemHandler(syncStateRepo, keyRepo, contactRepo, logRepo)
@@ -202,6 +205,10 @@ func main() {
 
 	if cfg.Nightly.Enabled {
 		nightlySvc.Start()
+	}
+
+	if cfg.ContactScheduler.Enabled {
+		contactSchedulerSvc.Start()
 	}
 
 	// 启动任务队列工作线程
@@ -266,6 +273,7 @@ func main() {
 
 	// 1. 停止定时调度
 	schedulerSvc.Stop()
+	contactSchedulerSvc.Stop()
 	nightlySvc.Stop()
 
 	// 2. 停止任务队列
@@ -317,4 +325,16 @@ func checkKeyPermissions(keysDir string) {
 			os.Chmod(path, 0600)
 		}
 	}
+}
+
+func parseDurationOrDefault(value string, fallback time.Duration, label string) time.Duration {
+	if value == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil || d <= 0 {
+		slog.Warn(fmt.Sprintf("invalid %s %q, using default %v", label, value, fallback))
+		return fallback
+	}
+	return d
 }
