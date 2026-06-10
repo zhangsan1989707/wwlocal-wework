@@ -54,35 +54,47 @@ func (r *ContactRepository) BatchUpsertContacts(contacts []model.Contact) error 
 		}).CreateInBatches(batch, 100).Error; err != nil {
 			return err
 		}
-		// 同时更新 contact_departments 中间表
-		for _, contact := range batch {
-			// 先删除旧的关联
-			r.DB.Where("user_id = ?", contact.UserID).Delete(&model.ContactDepartment{})
-			// 解析 department 字段为 int 数组
-			var deptIDs []int
-			if err := json.Unmarshal([]byte(contact.Department), &deptIDs); err == nil {
-				var deptLinks []model.ContactDepartment
-				for _, deptID := range deptIDs {
-					deptLinks = append(deptLinks, model.ContactDepartment{
-						UserID:     contact.UserID,
-						Department: deptID,
-					})
-				}
-				if len(deptLinks) > 0 {
-					if err := r.DB.Clauses(clause.OnConflict{
-						Columns:   []clause.Column{{Name: "user_id"}, {Name: "department"}},
-						DoNothing: true,
-					}).CreateInBatches(deptLinks, 100).Error; err != nil {
-						slog.Info(fmt.Sprintf("update contact_departments for %s failed: %v", contact.UserID, err))
-					}
-				}
-			}
+		if err := r.replaceContactDepartments(batch); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-// BatchUpdateBasicInfo 只更新已有用户的基础字段（姓名、部门、同步时间），不覆盖 mobile/email/avatar 等详情
+func (r *ContactRepository) replaceContactDepartments(contacts []model.Contact) error {
+	for _, contact := range contacts {
+		var deptIDs []int
+		if err := json.Unmarshal([]byte(contact.Department), &deptIDs); err != nil {
+			continue
+		}
+		txErr := r.DB.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Where("user_id = ?", contact.UserID).Delete(&model.ContactDepartment{}).Error; err != nil {
+				return err
+			}
+			var deptLinks []model.ContactDepartment
+			for _, deptID := range deptIDs {
+				deptLinks = append(deptLinks, model.ContactDepartment{
+					UserID:     contact.UserID,
+					Department: deptID,
+				})
+			}
+			if len(deptLinks) == 0 {
+				return nil
+			}
+			return tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "user_id"}, {Name: "department"}},
+				DoNothing: true,
+			}).CreateInBatches(deptLinks, 100).Error
+		})
+		if txErr != nil {
+			slog.Info(fmt.Sprintf("update contact_departments for %s failed: %v", contact.UserID, txErr))
+			return txErr
+		}
+	}
+	return nil
+}
+
+// BatchUpdateBasicInfo 更新成员简表可提供的字段，并同步部门关系。
 func (r *ContactRepository) BatchUpdateBasicInfo(contacts []model.Contact) error {
 	if len(contacts) == 0 {
 		return nil
@@ -94,21 +106,42 @@ func (r *ContactRepository) BatchUpdateBasicInfo(contacts []model.Contact) error
 		}
 		batch := contacts[i:end]
 
-		sql := "INSERT INTO contacts (user_id, name, department, synced_at) VALUES "
+		sql := "INSERT INTO contacts (user_id, name, department, positions, status, synced_at) VALUES "
 		var args []interface{}
 		for j, c := range batch {
 			if j > 0 {
 				sql += ","
 			}
-			sql += "(?,?,?,?)"
-			args = append(args, c.UserID, c.Name, c.Department, c.SyncedAt)
+			sql += "(?,?,?,?,?,?)"
+			args = append(args, c.UserID, c.Name, c.Department, c.Positions, c.Status, c.SyncedAt)
 		}
-		sql += " ON DUPLICATE KEY UPDATE name=VALUES(name), department=VALUES(department), synced_at=VALUES(synced_at)"
+		sql += " ON DUPLICATE KEY UPDATE name=VALUES(name), department=VALUES(department), positions=VALUES(positions), status=VALUES(status), synced_at=VALUES(synced_at)"
 		if err := r.DB.Exec(sql, args...).Error; err != nil {
+			return err
+		}
+		if err := r.replaceContactDepartments(batch); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (r *ContactRepository) MarkContactsInactive(userIDs []string) error {
+	if len(userIDs) == 0 {
+		return nil
+	}
+	now := time.Now()
+	return r.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.Contact{}).
+			Where("user_id IN ?", userIDs).
+			Updates(map[string]interface{}{
+				"status":    0,
+				"synced_at": now,
+			}).Error; err != nil {
+			return err
+		}
+		return tx.Where("user_id IN ?", userIDs).Delete(&model.ContactDepartment{}).Error
+	})
 }
 
 func (r *ContactRepository) BatchUpsertDepts(depts []model.Department) error {
@@ -483,10 +516,13 @@ func BuildDeptTree(depts []model.Department, memberCounts map[int]int) []model.D
 // SimpleUserToContact 将 SimpleUser 转为 Contact（仅基础字段）
 func SimpleUserToContact(u model.SimpleUser) model.Contact {
 	deptBytes, _ := json.Marshal(u.Department)
+	posBytes, _ := json.Marshal(u.Positions)
 	return model.Contact{
 		UserID:     u.UserID,
 		Name:       u.Name,
 		Department: string(deptBytes),
+		Positions:  string(posBytes),
+		Status:     1,
 		SyncedAt:   time.Now(),
 	}
 }

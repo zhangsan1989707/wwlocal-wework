@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -39,6 +40,46 @@ func TestExpandDepartmentIDsFromListDeduplicates(t *testing.T) {
 
 	got := ExpandDepartmentIDsFromList(depts, []int{1, 2})
 	want := []int{1, 2, 3}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestSimpleUserToContactKeepsDepartmentsAndPositions(t *testing.T) {
+	got := SimpleUserToContact(model.SimpleUser{
+		UserID:     "u1",
+		Name:       "张三",
+		Department: []int{1, 2},
+		Positions:  []string{"主任", "委员"},
+	})
+
+	var depts []int
+	if err := json.Unmarshal([]byte(got.Department), &depts); err != nil {
+		t.Fatalf("department json: %v", err)
+	}
+	if !reflect.DeepEqual(depts, []int{1, 2}) {
+		t.Fatalf("departments got %v", depts)
+	}
+
+	var positions []string
+	if err := json.Unmarshal([]byte(got.Positions), &positions); err != nil {
+		t.Fatalf("positions json: %v", err)
+	}
+	if !reflect.DeepEqual(positions, []string{"主任", "委员"}) {
+		t.Fatalf("positions got %v", positions)
+	}
+	if got.Status != 1 {
+		t.Fatalf("status got %d, want 1", got.Status)
+	}
+}
+
+func TestFilterMissingUserIDs(t *testing.T) {
+	got := FilterMissingUserIDs([]string{"u1", "u3"}, map[string]bool{
+		"u1": true,
+		"u2": true,
+		"u3": true,
+	})
+	want := []string{"u2"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}

@@ -22,14 +22,16 @@ type ContactSyncService struct {
 }
 
 type ContactSyncStatus struct {
-	Running     bool      `json:"running"`
-	Phase       string    `json:"phase"`
-	Progress    int       `json:"progress"`
-	Total       int       `json:"total"`
-	NewCount    int       `json:"new_count"`
-	FailedCount int       `json:"failed_count"`
-	ErrorMsg    string    `json:"error_msg,omitempty"`
-	LastSync    time.Time `json:"last_sync,omitempty"`
+	Running      bool      `json:"running"`
+	Phase        string    `json:"phase"`
+	Progress     int       `json:"progress"`
+	Total        int       `json:"total"`
+	NewCount     int       `json:"new_count"`
+	UpdatedCount int       `json:"updated_count"`
+	DeletedCount int       `json:"deleted_count"`
+	FailedCount  int       `json:"failed_count"`
+	ErrorMsg     string    `json:"error_msg,omitempty"`
+	LastSync     time.Time `json:"last_sync,omitempty"`
 }
 
 func NewContactSyncService(contactSvc *ContactService, contactRepo *repository.ContactRepository, syncHistoryRepo *repository.SyncHistoryRepository) *ContactSyncService {
@@ -42,6 +44,10 @@ func NewContactSyncService(contactSvc *ContactService, contactRepo *repository.C
 }
 
 func (s *ContactSyncService) SyncContactsFull() {
+	if !s.TryStartRunning() {
+		slog.Info("contact sync already running, skipping")
+		return
+	}
 	startTime := time.Now()
 
 	finish := func(phase string, errMsg string) {
@@ -120,6 +126,7 @@ func (s *ContactSyncService) SyncContactsFull() {
 		return
 	}
 	newUserIDs := repository.FilterNewUserIDs(allUserIDs, existing)
+	missingUserIDs := repository.FilterMissingUserIDs(allUserIDs, existing)
 
 	s.mu.Lock()
 	s.status.Phase = "details"
@@ -148,15 +155,37 @@ func (s *ContactSyncService) SyncContactsFull() {
 		}
 	}
 	if len(simpleContacts) > 0 {
-		s.contactRepo.BatchUpdateBasicInfo(simpleContacts)
+		if err := s.contactRepo.BatchUpdateBasicInfo(simpleContacts); err != nil {
+			slog.Info(fmt.Sprintf("contact sync: batch update basic info failed: %v", err))
+		} else {
+			s.mu.Lock()
+			s.status.UpdatedCount = len(simpleContacts)
+			s.mu.Unlock()
+		}
 	}
 
-	slog.Info(fmt.Sprintf("contact sync: completed. new=%d, failed=%d", s.status.NewCount, s.status.FailedCount))
+	if len(missingUserIDs) > 0 {
+		slog.Info(fmt.Sprintf("contact sync: %d users no longer in API", len(missingUserIDs)))
+		if err := s.contactRepo.MarkContactsInactive(missingUserIDs); err != nil {
+			slog.Info(fmt.Sprintf("contact sync: mark inactive failed: %v", err))
+		} else {
+			s.mu.Lock()
+			s.status.DeletedCount = len(missingUserIDs)
+			s.mu.Unlock()
+		}
+	}
+
+	slog.Info(fmt.Sprintf("contact sync: completed. new=%d, updated=%d, inactive=%d, failed=%d",
+		s.status.NewCount, s.status.UpdatedCount, s.status.DeletedCount, s.status.FailedCount))
 	s.saveContactSyncHistory("full", startTime, "")
 	finish("", "")
 }
 
 func (s *ContactSyncService) SyncContactsIncremental() {
+	if !s.TryStartRunning() {
+		slog.Info("contact sync already running, skipping")
+		return
+	}
 	startTime := time.Now()
 
 	finish := func(errMsg string) {
@@ -243,7 +272,7 @@ func (s *ContactSyncService) SyncContactsIncremental() {
 	s.status.Progress = 0
 	s.mu.Unlock()
 
-	// 4. 只对新用户拉取详情
+	// 4. 新用户拉取详情
 	if len(newUserIDs) > 0 {
 		contacts, failed := s.contactSvc.FetchAllDetails(newUserIDs, 5, s.cancelCh)
 		if err := s.contactRepo.BatchUpsertContacts(contacts); err != nil {
@@ -256,23 +285,37 @@ func (s *ContactSyncService) SyncContactsIncremental() {
 		s.mu.Unlock()
 	}
 
-	// 5. 已有用户更新 synced_at
-	var existingIDs []string
-	for _, id := range allUserIDs {
-		if existing[id] {
-			existingIDs = append(existingIDs, id)
+	// 5. 已有用户刷新基础字段和部门关系，避免组织架构变更滞后。
+	var existingContacts []model.Contact
+	for _, u := range simpleUsers {
+		if existing[u.UserID] {
+			existingContacts = append(existingContacts, repository.SimpleUserToContact(u))
 		}
 	}
-	if len(existingIDs) > 0 {
-		s.contactRepo.MarkSyncedAt(existingIDs)
+	if len(existingContacts) > 0 {
+		if err := s.contactRepo.BatchUpdateBasicInfo(existingContacts); err != nil {
+			slog.Info(fmt.Sprintf("contact incremental sync: batch update basic info failed: %v", err))
+		} else {
+			s.mu.Lock()
+			s.status.UpdatedCount = len(existingContacts)
+			s.mu.Unlock()
+		}
 	}
 
-	// 6. 标记不在 API 中的用户
+	// 6. 标记不在 API 中的用户为失效。
 	if len(missingUserIDs) > 0 {
 		slog.Info(fmt.Sprintf("contact incremental sync: %d users no longer in API", len(missingUserIDs)))
+		if err := s.contactRepo.MarkContactsInactive(missingUserIDs); err != nil {
+			slog.Info(fmt.Sprintf("contact incremental sync: mark inactive failed: %v", err))
+		} else {
+			s.mu.Lock()
+			s.status.DeletedCount = len(missingUserIDs)
+			s.mu.Unlock()
+		}
 	}
 
-	slog.Info(fmt.Sprintf("contact incremental sync: completed. new=%d, failed=%d", s.status.NewCount, s.status.FailedCount))
+	slog.Info(fmt.Sprintf("contact incremental sync: completed. new=%d, updated=%d, inactive=%d, failed=%d",
+		s.status.NewCount, s.status.UpdatedCount, s.status.DeletedCount, s.status.FailedCount))
 	s.saveContactSyncHistory("incremental", startTime, "")
 	finish("")
 }
@@ -304,6 +347,8 @@ func (s *ContactSyncService) TryStartRunning() bool {
 	s.status.Progress = 0
 	s.status.Total = 0
 	s.status.NewCount = 0
+	s.status.UpdatedCount = 0
+	s.status.DeletedCount = 0
 	s.status.FailedCount = 0
 	s.status.ErrorMsg = ""
 	s.cancelCh = make(chan struct{})
@@ -322,12 +367,9 @@ func (s *ContactSyncService) StartSync(fn func()) {
 		defer func() {
 			if r := recover(); r != nil {
 				slog.Error(fmt.Sprintf("contact sync goroutine panic: %v\n%s", r, debug.Stack()))
+				s.ResetRunning()
 			}
-			s.ResetRunning()
 		}()
-		if !s.TryStartRunning() {
-			return
-		}
 		fn()
 	}()
 }
@@ -342,14 +384,18 @@ func (s *ContactSyncService) GetStatus() *ContactSyncStatus {
 func (s *ContactSyncService) saveContactSyncHistory(trigger string, startTime time.Time, errMsg string) {
 	s.mu.Lock()
 	newCount := s.status.NewCount
+	updatedCount := s.status.UpdatedCount
+	deletedCount := s.status.DeletedCount
 	failedCount := s.status.FailedCount
 	total := s.status.Total
 	s.mu.Unlock()
 
 	detailsMap := map[string]interface{}{
-		"new_count":    newCount,
-		"failed_count": failedCount,
-		"total_users":  total,
+		"new_count":     newCount,
+		"updated_count": updatedCount,
+		"deleted_count": deletedCount,
+		"failed_count":  failedCount,
+		"total_users":   total,
 	}
 	detailsJSON, _ := json.Marshal(detailsMap)
 
